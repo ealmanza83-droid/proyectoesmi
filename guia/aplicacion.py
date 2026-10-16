@@ -154,15 +154,17 @@ class Aplicacion:
             # Un solo punto de decision: el manejador del estado actual.
             self._manejadores[self.estado](self, resultado)
 
-            dibujar_detecciones(frame, resultado)
-            tecla = self._ventana.mostrar(
-                frame,
-                distancia_cm=distancia_cm,
-                estado=self.estado,
-                detalle=self._etiqueta,
-                ubicacion=self.ubicacion,
-                destino=self.destino,
-            )
+            tecla = 0
+            if self._ventana.activa:
+                dibujar_detecciones(frame, resultado)
+                tecla = self._ventana.mostrar(
+                    frame,
+                    distancia_cm=distancia_cm,
+                    estado=self.estado,
+                    detalle=self._etiqueta,
+                    ubicacion=self.ubicacion,
+                    destino=self.destino,
+                )
             if tecla == TECLA_SALIR:
                 break
 

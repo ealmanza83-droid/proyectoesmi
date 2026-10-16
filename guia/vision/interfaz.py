@@ -1,6 +1,12 @@
-"""Ventana de diagnostico: estado del sistema para quien pruebe el equipo."""
+"""Ventana de diagnostico: estado del sistema para quien pruebe el equipo.
+
+Si no hay pantalla (sesion SSH sin escritorio) la ventana se desactiva
+sola y el sistema sigue funcionando igual, solo que sin video en pantalla.
+"""
 
 from __future__ import annotations
+
+import os
 
 import cv2
 
@@ -9,12 +15,28 @@ from ..dominio.estados import Estado
 TECLA_SALIR = 27  # Escape
 
 
+def _hay_pantalla() -> bool:
+    """True si existe un servidor grafico donde poder abrir ventanas."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 class VentanaDiagnostico:
     """Muestra distancia, estado, ubicacion y destino sobre el video."""
 
     def __init__(self, titulo: str = "Sistema de Orientacion", activa: bool = True):
         self._titulo = titulo
-        self._activa = activa
+        self._activa = activa and _hay_pantalla()
+
+        if activa and not self._activa:
+            print(
+                "AVISO: sin pantalla (DISPLAY no definido); "
+                "ventana de diagnostico desactivada."
+            )
+
+    @property
+    def activa(self) -> bool:
+        """True si la ventana puede mostrar el video."""
+        return self._activa
 
     def mostrar(
         self,
@@ -52,10 +74,20 @@ class VentanaDiagnostico:
                 2,
             )
 
-        cv2.imshow(self._titulo, frame)
-        return cv2.waitKey(1) & 0xFF
+        try:
+            cv2.imshow(self._titulo, frame)
+            return cv2.waitKey(1) & 0xFF
+        except cv2.error as error:
+            # Por ejemplo: DISPLAY apuntado pero sin X forwarding.
+            print(f"AVISO: no se pudo abrir la ventana ({error}); desactivada.")
+            self._activa = False
+            return 0
 
     def cerrar(self) -> None:
         """Cierra todas las ventanas de OpenCV."""
         if self._activa:
-            cv2.destroyAllWindows()
+            self._activa = False
+            try:
+                cv2.destroyAllWindows()
+            except cv2.error:
+                pass

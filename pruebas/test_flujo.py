@@ -197,6 +197,8 @@ class DetectorFalso:
 
 
 class VentanaFalsa:
+    activa = True
+
     def mostrar(self, frame, **kwargs) -> int:
         return 0
 
