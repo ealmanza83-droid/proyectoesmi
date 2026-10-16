@@ -61,6 +61,10 @@ class Aplicacion:
         self.microfono = microfono
         self.detector = detector
 
+        # Pitidos de proximidad: se silencian solos mientras la voz habla
+        # (``locutor.hablando`` es el evento compartido entre ambos hilos).
+        self.alerta = AlertaProximidad(sensor, alarma, locutor.hablando)
+
         self.estado = Estado.GIRO_INICIAL
         self.ubicacion: str | None = None
         self.destino: str | None = None
