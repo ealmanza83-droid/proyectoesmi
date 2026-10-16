@@ -1,0 +1,22 @@
+# Dependencias de Python (Raspberry Pi 5)
+
+# Visión
+ultralytics          # YOLO
+opencv-python
+numpy
+
+# Audio
+piper-tts            # síntesis de voz (TTS)
+vosk                 # reconocimiento de voz en español
+sounddevice          # captura del micrófono
+
+# Hardware (si no están ya del sistema)
+gpiozero
+lgpio
+smbus2
+
+# Notas:
+# - picamera2 y opencv es preferible instalarlos con apt:
+#       sudo apt install python3-picamera2 python3-opencv
+# - "aplay" (alsa-utils) se usa para reproducir los audios:
+#       sudo apt install alsa-utils
