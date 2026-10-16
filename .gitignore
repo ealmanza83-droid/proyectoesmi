@@ -1,0 +1,19 @@
+
+# Archivo ZIP que no quiero subir
+mi_deteccion-20260802T041618Z-1-001.zip
+
+# Archivo ZIP comprimido del proyecto
+Proyectoesmi.zip
+
+# Entorno virtual de Python
+venv/
+
+# Archivos temporales de Python
+__pycache__/
+*.py[cod]
+*.log
+
+# Variables de entorno y credenciales
+.env
+.env.*
+!.env.example
