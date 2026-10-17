@@ -62,6 +62,7 @@ proyectoesmi/
 │   │   └── interfaz.py      ventana de diagnóstico
 │   └── navegacion/
 │       ├── movimiento.py    MuestreadorMPU (100 Hz) + MedidorGiro + ContadorPasos
+│       ├── rumbo.py         Rumbo (orientación relativa anclada a la señal)
 │       └── caida.py         DetectorCaida (acelerómetro)
 ├── pruebas/test_flujo.py    prueba completa sin hardware
 ├── mi_deteccion/            modelos YOLO (best.pt, yolo11n_ncnn_model…)
@@ -229,6 +230,42 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
 
 Así la persona nunca se queda sin saber cuándo detenerse ni en qué
 punto del recorrido va.
+
+### Rumbo: ¿sabe el sistema hacia dónde mira la persona?
+
+El MPU6050 no tiene magnetómetro (no puede saber el norte), pero sí
+puede mantener un **rumbo relativo**: el giroscopio integra toda la
+rotación real (por encima del umbral de temblor) en una variable
+`Rumbo`, que se **ancla en cero cada vez que la cámara confirma una
+señal orientadora** — en ese instante la persona tiene la señal
+enfrente, y esa es una referencia conocida.
+
+Por eso, al pedir un destino el sistema **no arranca a ciegas**:
+
+* Si la señal de la zona está a la vista → el rumbo se ancla y la
+  ruta arranca de inmediato ("Entendido. Vamos a Baño." → "Gira a la
+  izquierda 90 grados.").
+* Si **no** está a la vista → el nuevo estado *Encarar señal* pide
+  girar despacio hasta encontrarla ("Para saber hacia dónde miras,
+  primero encárate con la señal de esta zona..."); solo entonces se
+  ancla el rumbo y se dan las instrucciones, que así se miden desde
+  una orientación conocida.
+
+La deriva del giroscopio hace que el rumbo pierda precisión con los
+minutos; por eso se vuelve a anclar en cada señal encontrada.
+
+### Línea recta: ¿camina derecho mientras cuenta pasos?
+
+Mientras la persona camina un tramo, el sistema vigila el rumbo: si
+acumula más giro que `desvio_maximo_grados` (25° por defecto) respecto
+del punto donde empezó a caminar, va curvando y los pasos no
+llegarían al sitio medido. En ese caso avisa **una vez** (y como
+máximo cada `enfriamiento_desvio_s`): *"Te estás desviando de la
+línea recta. Gira 30 grados a la izquierda para seguir derecho."* —
+con el lado de la corrección calculado al revés del desvío.
+
+Los pasos seguirán contando; la corrección recoloca la persona sobre
+la recta sin perder el tramo.
 
 ### Alertas de seguridad
 

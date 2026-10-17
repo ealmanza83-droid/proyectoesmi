@@ -82,6 +82,15 @@ class Configuracion:
     pasos_objetivo: int = 5
 
     # ------------------------------------------------------------------
+    # Navegacion asistida (rumbo y linea recta)
+    # ------------------------------------------------------------------
+    # El rumbo integra el giroscopio desde la ultima senal vista.  Si
+    # mientras la persona camina acumula mas giro que este umbral, va
+    # curvando la ruta y se le avisa que enderece.
+    desvio_maximo_grados: float = 25.0
+    enfriamiento_desvio_s: float = 12.0
+
+    # ------------------------------------------------------------------
     # HC-SR04 (alerta de proximidad)
     # ------------------------------------------------------------------
     # Numero de chip lgpio del encabezado GPIO; en la Pi 5 suele ser el

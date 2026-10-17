@@ -358,8 +358,11 @@ def test_flujo_completo() -> None:
     microfono.eventos.put(
         EventoVoz(ModoMicrofono.DESTINO, "quiero ir al baño")
     )
+    # La senal de Sala sigue a la vista: el rumbo se ancla y arranca
+    # sin pedir giros extra.
     paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.NAVEGANDO, "ruta hacia Baño iniciada")
+    comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en la senal")
     comprobar(aplicacion.destino == "Baño", "destino registrado")
     comprobar(microfono.modo is ModoMicrofono.DESPERTADOR, "sigue escuchando ordenes")
 
@@ -629,6 +632,91 @@ def test_confirmacion_de_senal_tolerante() -> None:
     )
 
 
+def test_encarada_y_desvio() -> None:
+    print("\n[10] Encarada de la senal y aviso de desvio al caminar")
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # La persona esta en Sala pero ya se giro: la senal no esta a la
+    # vista y pide ir al bano.
+    aplicacion.ubicacion = "Sala"
+    aplicacion.estado = Estado.ESPERANDO_DESTINO
+    microfono.cambiar_modo(ModoMicrofono.DESTINO)
+    detector.senal = None
+    microfono.eventos.put(EventoVoz(ModoMicrofono.DESTINO, "quiero ir al baño"))
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "pide encarar la senal antes de arrancar",
+    )
+    comprobar(
+        any("encárate" in frase for frase in locutor.frases),
+        "explica que hay que poner la senal enfrente",
+    )
+
+    # Gira buscando; mientras tanto la ruta NO arranca a ciegas.
+    mpu.gz = -90.0
+    for _ in range(3):
+        paso(aplicacion, detector, mpu)
+    comprobar(aplicacion.estado is Estado.ENCARAR_SENAL, "sigue encarando")
+    comprobar(aplicacion._ruta_pendiente is not None, "la ruta queda pendiente")
+
+    # Aparece la senal: se ancla el rumbo y arranca la navegacion.
+    detector.senal = "Sala"
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "con la senal enfrente arranca la ruta",
+    )
+    comprobar(
+        any("frente a ti" in frase for frase in locutor.frases),
+        "confirma que la senal esta enfrente",
+    )
+    comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en cero")
+
+    # Giro de la ruta (Sala -> Baño: izquierda) completado.
+    mpu.gz = 90.0
+    for _ in range(12):
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._instruccion_actual is not None
+        and aplicacion._instruccion_actual.es_pasos,
+        "tras el giro pasa al tramo a pie",
+    )
+
+    # Al caminar se va curvando a la derecha: hay que avisar que
+    # corrija a la izquierda (el rumbo acumulado delata la curva).
+    locutor.frases.clear()
+    mpu.gz = -60.0
+    for i in range(8):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        any("desviando" in frase for frase in locutor.frases),
+        "avisa del desvio de la linea recta",
+    )
+    comprobar(
+        any("izquierda" in frase for frase in locutor.frases),
+        "pide corregir al lado contrario (desvio a la derecha)",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -647,6 +735,7 @@ def main() -> int:
         test_proximidad_se_acelera()
         test_confirmacion_de_senal_tolerante()
         test_pasos_sin_fantasmas()
+        test_encarada_y_desvio()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

@@ -29,6 +29,7 @@ from .hardware.mpu6050 import MPU6050
 from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
 from .navegacion.caida import DetectorCaida
 from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
+from .navegacion.rumbo import Rumbo
 from .vision.detector import DetectorVisual, ResultadoVision, dibujar_detecciones
 from .vision.interfaz import TECLA_SALIR, VentanaDiagnostico
 
@@ -79,7 +80,10 @@ class Aplicacion:
         # cada lectura entre el medidor de giro, el contador de pasos
         # y el detector de caidas.  Integrar en un hilo propio evita
         # que la carga de la camara haga perder grados de giro.
-        self.giro = MedidorGiro(config)
+        # El rumbo acumula la orientacion continua (relativa a la
+        # ultima senal vista) con los mismos giros ya depurados.
+        self.rumbo = Rumbo()
+        self.giro = MedidorGiro(config, rumbo=self.rumbo)
         self.pasos = ContadorPasos(config)
         self.caida = DetectorCaida(config)
         self.muestreador = MuestreadorMPU(
@@ -93,6 +97,10 @@ class Aplicacion:
         self._plan: list[Instruccion] = []
         self._indice_plan = 0
         self._instruccion_actual: Instruccion | None = None
+        self._ruta_pendiente: list[Instruccion] | None = None
+        self._instruccion_encarar_dada = False
+        self._rumbo_al_caminar = 0.0
+        self._ultima_alerta_desvio: float | None = None
 
         # Busqueda de senal
         self._intento = 0
@@ -115,6 +123,7 @@ class Aplicacion:
             Estado.MEDIA_VUELTA: Aplicacion._en_media_vuelta,
             Estado.CINCO_PASOS: Aplicacion._en_cinco_pasos,
             Estado.ESPERANDO_DESTINO: Aplicacion._en_esperando_destino,
+            Estado.ENCARAR_SENAL: Aplicacion._en_encarar_senal,
             Estado.NAVEGANDO: Aplicacion._en_navegando,
         }
 
@@ -317,7 +326,39 @@ class Aplicacion:
             else:
                 self._hablar(f"Entendido. Vamos a {destino}.")
                 self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
-                self._iniciar_navegacion(plan)
+                self._iniciar_encarada(plan)
+
+    def _iniciar_encarada(self, plan: list[Instruccion]) -> None:
+        """Prepara la ruta: antes hay que encarar la senal de la zona.
+
+        Las instrucciones del mapa se dan "de frente a la senal" (asi
+        se midieron los pasos).  Si la camara no la ve ahora, se pide
+        girar despacio hasta encontrarla antes de arrancar.
+        """
+        self._ruta_pendiente = plan
+        self._instruccion_encarar_dada = False
+        self.estado = Estado.ENCARAR_SENAL
+
+    def _en_encarar_senal(self, resultado: ResultadoVision) -> None:
+        """Arranca la ruta al confirmar la senal enfrente (rumbo = 0)."""
+        if resultado.senal is not None:
+            self.rumbo.anclar()
+            print("RUMBO ANCLADO: señal de", resultado.senal, "enfrente")
+            plan = self._ruta_pendiente or []
+            self._ruta_pendiente = None
+            if self._instruccion_encarar_dada:
+                self._hablar("La señal está frente a ti.")
+            self._iniciar_navegacion(plan)
+            return
+
+        self._etiqueta = "Encarando la senal orientadora"
+        if not self._instruccion_encarar_dada:
+            self._instruccion_encarar_dada = True
+            self._hablar(
+                "Para saber hacia dónde miras, primero encárate con la "
+                "señal de esta zona. Gira despacio a la izquierda hasta "
+                "que te diga que la tienes frente a ti."
+            )
 
     def _volver_a_preguntar(self, motivo: str) -> None:
         """Explica el problema y vuelve a pedir el destino."""
@@ -434,6 +475,7 @@ class Aplicacion:
 
         if resultado.senal is not None:
             self.ubicacion = resultado.senal
+            self.rumbo.anclar()  # se mira la senal: rumbo conocido
             print("SEÑAL ENCONTRADA:", self.ubicacion)
             self._hablar(f"Estás en {self.ubicacion}.")
             self.estado = Estado.ESPERANDO_DESTINO
@@ -512,6 +554,10 @@ class Aplicacion:
                 self.giro.reiniciar()
             else:
                 self.pasos.reiniciar()
+                # Punto de partida de la linea recta: a partir de aqui
+                # el rumbo no deberia moverse mientras camina.
+                self._rumbo_al_caminar = self.rumbo.grados
+                self._ultima_alerta_desvio = None
 
         instruccion = self._instruccion_actual
 
@@ -529,9 +575,40 @@ class Aplicacion:
         elif instruccion.es_pasos:
             dados = self.pasos.avanzar()
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
+            self._vigilar_desvio()
             if dados >= instruccion.cantidad:
                 self._hablar("Pasos completados. Puedes parar.")
                 self._instruccion_actual = None
+
+    def _vigilar_desvio(self) -> None:
+        """Avisa si al caminar se aparta de la linea recta.
+
+        El rumbo integra el giroscopio desde la ultima senal anclada:
+        si mientras camina acumula mas giro que ``desvio_maximo_grados``
+        va curvando, y los pasos no llegarian al sitio medido.
+        """
+        desvio = self.rumbo.grados - self._rumbo_al_caminar
+        if abs(desvio) < self.config.desvio_maximo_grados:
+            return
+
+        ahora = time.monotonic()
+        if (
+            self._ultima_alerta_desvio is not None
+            and ahora - self._ultima_alerta_desvio
+            < self.config.enfriamiento_desvio_s
+        ):
+            return
+        self._ultima_alerta_desvio = ahora
+
+        # Desvio positivo = giro a la derecha: para enderezar hay que
+        # corregir al lado contrario.
+        sentido = "izquierda" if desvio > 0 else "derecha"
+        grados = round(abs(desvio))
+        print(f"DESVIO: {desvio:+.1f} grados respecto de la recta")
+        self._hablar(
+            f"Te estás desviando de la línea recta. Gira {grados} "
+            f"grados a la {sentido} para seguir derecho."
+        )
 
     def _anunciar_instruccion(self, instruccion: Instruccion) -> None:
         if instruccion.accion is Accion.GIRAR_DERECHA:

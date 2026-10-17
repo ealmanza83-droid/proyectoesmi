@@ -21,6 +21,7 @@ import time
 
 from ..configuracion import Configuracion
 from ..hardware.mpu6050 import LecturaMPU, MPU6050
+from .rumbo import Rumbo
 
 # Tope del dt integrado: protege contra paradas extremas del hilo (por
 # ejemplo un cuelgue del bus I2C).  Es generoso a proposito: si la
@@ -96,8 +97,9 @@ class MedidorGiro:
     opuesto de la proyeccion).
     """
 
-    def __init__(self, config: Configuracion):
+    def __init__(self, config: Configuracion, rumbo: Rumbo | None = None):
         self._config = config
+        self._rumbo = rumbo
         self._angulo_derecha = 0.0
         self._angulo_izquierda = 0.0
         self._sesgo = config.offset_giroscopio
@@ -141,6 +143,12 @@ class MedidorGiro:
             self._angulo_derecha += abs(direccion) * dt
         elif direccion <= -umbral:
             self._angulo_izquierda += abs(direccion) * dt
+
+        # El rumbo (orientacion continua) recibe solo los giros reales:
+        # por debajo del umbral es temblor, y temblor no desvia la
+        # ruta.  La referencia se ancla en cada senal orientadora.
+        if self._rumbo is not None and abs(direccion) >= umbral:
+            self._rumbo.girar(direccion * dt)
 
     @property
     def velocidad_derecha(self) -> float:
