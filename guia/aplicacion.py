@@ -104,6 +104,9 @@ class Aplicacion:
 
         self._etiqueta = ""
         self._ultimo_aviso_giro = 0.0
+        # Avisos de avance del giro en curso (0.5 y 0.75 del objetivo)
+        self._avances_anunciados: set[float] = set()
+        self._ultimo_angulo_giro = 0.0
         self._ventana = ventana or VentanaDiagnostico()
 
         self._manejadores: dict[Estado, Callable[["Aplicacion", ResultadoVision], None]] = {
@@ -364,11 +367,14 @@ class Aplicacion:
         )
 
     def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> None:
-        """Etiqueta de diagnostico y aviso de consola del giro.
+        """Etiqueta de diagnostico, aviso de consola y voz del giro.
 
         La consola muestra los grados acumulados y la velocidad de giro
         actual (positiva = derecha).  Si al girar a la derecha la
         velocidad sale negativa, el ``signo_derecha`` esta invertido.
+
+        Ademas se avanza por voz al 50% y al 75% del objetivo para que
+        quien gira pueda ritmar el giro sin ver nada.
         """
         self._etiqueta = f"Giro {sentido}: {angulo:.1f}/{objetivo} grados"
         ahora = time.monotonic()
@@ -379,6 +385,21 @@ class Aplicacion:
                 f"GIRO {sentido}: {angulo:.1f}/{objetivo} grados"
                 f" | vel {velocidad:+.1f} dps"
             )
+
+        # El acumulado solo baja cuando se reinicia el giro: ese es el
+        # momento de olvidar los avisos del giro anterior.
+        if angulo < self._ultimo_angulo_giro:
+            self._avances_anunciados.clear()
+        self._ultimo_angulo_giro = angulo
+
+        for parte, texto in (
+            (0.75, "Ya casi lo logras"),
+            (0.5, "Vas por la mitad"),
+        ):
+            if parte not in self._avances_anunciados and angulo >= objetivo * parte:
+                self._avances_anunciados.add(parte)
+                self._hablar(f"{texto}: {angulo:.0f} de {objetivo:.0f} grados.")
+                break
 
     # ------------------------------------------------------------------
     # Manejadores de estado
@@ -396,6 +417,8 @@ class Aplicacion:
         self._mostrar_giro("derecha", angulo, objetivo)
 
         if angulo >= objetivo:
+            self._avances_anunciados.clear()
+            self._hablar(f"Ya giraste {objetivo:.0f} grados. Puedes parar.")
             self._iniciar_busqueda(intento=1)
 
     def _en_buscar_senal(self, resultado: ResultadoVision) -> None:
@@ -437,6 +460,8 @@ class Aplicacion:
         self._mostrar_giro("izquierda", angulo, objetivo)
 
         if angulo >= objetivo:
+            self._avances_anunciados.clear()
+            self._hablar(f"Ya giraste {objetivo:.0f} grados. Puedes parar.")
             self._iniciar_busqueda(intento=2)
 
     def _en_cinco_pasos(self, resultado: ResultadoVision) -> None:
@@ -446,7 +471,7 @@ class Aplicacion:
 
         if dados >= objetivo:
             self._hablar(
-                f"{objetivo} pasos completados. Gira "
+                f"{objetivo} pasos completados. Puedes parar. Gira "
                 f"{self.config.grados_giro_inicial} grados a la derecha "
                 "suavemente para buscar la señal."
             )
@@ -487,12 +512,15 @@ class Aplicacion:
             angulo = self.giro.avanzar(derecha=derecha)
             self._mostrar_giro(sentido, angulo, float(instruccion.cantidad))
             if angulo >= instruccion.cantidad:
+                self._avances_anunciados.clear()
+                self._hablar("Giro completo. Puedes parar.")
                 self._instruccion_actual = None
 
         elif instruccion.es_pasos:
             dados = self.pasos.avanzar()
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
             if dados >= instruccion.cantidad:
+                self._hablar("Pasos completados. Puedes parar.")
                 self._instruccion_actual = None
 
     def _anunciar_instruccion(self, instruccion: Instruccion) -> None:

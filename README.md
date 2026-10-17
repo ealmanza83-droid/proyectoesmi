@@ -201,6 +201,22 @@ Palabra clave: **"Raspi"** (también "ras pi", "ras py").
 * *"gira a la derecha"* / *"gira a la izquierda"* → indicación de giro.
 * *"silencia"* / *"apaga"* / *"estoy bien"* → apaga la alarma de caída.
 
+### Guía de giros y pasos por voz
+
+Mientras la persona gira o camina, el sistema la guía en todo momento:
+
+* **Durante el giro**: al llegar a la mitad anuncia *"Vas por la mitad:
+  45 de 90 grados"* y a las tres cuartas partes *"Ya casi lo logras"*.
+* **Al completar el giro** (el inicial de 90°, la media vuelta de 180°
+  o el giro de una ruta): *"Ya giraste 90 grados. Puedes parar."* /
+  *"Giro completo. Puedes parar."* — después pasa a la siguiente
+  indicación (buscar señal, caminar, etc.).
+* **Al completar los pasos** de un tramo: *"Pasos completados. Puedes
+  parar."* y después la llegada o el siguiente paso de la ruta.
+
+Así la persona nunca se queda sin saber cuándo detenerse ni en qué
+punto del recorrido va.
+
 ### Alertas de seguridad
 
 * **Caída**: si el acelerómetro cambia de forma brusca (impacto o salto

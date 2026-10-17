@@ -315,6 +315,14 @@ def test_flujo_completo() -> None:
         paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.BUSCAR_SENAL, "giro de 90 grados completado")
     comprobar(
+        "Ya giraste 90 grados. Puedes parar." in locutor.frases,
+        "avisa cuando parar el giro de 90",
+    )
+    comprobar(
+        any("Vas por la mitad" in frase for frase in locutor.frases),
+        "da avance del giro mientras gira",
+    )
+    comprobar(
         microfono.modo is ModoMicrofono.DESPERTADOR,
         "el microfono vuelve a escuchar el despertador",
     )
