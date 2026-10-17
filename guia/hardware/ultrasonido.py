@@ -164,12 +164,21 @@ class SensorUltrasonico:
         return f"{etiqueta or nombre}, {lineas} lineas"
 
     def _es_chip_cabecera(self, manejo) -> bool:
-        """El chip de la cabecera siempre se llama "pinctrl-*"."""
+        """El chip de la cabecera siempre se llama "pinctrl-*".
+
+        En algunos sistemas la lectura de la etiqueta viene vacia o a
+        ceros (no fiable): en ese caso no se descarta el chip, para no
+        dejar el sensor entero sin usar por una lectura mala.  Solo se
+        rechazan los chips con etiqueta *real* que no es "pinctrl"
+        (p. ej. "gpio-brcmstb", que controla el PCIe).
+        """
         datos = self._leer_info_chip(manejo)
         if datos is None:
-            # Sin etiqueta no se puede descartar: se acepta el chip.
             return True
-        return "pinctrl" in datos[2].lower()
+        _, _, etiqueta = datos
+        if not etiqueta.strip():
+            return True
+        return "pinctrl" in etiqueta.lower()
 
     def _chips_candidatos(self, chip_preferido: int | None):
         """Numeros de chip a probar: el preferido y todos los existentes."""
@@ -288,6 +297,28 @@ class SensorUltrasonico:
 
         return microsegundos / MICROSEGUNDOS_POR_CM
 
+    def _estado_echo(self) -> str:
+        """Que hace la linea ECHO ahora mismo (diagnostico de cableado)."""
+        try:
+            lecturas = [
+                self._lgpio.gpio_read(self._manejo, self._echo)
+                for _ in range(200)
+            ]
+        except Exception:
+            return "sin lectura"
+        altos = sum(lecturas)
+        if altos == 0:
+            return (
+                "SIEMPRE EN BAJO: el sensor no contesta; revisa VCC (5V) "
+                "y GND, y que TRIG llegue al pin 12"
+            )
+        if altos == len(lecturas):
+            return (
+                "SIEMPRE EN ALTO: casi seguro ECHO conectado a 5V sin "
+                "divisor de voltaje; el GPIO solo admite 3.3V"
+            )
+        return f"alterna correctamente ({altos}/200 altos)"
+
     def _avisar_sin_eco(self) -> None:
         """Aviso unico y repetido cada rato si el sensor no contesta."""
         ahora = time.monotonic()
@@ -299,8 +330,7 @@ class SensorUltrasonico:
             print("HC-SR04: se perdio el eco.")
         print(
             f"AVISO HC-SR04: sin eco usando el {self._chip_info}. "
-            "Revisa VCC (5V), GND, TRIG y ECHO (con divisor de voltaje: "
-            "el ECHO del sensor es de 5V y el GPIO solo admite 3.3V). "
+            f"ECHO {self._estado_echo()}. "
             "La guia sigue funcionando, solo sin pitidos."
         )
 

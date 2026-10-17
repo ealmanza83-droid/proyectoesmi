@@ -366,15 +366,18 @@ class Aplicacion:
             "Caida detectada. Di silencia cuando te hayas levantado.",
         )
 
-    def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> None:
+    def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> bool:
         """Etiqueta de diagnostico, aviso de consola y voz del giro.
 
         La consola muestra los grados acumulados y la velocidad de giro
         actual (positiva = derecha).  Si al girar a la derecha la
         velocidad sale negativa, el ``signo_derecha`` esta invertido.
 
-        Ademas se avanza por voz al 50% y al 75% del objetivo para que
-        quien gira pueda ritmar el giro sin ver nada.
+        Se avisa por voz al 50% y al 75% del objetivo con frases
+        *cortas* (sin numeros): la voz tarda su tiempo y mientras se
+        habla la persona sigue girando, por eso el manejador vuelve a
+        medir tras cualquier aviso.  Devuelve ``True`` si acaba de
+        hablar.
         """
         self._etiqueta = f"Giro {sentido}: {angulo:.1f}/{objetivo} grados"
         ahora = time.monotonic()
@@ -393,13 +396,14 @@ class Aplicacion:
         self._ultimo_angulo_giro = angulo
 
         for parte, texto in (
-            (0.75, "Ya casi lo logras"),
-            (0.5, "Vas por la mitad"),
+            (0.75, "Ya casi listo."),
+            (0.5, "Vas por la mitad."),
         ):
             if parte not in self._avances_anunciados and angulo >= objetivo * parte:
                 self._avances_anunciados.add(parte)
-                self._hablar(f"{texto}: {angulo:.0f} de {objetivo:.0f} grados.")
-                break
+                self._hablar(texto)
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Manejadores de estado
@@ -414,7 +418,11 @@ class Aplicacion:
     def _en_giro_inicial(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.grados_giro_inicial
         angulo = self.giro.avanzar(derecha=True)
-        self._mostrar_giro("derecha", angulo, objetivo)
+        if self._mostrar_giro("derecha", angulo, objetivo):
+            # Mientras la voz aviso el avance, la persona sigue
+            # girando: se vuelve a medir para no dejar pasar el
+            # objetivo (antes se giraba de mas esperando el aviso).
+            angulo = self.giro.avanzar(derecha=True)
 
         if angulo >= objetivo:
             self._avances_anunciados.clear()
@@ -457,7 +465,8 @@ class Aplicacion:
     def _en_media_vuelta(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.grados_media_vuelta
         angulo = self.giro.avanzar(derecha=False)
-        self._mostrar_giro("izquierda", angulo, objetivo)
+        if self._mostrar_giro("izquierda", angulo, objetivo):
+            angulo = self.giro.avanzar(derecha=False)
 
         if angulo >= objetivo:
             self._avances_anunciados.clear()
@@ -510,7 +519,8 @@ class Aplicacion:
             derecha = instruccion.accion is Accion.GIRAR_DERECHA
             sentido = "derecha" if derecha else "izquierda"
             angulo = self.giro.avanzar(derecha=derecha)
-            self._mostrar_giro(sentido, angulo, float(instruccion.cantidad))
+            if self._mostrar_giro(sentido, angulo, float(instruccion.cantidad)):
+                angulo = self.giro.avanzar(derecha=derecha)
             if angulo >= instruccion.cantidad:
                 self._avances_anunciados.clear()
                 self._hablar("Giro completo. Puedes parar.")

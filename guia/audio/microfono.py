@@ -128,13 +128,24 @@ class Microfono:
             if frecuencia <= 0:
                 frecuencia = 16000
 
+            # Vosk trabaja a 16 kHz: capturar a esa frecuencia ahorra
+            # CPU y ancho de banda USB (menos "MIC: input overflow" y
+            # menos palabras cortadas al responder).
+            try:
+                sd.check_input_settings(
+                    device=dispositivo, samplerate=16000, channels=1, dtype="int16"
+                )
+                frecuencia = 16000
+            except Exception:
+                pass
+
             print(f"MICROFONO: {info['name']} | FRECUENCIA: {frecuencia}")
 
             with sd.RawInputStream(
                 samplerate=frecuencia,
-                # Buffer de ~180 ms: con la carga de YOLO y la camara,
+                # ~180 ms por bloque: con la carga de YOLO y la camara,
                 # buffers cortos provocaban "MIC: input overflow".
-                blocksize=8000,
+                blocksize=int(frecuencia * 0.18),
                 device=dispositivo,
                 dtype="int16",
                 channels=1,

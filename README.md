@@ -205,8 +205,11 @@ Palabra clave: **"Raspi"** (también "ras pi", "ras py").
 
 Mientras la persona gira o camina, el sistema la guía en todo momento:
 
-* **Durante el giro**: al llegar a la mitad anuncia *"Vas por la mitad:
-  45 de 90 grados"* y a las tres cuartas partes *"Ya casi lo logras"*.
+* **Durante el giro**: al llegar a la mitad anuncia *"Vas por la
+  mitad"* y a las tres cuartas partes *"Ya casi listo."* — frases
+  cortas sin números, porque la voz tarda y mientras se habla la
+  persona sigue girando (tras cualquier aviso el sistema **vuelve a
+  medir** el ángulo antes de decidir, para no pedir giros de más).
 * **Al completar el giro** (el inicial de 90°, la media vuelta de 180°
   o el giro de una ruta): *"Ya giraste 90 grados. Puedes parar."* /
   *"Giro completo. Puedes parar."* — después pasa a la siguiente
@@ -244,9 +247,13 @@ Si al girar a la derecha la velocidad sale negativa, cambia
 `signo_derecha` de `1` a `-1` en `guia/configuracion.py`.
 
 Si el HC-SR04 no devuelve eco, la consola avisa `AVISO HC-SR04: sin
-eco usando el chip lgpio N (pinctrl-rp1, 54 lineas)` — **la guia sigue
-funcionando** solo sin pitidos de proximidad (antes ese bloqueo congelaba
-todo el sistema esperando el eco). Al reconectarlo aparece
+eco usando el chip lgpio N (...)` junto con el **estado de la línea
+ECHO**: `SIEMPRE EN ALTO` significa casi seguro ECHO conectado a 5V
+sin divisor de voltaje, `SIEMPRE EN BAJO` que el sensor no tiene
+alimentación o TRIG no llega, y `alterna correctamente` que el eco
+llega pero la medición falla. **La guia sigue funcionando** solo sin
+pitidos de proximidad (antes ese bloqueo congelaba todo el sistema
+esperando el eco). Al reconectarlo aparece
 `HC-SR04: eco recuperado (NN cm)`.
 
 El chip GPIO se elige **por su etiqueta**: los pines de la cabecera
