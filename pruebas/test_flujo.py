@@ -409,6 +409,29 @@ def test_destino_sin_ubicacion() -> None:
         any("no sé en qué zona" in frase for frase in locutor.frases),
         "explica que falta la senal orientadora",
     )
+    comprobar(
+        microfono.modo is ModoMicrofono.DESTINO,
+        "tras el error vuelve a preguntar el destino (no se apaga)",
+    )
+    comprobar(
+        "¿A dónde quieres ir?" in locutor.frases,
+        "vuelve a pedir el destino tras el error",
+    )
+
+    # Con ubicacion conocida, un destino sin ruta tambien debe volver
+    # a preguntar (antes el microfono se quedaba en despertador y la
+    # siguiente indicacion no se reconocia).
+    aplicacion.ubicacion = "Baño"
+    locutor.frases.clear()
+    aplicacion._asignar_destino("Cocina")
+    comprobar(
+        any("no está configurada" in frase for frase in locutor.frases),
+        "avisa que la ruta no esta configurada",
+    )
+    comprobar(
+        microfono.modo is ModoMicrofono.DESTINO,
+        "tras 'ruta no configurada' sigue escuchando destinos",
+    )
 
 
 def test_giro_integra_velocidad_angular() -> None:

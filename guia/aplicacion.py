@@ -288,30 +288,39 @@ class Aplicacion:
     # Destino y navegacion
     # ------------------------------------------------------------------
     def _asignar_destino(self, destino: str) -> None:
-        """Valida el destino pedido y arranca la ruta si existe."""
+        """Valida el destino pedido y arranca la ruta si existe.
+
+        Si el destino no sirve (es la ubicacion actual, la zona es
+        desconocida o no hay ruta), se vuelve a preguntar a donde
+        quiere ir: antes se volvia al modo despertador y la siguiente
+        indicacion se quedaba sin reconocer.
+        """
         self.destino = destino
         print("DESTINO:", destino)
 
         if destino == self.ubicacion:
-            self._hablar(f"Ya estás en {destino}.")
-            self.destino = None
+            self._volver_a_preguntar(f"Ya estás en {destino}.")
         elif self.ubicacion is None:
-            self._hablar(
+            self._volver_a_preguntar(
                 "Todavía no sé en qué zona estamos. "
                 "Acércate a una señal orientadora."
             )
         else:
             plan = self._planificador.planificar(self.ubicacion, destino)
             if plan is None:
-                self._hablar(
+                self._volver_a_preguntar(
                     f"La ruta hacia {destino} todavía no está configurada."
                 )
-                self.destino = None
             else:
                 self._hablar(f"Entendido. Vamos a {destino}.")
+                self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
                 self._iniciar_navegacion(plan)
 
-        self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
+    def _volver_a_preguntar(self, motivo: str) -> None:
+        """Explica el problema y vuelve a pedir el destino."""
+        self.destino = None
+        self._hablar(motivo)
+        self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
 
     def _iniciar_navegacion(self, plan: list[Instruccion]) -> None:
         self._plan = plan

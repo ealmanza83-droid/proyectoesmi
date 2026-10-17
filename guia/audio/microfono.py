@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -77,6 +78,7 @@ class Microfono:
         self._modo = ModoMicrofono.APAGADO
         self._candado = threading.Lock()
         self._detener = threading.Event()
+        self._ultimo_aviso_audio = 0.0
         self._hilo = threading.Thread(
             target=self._bucle, name="microfono", daemon=True
         )
@@ -130,12 +132,12 @@ class Microfono:
 
             with sd.RawInputStream(
                 samplerate=frecuencia,
-                blocksize=4000,
+                # Buffer de ~180 ms: con la carga de YOLO y la camara,
+                # buffers cortos provocaban "MIC: input overflow".
+                blocksize=8000,
                 device=dispositivo,
                 dtype="int16",
                 channels=1,
-                # Latencia holgada: con la carga de YOLO y la camara,
-                # buffers cortos provocaban "MIC: input overflow".
                 latency="high",
                 callback=self._capturar_audio,
             ):
@@ -147,7 +149,12 @@ class Microfono:
 
     def _capturar_audio(self, indata, frames, tiempo, status) -> None:
         if status:
-            print("MIC:", status)
+            # El desbordamiento es colateral (CPU ocupada): se avisa de
+            # vez en cuando, no a cada bloque, para no llenar la consola.
+            ahora = time.monotonic()
+            if ahora - self._ultimo_aviso_audio >= 5.0:
+                self._ultimo_aviso_audio = ahora
+                print("MIC:", status)
         self._cola_audio.put(bytes(indata))
 
     def _reconocer(self, modelo: Model, frecuencia: int) -> None:

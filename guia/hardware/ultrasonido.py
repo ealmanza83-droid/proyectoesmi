@@ -14,6 +14,8 @@ asistente sin pitidos, pero jamas congelado.
 
 from __future__ import annotations
 
+import glob
+import os
 import threading
 import time
 
@@ -96,24 +98,20 @@ class SensorUltrasonico:
 
         El numero de chip del encabezado varia entre versiones del
         sistema (en la Pi 5 suele ser el 0 o el 4), y un chip que no
-        contiene las lineas no falla al abrir: por eso la comprobacion
-        es intentar reclamar los pines en cada candidato.
+        contiene las lineas no falla al abrir: por eso se prueban en
+        orden *todos* los ``/dev/gpiochip*`` que existan.
         """
         lgpio = self._lgpio
-        candidatos = [chip_preferido, 0, 4, 1, 2, 3]
-        ultimo_error: Exception | None = None
 
-        for numero in dict.fromkeys(c for c in candidatos if c is not None):
+        for numero in self._chips_candidatos(chip_preferido):
             try:
                 manejo = lgpio.gpiochip_open(numero)
-            except Exception as error:
-                ultimo_error = error
+            except Exception:
                 continue
             try:
                 lgpio.gpio_claim_output(manejo, self._trigger, 0)
                 lgpio.gpio_claim_input(manejo, self._echo)
-            except Exception as error:
-                ultimo_error = error
+            except Exception:
                 try:
                     lgpio.gpiochip_close(manejo)
                 except Exception:
@@ -122,20 +120,52 @@ class SensorUltrasonico:
             print(f"HC-SR04 OK (chip lgpio {numero})")
             return manejo
 
+        self._avisar_fallo_gpio()
+        return None
+
+    def _chips_candidatos(self, chip_preferido: int | None):
+        """Numeros de chip a probar: el preferido y todos los existentes."""
+        encontrados: list[int] = []
+        for ruta in glob.glob("/dev/gpiochip*"):
+            try:
+                encontrados.append(int(ruta.rsplit("chip", 1)[1]))
+            except ValueError:
+                continue
+        lista = [chip_preferido, *sorted(encontrados), 0, 4]
+        return dict.fromkeys(c for c in lista if c is not None)
+
+    def _avisar_fallo_gpio(self) -> None:
+        """Diagnostico concreto: permisos, sistema o pines ocupados."""
+        chips = sorted(glob.glob("/dev/gpiochip*"))
+        legibles = [c for c in chips if os.access(c, os.R_OK | os.W_OK)]
+
         print(
             f"AVISO HC-SR04: no se pudo usar el sensor (TRIG={self._trigger}, "
-            f"ECHO={self._echo}; ultimo error: {ultimo_error}). "
-            "La guia sigue funcionando, solo sin pitidos."
+            f"ECHO={self._echo}). La guia sigue funcionando, solo sin pitidos."
         )
-        if ultimo_error is not None and "gpiochip" in str(ultimo_error).lower():
+        print(
+            f"Chips GPIO visibles: {chips or 'ninguno'} | "
+            f"legibles para este usuario: {legibles or 'ninguno'}"
+        )
+
+        if chips and not legibles:
             print(
-                "Pista: ningun chip lgpio se pudo abrir; casi seguro son "
-                "permisos. Comprueba 'ls -l /dev/gpiochip*' y ejecuta "
-                "'sudo usermod -aG gpio $USER' (despues cierra sesion o "
-                "reinicia). Para probar sin cambiar nada: "
+                "Causa: PERMISOS sobre /dev/gpiochip*. Solucion: "
+                "'sudo usermod -aG gpio $USER' y despues reinicia "
+                "(o cierra y abre sesion).  Prueba rapida con: "
                 "'sudo venv/bin/python main.py'."
             )
-        return None
+        elif not chips:
+            print(
+                "Causa: el sistema no expone /dev/gpiochip*. Solucion: "
+                "'sudo apt install --reinstall python3-lgpio' y revisa "
+                "'ls /dev/gpiochip*'."
+            )
+        else:
+            print(
+                "Causa: los pines TRIG/ECHO no estan libres (revisa que "
+                "ningun otro programa los use) o el cableado del sensor."
+            )
 
     # ------------------------------------------------------------------
     # Medicion
