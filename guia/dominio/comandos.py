@@ -18,6 +18,9 @@ PALABRAS_DESPERTADOR = ("raspi", "ras pi", "ras py")
 
 _PATRON_PARAR = re.compile(r"\b(para|parar|alto|detente)\b")
 _PATRON_REANUDAR = re.compile(r"\b(reanuda\w*|continua\w*)\b")
+_PATRON_SILENCIAR = re.compile(
+    r"\b(silencia\w*|apaga\w*|desactiva\w*|ya me recupere|estoy bien)\b"
+)
 _PATRON_DERECHA = re.compile(r"\b(gira|girar)\b.*\bderecha\b")
 _PATRON_IZQUIERDA = re.compile(r"\b(gira|girar)\b.*\bizquierda\b")
 
@@ -31,6 +34,7 @@ class TipoComando(Enum):
     DESTINO = auto()
     PARAR = auto()
     REANUDAR = auto()
+    SILENCIAR = auto()
     GIRAR_DERECHA = auto()
     GIRAR_IZQUIERDA = auto()
     DESCONOCIDO = auto()
@@ -87,6 +91,9 @@ def reconocer(texto: str) -> Comando:
 
     if _PATRON_REANUDAR.search(normal):
         return Comando(TipoComando.REANUDAR)
+
+    if _PATRON_SILENCIAR.search(normal):
+        return Comando(TipoComando.SILENCIAR)
 
     if _PATRON_DERECHA.search(normal):
         return Comando(TipoComando.GIRAR_DERECHA)

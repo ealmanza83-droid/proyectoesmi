@@ -56,12 +56,13 @@ proyectoesmi/
 │   │   ├── locutor.py       Piper (voz) con caché de audios
 │   │   ├── microfono.py     Vosk (escucha) en hilo propio
 │   │   ├── gramaticas.py    gramáticas reducidas por modo
-│   │   └── alarma.py        generación del beep de proximidad
+│   │   └── alarma.py        beep de proximidad + alarma continua de caída
 │   ├── vision/
 │   │   ├── detector.py      YOLO: señales + obstáculos (1 inferencia)
 │   │   └── interfaz.py      ventana de diagnóstico
 │   └── navegacion/
-│       └── movimiento.py    MedidorGiro y ContadorPasos
+│       ├── movimiento.py    MuestreadorMPU (100 Hz) + MedidorGiro + ContadorPasos
+│       └── caida.py         DetectorCaida (acelerómetro)
 ├── pruebas/test_flujo.py    prueba completa sin hardware
 ├── mi_deteccion/            modelos YOLO (best.pt, yolo11n_ncnn_model…)
 ├── piper_voices/            voces Piper (es_MX-claude-high…)
@@ -116,9 +117,13 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Confianza mínima de YOLO | `confianza_minima` | `0.75` |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
 | Detecciones seguidas para confirmar una señal | `detecciones_senal_requeridas` | `3` |
-| Offset del giroscopio (calibración) | `offset_giroscopio` | `0.445992` |
+| Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
 | Velocidad mínima para contar giro | `velocidad_minima_giro_dps` | `8.0` |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
+| Umbral de impacto para detectar caída | `umbral_caida_g` | `2.5` |
+| Cambio brusco de aceleración que delata una caída | `umbral_cambio_caida_g` | `1.2` |
+| Enfriamiento tras una caída (evita dobles alarmas) | `enfriamiento_caida_s` | `15` |
+| Duración máxima del beep continuo de caída | `duracion_alarma_caida_s` | `60` |
 | Pines HC-SR04 | `pin_echo` / `pin_trigger` | `23` / `18` |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
@@ -154,6 +159,18 @@ Palabra clave: **"Raspi"** (también "ras pi", "ras py").
 * *"Raspi, ve al baño"* / *"quiero ir a la sala"* → inicia la ruta.
 * *"Raspi, para"* / *"alto"* → pausa · *"reanuda"* / *"continuar"* → sigue.
 * *"gira a la derecha"* / *"gira a la izquierda"* → indicación de giro.
+* *"silencia"* / *"apaga"* / *"estoy bien"* → apaga la alarma de caída.
+
+### Alertas de seguridad
+
+* **Caída**: si el acelerómetro cambia de forma brusca (impacto o salto
+  grande respecto a hace un instante), el sistema anuncia *"Caida
+  detectada"* y enciende un **beep continuo** (no intermitente) durante
+  60 s o hasta que la persona diga *"silencia"*.
+* **Proximidad**: el ritmo de los pitidos del HC-SR04 **se acelera de
+  forma continua** a medida que la persona se acerca al obstáculo
+  (lineal entre 1.2 s de intervalo a 2 m y 0.1 s rozando el objeto).
+  Si hay una alarma de caída en marcha, los pitidos se callan.
 
 ---
 
@@ -164,8 +181,11 @@ Palabra clave: **"Raspi"** (también "ras pi", "ras py").
   constructor (facilita simularla en pruebas).
 * **Máquina de estados**: `Aplicacion` despacha a un manejador por estado;
   no hay banderas globales ni `if` encadenados de 700 líneas.
-* **Hilos acotados**: solo dos (micrófono y alerta de proximidad), ambos
-  con parada ordenada (`detener()` + `join`).
+* **Hilos acotados**: cuatro (micrófono, alerta de proximidad, muestreador
+  del MPU6050 a 100 Hz y alarma de caída), todos con parada ordenada
+  (`detener()` + `join`). El giroscopio mide **velocidad angular**, no
+  ángulos: el muestreador integra esa velocidad a frecuencia fija para
+  no perder grados aunque la cámara o la voz relentice el bucle.
 * **Sin bloqueos innecesarios**: la voz se atiende desde la cola de
   eventos en cada vuelta del bucle; la cámara sigue trabajando.
 * **Una sola inferencia YOLO por frame**, con confirmación de 3 detecciones

@@ -27,7 +27,8 @@ from .dominio.estados import Estado
 from .dominio.rutas import Accion, Instruccion, PlanificadorRutas
 from .hardware.mpu6050 import MPU6050
 from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
-from .navegacion.movimiento import ContadorPasos, MedidorGiro
+from .navegacion.caida import DetectorCaida
+from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
 from .vision.detector import DetectorVisual, ResultadoVision, dibujar_detecciones
 from .vision.interfaz import TECLA_SALIR, VentanaDiagnostico
 
@@ -69,9 +70,18 @@ class Aplicacion:
         self.ubicacion: str | None = None
         self.destino: str | None = None
 
-        # Movimiento
-        self.giro = MedidorGiro(mpu, config)
-        self.pasos = ContadorPasos(mpu, config)
+        # Movimiento: el muestreador lee el MPU6050 a 100 Hz y reparte
+        # cada lectura entre el medidor de giro, el contador de pasos
+        # y el detector de caidas.  Integrar en un hilo propio evita
+        # que la carga de la camara haga perder grados de giro.
+        self.giro = MedidorGiro(config)
+        self.pasos = ContadorPasos(config)
+        self.caida = DetectorCaida(config)
+        self.muestreador = MuestreadorMPU(
+            mpu,
+            config,
+            (self.giro.en_muestra, self.pasos.en_muestra, self.caida.en_muestra),
+        )
 
         # Navegacion
         self._planificador = planificador or PlanificadorRutas()
@@ -109,6 +119,7 @@ class Aplicacion:
         print("INICIANDO SISTEMA")
         print("======================================")
 
+        self.muestreador.start()
         self.alerta.start()
         self.microfono.iniciar()
         time.sleep(2)
@@ -132,6 +143,7 @@ class Aplicacion:
         """Detiene hilos y libera los recursos que usa la aplicacion."""
         print()
         print("Cerrando sistema...")
+        self.muestreador.detener()
         self.alerta.detener()
         self.microfono.detener()
         self.alarma.esperar()
@@ -149,6 +161,7 @@ class Aplicacion:
             distancia_cm = self.sensor.distancia_cm
 
             self._procesar_voz()
+            self._vigilar_caida()
             self._anunciar_obstaculos(resultado)
 
             # Un solo punto de decision: el manejador del estado actual.
@@ -248,6 +261,12 @@ class Aplicacion:
             self._en_pausa = False
             self._hablar("Navegación reanudada.")
 
+        elif comando.tipo is TipoComando.SILENCIAR:
+            # Apaga la alarma continua de una caida si esta sonando.
+            if self.alarma.alarma_activa:
+                self.alarma.silenciar_alarma()
+                self._hablar("Alarma apagada.")
+
         elif comando.tipo is TipoComando.GIRAR_DERECHA:
             self._hablar("Gira a la derecha suavemente.")
 
@@ -306,11 +325,26 @@ class Aplicacion:
         self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
 
     # ------------------------------------------------------------------
-    # Obstaculos
+    # Obstaculos y seguridad
     # ------------------------------------------------------------------
     def _anunciar_obstaculos(self, resultado: ResultadoVision) -> None:
         for nombre in resultado.obstaculos:
             self._hablar(f"Alto, hay un {nombre}.")
+
+    def _vigilar_caida(self) -> None:
+        """Si el acelerometro detecto una caida, alarma constante + voz.
+
+        El beep de la caida es continuo (no intermitente) y tiene
+        prioridad: se apaga con la orden "silencia" o solo.
+        """
+        if not self.caida.hay_caida:
+            return
+
+        self.caida.reconocer()
+        self.alarma.activar_alarma(self.config.duracion_alarma_caida_s)
+        self._hablar(
+            "Caida detectada. Di silencia cuando te hayas levantado.",
+        )
 
     # ------------------------------------------------------------------
     # Manejadores de estado

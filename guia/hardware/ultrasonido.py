@@ -1,7 +1,9 @@
 """Sensor ultrasonico HC-SR04 y su alerta sonora de proximidad.
 
 La regla es sencilla: cuanto mas cerca esta un obstaculo, mas
-frecuentes son los pitidos (y mas de 2 metros = silencio).
+frecuentes son los pitidos (y mas de la distancia de alerta = silencio).
+El ritmo crece de forma continua, sin saltos: el sonido "se acelera"
+solo a medida que la persona se acerca al objeto.
 """
 
 from __future__ import annotations
@@ -15,24 +17,22 @@ from gpiozero.pins.lgpio import LGPIOFactory
 from ..configuracion import Configuracion
 from ..audio.alarma import ReproductorBeep
 
-# Tramos de distancia -> segundos entre pitidos.
-TRAMAS_BEEP: tuple[tuple[float, float], ...] = (
-    (150.0, 1.20),  # 1.50 - 2.00 m
-    (100.0, 0.70),  # 1.00 - 1.50 m
-    (50.0, 0.35),   # 0.50 - 1.00 m
-    (25.0, 0.18),   # 0.25 - 0.50 m
-    (0.0, 0.12),    # menos de 25 cm
-)
+# Segundos entre pitidos en los extremos del rango de alerta.
+INTERVALO_LEJANO_S = 1.20  # justo en el limite de la distancia de alerta
+INTERVALO_CERCA_S = 0.10   # rozando el obstaculo
 
 
 def intervalo_de_beep(distancia_cm: float, distancia_alerta_cm: float) -> float | None:
-    """Segundos entre pitidos para una distancia dada (``None`` = silencio)."""
-    if distancia_cm > distancia_alerta_cm:
+    """Segundos entre pitidos para una distancia dada (``None`` = silencio).
+
+    El intervalo se acorta de forma proporcional a la distancia: a
+    medida que la persona avanza hacia el obstaculo los pitidos se
+    aceleran sin saltos bruscos.
+    """
+    if distancia_cm > distancia_alerta_cm or distancia_alerta_cm <= 0:
         return None
-    for limite, intervalo in TRAMAS_BEEP:
-        if distancia_cm > limite:
-            return intervalo
-    return TRAMAS_BEEP[-1][1]
+    fraccion = max(min(distancia_cm / distancia_alerta_cm, 1.0), 0.0)
+    return INTERVALO_CERCA_S + fraccion * (INTERVALO_LEJANO_S - INTERVALO_CERCA_S)
 
 
 class SensorUltrasonico:
@@ -104,11 +104,13 @@ class AlertaProximidad(threading.Thread):
                     distancia, self._sensor.distancia_alerta_cm
                 )
 
-                # Nunca tapar la voz ni superponer pitidos.
+                # Nunca tapar la voz, superponer pitidos ni competir
+                # con la alarma continua de una caida.
                 if (
                     intervalo is not None
                     and ahora - ultima_alerta >= intervalo
                     and not self._voz_activa.is_set()
+                    and not self._alarma.alarma_activa
                 ):
                     self._alarma.reproducir()
                     ultima_alerta = ahora

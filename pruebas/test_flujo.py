@@ -104,7 +104,9 @@ from guia.dominio.comandos import TipoComando, extraer_destino, quitar_despertad
 from guia.dominio.estados import Estado  # noqa: E402
 from guia.dominio.rutas import Accion, PlanificadorRutas  # noqa: E402
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
+from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
+from guia.navegacion.caida import DetectorCaida  # noqa: E402
 from guia.vision.detector import ResultadoVision  # noqa: E402
 
 
@@ -148,11 +150,20 @@ class SensorFalso:
 
 
 class AlarmaFalsa:
+    def __init__(self) -> None:
+        self.alarma_activa = False
+
     def reproducir(self) -> None:
         pass
 
+    def activar_alarma(self, duracion_s: float | None = None) -> None:
+        self.alarma_activa = True
+
+    def silenciar_alarma(self, espera_s: float = 2.0) -> None:
+        self.alarma_activa = False
+
     def esperar(self, espera_s: float = 2.0) -> None:
-        pass
+        self.alarma_activa = False
 
 
 class LocutorFalso:
@@ -209,11 +220,19 @@ class VentanaFalsa:
 # ----------------------------------------------------------------------
 # Utilidades del ensayo
 # ----------------------------------------------------------------------
-def paso(aplicacion: Aplicacion, detector: DetectorFalso) -> None:
-    """Una iteracion del bucle principal (sin ventana de OpenCV)."""
+def paso(
+    aplicacion: Aplicacion, detector: DetectorFalso, mpu: MPUFalso, dt: float = 0.1
+) -> None:
+    """Una iteracion del bucle principal (sin ventana de OpenCV).
+
+    Como en el sistema real, primero se muestrea el MPU6050 y luego se
+    atiende voz, caidas, obstaculos y el estado actual.
+    """
     frame = aplicacion.camara.capturar()
     resultado = detector.analizar(frame)
+    aplicacion.muestreador.muestrear(mpu.leer(), dt)
     aplicacion._procesar_voz()
+    aplicacion._vigilar_caida()
     aplicacion._anunciar_obstaculos(resultado)
     aplicacion._manejadores[aplicacion.estado](aplicacion, resultado)
 
@@ -236,6 +255,10 @@ def test_comandos_de_voz() -> None:
         "orden 'gira a la izquierda'",
     )
     comprobar(quitar_despertador("Raspi, ve a la sala") == "ve a la sala", "quita la palabra clave")
+    comprobar(
+        reconocer("silencia").tipo is TipoComando.SILENCIAR,
+        "orden 'silencia' (apaga la alarma de caida)",
+    )
 
 
 def test_planificacion_de_rutas() -> None:
@@ -281,7 +304,7 @@ def test_flujo_completo() -> None:
     aplicacion.giro.reiniciar()
     mpu.gz = 100.0  # giro a derecha sostenido
     for _ in range(15):
-        paso(aplicacion, detector)
+        paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.BUSCAR_SENAL, "giro de 90 grados completado")
     comprobar(
         microfono.modo is ModoMicrofono.DESPERTADOR,
@@ -290,7 +313,7 @@ def test_flujo_completo() -> None:
 
     # --- 3.2 Aparece la senal orientadora --------------------------
     detector.senal = "Sala"
-    paso(aplicacion, detector)
+    paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.ESPERANDO_DESTINO, "senal detectada")
     comprobar(aplicacion.ubicacion == "Sala", "ubicacion actualizada a Sala")
     comprobar(microfono.modo is ModoMicrofono.DESTINO, "pide el destino por voz")
@@ -299,7 +322,7 @@ def test_flujo_completo() -> None:
     microfono.eventos.put(
         EventoVoz(ModoMicrofono.DESTINO, "quiero ir al baño")
     )
-    paso(aplicacion, detector)
+    paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.NAVEGANDO, "ruta hacia Baño iniciada")
     comprobar(aplicacion.destino == "Baño", "destino registrado")
     comprobar(microfono.modo is ModoMicrofono.DESPERTADOR, "sigue escuchando ordenes")
@@ -307,7 +330,7 @@ def test_flujo_completo() -> None:
     # --- 3.4 Giro de la ruta (izquierda 90 grados) -----------------
     mpu.gz = -100.0
     for _ in range(15):
-        paso(aplicacion, detector)
+        paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion._instruccion_actual is not None
         and aplicacion._instruccion_actual.es_pasos,
@@ -318,7 +341,7 @@ def test_flujo_completo() -> None:
     mpu.gz = 0.0
     mpu.az = 1.5  # picos de aceleracion al caminar
     for _ in range(60):
-        paso(aplicacion, detector)
+        paso(aplicacion, detector, mpu)
         if aplicacion.estado is Estado.ESPERANDO_DESTINO:
             break
 
@@ -328,6 +351,19 @@ def test_flujo_completo() -> None:
     comprobar(aplicacion.destino is None, "destino limpio tras la llegada")
     comprobar("Has llegado a Baño." in locutor.frases, "anuncio de llegada")
     comprobar("¿A dónde quieres ir?" in locutor.frases, "vuelve a preguntar destino")
+
+    # --- 3.7 Caida: alarma constante y orden para apagarla ---------
+    mpu.az = 4.0  # golpe brusco contra el suelo
+    paso(aplicacion, detector, mpu)
+    comprobar(aplicacion.alarma.alarma_activa, "la caida enciende la alarma continua")
+    comprobar(
+        any("Caida detectada" in frase for frase in locutor.frases),
+        "anuncia la caida por voz",
+    )
+
+    microfono.eventos.put(EventoVoz(ModoMicrofono.DESPERTADOR, "Raspi silencia"))
+    paso(aplicacion, detector, mpu)
+    comprobar(not aplicacion.alarma.alarma_activa, "la orden 'silencia' apaga la alarma")
 
 
 def test_destino_sin_ubicacion() -> None:
@@ -357,6 +393,84 @@ def test_destino_sin_ubicacion() -> None:
     )
 
 
+def test_giro_integra_velocidad_angular() -> None:
+    """El giroscopio da grados/segundo: hay que integrarlos con el tiempo."""
+    print("\n[5] Giro: integracion de la velocidad angular")
+    config = Configuracion()
+    giro = movimiento.MedidorGiro(config)
+    mpu = MPUFalso()
+    dt = config.intervalo_muestreo_mpu_s  # 0.01 s (100 Hz)
+
+    # Giro sostenido de 90 dps durante 1.1 s -> mas de 90 grados.
+    mpu.gz = 90.0
+    for _ in range(110):
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(
+        giro.avanzar(derecha=True) >= 90.0,
+        "90 dps durante 1.1 s superan los 90 grados",
+    )
+    comprobar(
+        giro.avanzar(derecha=False) == 0.0,
+        "el giro a la derecha no suma en el contador izquierdo",
+    )
+
+    # En reposo (gz ~ offset) no se acumula angulo.
+    giro.reiniciar()
+    mpu.gz = config.offset_giroscopio
+    for _ in range(500):
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(giro.avanzar(derecha=True) == 0.0, "en reposo no se acumulan grados")
+
+    # Giro lento pero continuo: 10 dps durante 12 s -> 120 grados.
+    giro.reiniciar()
+    mpu.gz = config.offset_giroscopio + 10.0
+    for _ in range(1200):
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(
+        giro.avanzar(derecha=True) >= 100.0,
+        "un giro lento (10 dps) tambien completa el objetivo",
+    )
+
+
+def test_deteccion_de_caida() -> None:
+    print("\n[6] Caida: cambio brusco del acelerometro")
+    config = Configuracion()
+    detector_caida = DetectorCaida(config)
+    mpu = MPUFalso()
+
+    # Persona quieta: nada de alertas.
+    for _ in range(50):
+        detector_caida.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(not detector_caida.hay_caida, "en reposo no hay caida")
+
+    # Cambio brusco (golpe contra el suelo).
+    mpu.az = 3.5
+    detector_caida.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(detector_caida.hay_caida, "un golpe brusco dispara la caida")
+
+    # Tras avisar, el enfriamiento evita repetir la alerta.
+    detector_caida.reconocer()
+    comprobar(not detector_caida.hay_caida, "al avisar se limpia el aviso")
+    detector_caida.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        not detector_caida.hay_caida,
+        "el enfriamiento evita alarmas repetidas por el mismo golpe",
+    )
+
+
+def test_proximidad_se_acelera() -> None:
+    print("\n[7] Proximidad: el beep se acelera al acercarse")
+    lejos = intervalo_de_beep(200.0, 200.0)
+    medio = intervalo_de_beep(100.0, 200.0)
+    cerca = intervalo_de_beep(10.0, 200.0)
+
+    comprobar(intervalo_de_beep(250.0, 200.0) is None, "mas alla del umbral: silencio")
+    comprobar(
+        lejos > medio > cerca > 0.0,
+        "el intervalo baja a medida que la persona se acerca",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -370,6 +484,9 @@ def main() -> int:
         test_planificacion_de_rutas()
         test_flujo_completo()
         test_destino_sin_ubicacion()
+        test_giro_integra_velocidad_angular()
+        test_deteccion_de_caida()
+        test_proximidad_se_acelera()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

@@ -42,15 +42,30 @@ class Configuracion:
     # ------------------------------------------------------------------
     # MPU6050 (giroscopio + acelerometro)
     # ------------------------------------------------------------------
+    # El giroscopio da velocidad angular (grados/segundo): para saber
+    # cuantos grados gira la persona hay que integrarla a frecuencia
+    # fija.  Por eso el sensor se muestrea en su propio hilo.
     bus_i2c: int = 1
     direccion_mpu: int = 0x68
     registro_despertar: int = 0x6B
     registro_datos: int = 0x3B
-    offset_giroscopio: float = 0.445992
-    velocidad_minima_giro_dps: float = 8.0
+    intervalo_muestreo_mpu_s: float = 0.01  # 100 muestras por segundo
+    offset_giroscopio: float = 0.445992     # sesgo inicial (calibracion)
+    velocidad_minima_giro_dps: float = 8.0  # por debajo no es un giro
+    velocidad_reposo_dps: float = 5.0       # rango en que se recalibra el sesgo
+    constante_sesgo_s: float = 5.0          # lentitud del aprendizaje del sesgo
     signo_derecha: int = 1
     umbral_paso_g: float = 1.12
     intervalo_paso_s: float = 0.35
+
+    # ------------------------------------------------------------------
+    # Deteccion de caidas (acelerometro)
+    # ------------------------------------------------------------------
+    umbral_caida_g: float = 2.5         # impacto: magnitud muy lejos de 1 g
+    umbral_cambio_caida_g: float = 1.2  # salto brusco respecto a un instante antes
+    ventana_cambio_caida_s: float = 0.3 # margen de tiempo del "brusco"
+    enfriamiento_caida_s: float = 15.0  # una sola alerta por caida
+    duracion_alarma_caida_s: float = 60.0  # beep constante maximo tras caer
 
     # ------------------------------------------------------------------
     # Movimiento (giro inicial, media vuelta y pasos)
