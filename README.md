@@ -164,6 +164,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Enfriamiento tras una caída (evita dobles alarmas) | `enfriamiento_caida_s` | `15` |
 | Duración máxima del beep continuo de caída | `duracion_alarma_caida_s` | `60` |
 | Pines HC-SR04 | `pin_echo` / `pin_trigger` | `23` / `18` |
+| Chip lgpio del encabezado (None = autodetectar) | `chip_lgpio` | `None` |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
@@ -225,6 +226,12 @@ La velocidad de giro es **positiva hacia la derecha** y se proyecta
 sobre la vertical (funciona con el módulo plano, de canto o invertido).
 Si al girar a la derecha la velocidad sale negativa, cambia
 `signo_derecha` de `1` a `-1` en `guia/configuracion.py`.
+
+Si el HC-SR04 no devuelve eco, la consola avisa `AVISO HC-SR04: sin
+eco (revisa VCC, GND, ECHO y TRIG)` — **la guia sigue funcionando**
+solo sin pitidos de proximidad (antes ese bloqueo congelaba todo el
+sistema esperando el eco). Al reconectarlo aparece
+`HC-SR04: eco recuperado (NN cm)`.
 
 ---
 

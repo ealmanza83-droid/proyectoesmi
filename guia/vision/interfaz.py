@@ -42,7 +42,7 @@ class VentanaDiagnostico:
         self,
         frame,
         *,
-        distancia_cm: float,
+        distancia_cm: float | None,
         estado: Estado,
         detalle: str = "",
         ubicacion: str | None = None,
@@ -52,8 +52,13 @@ class VentanaDiagnostico:
         if not self._activa:
             return 0
 
+        if distancia_cm is None:
+            texto_distancia = "Distancia: sin eco"
+        else:
+            texto_distancia = f"Distancia: {distancia_cm:.1f} cm"
+
         lineas = [
-            (f"Distancia: {distancia_cm:.1f} cm", 30, (0, 255, 255)),
+            (texto_distancia, 30, (0, 255, 255)),
             (estado.etiqueta, 60, (255, 255, 255)),
         ]
         if detalle:

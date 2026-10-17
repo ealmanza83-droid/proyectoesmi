@@ -134,6 +134,9 @@ class Microfono:
                 device=dispositivo,
                 dtype="int16",
                 channels=1,
+                # Latencia holgada: con la carga de YOLO y la camara,
+                # buffers cortos provocaban "MIC: input overflow".
+                latency="high",
                 callback=self._capturar_audio,
             ):
                 print("MICROFONO OK")

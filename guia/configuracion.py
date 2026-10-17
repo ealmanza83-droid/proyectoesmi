@@ -84,7 +84,9 @@ class Configuracion:
     # ------------------------------------------------------------------
     # HC-SR04 (alerta de proximidad)
     # ------------------------------------------------------------------
-    chip_gpio: int = 15
+    # Numero de chip lgpio del encabezado GPIO; en la Pi 5 suele ser el
+    # 0 o el 4.  ``None`` = autodetectar reclamando los pines.
+    chip_lgpio: int | None = None
     pin_echo: int = 23
     pin_trigger: int = 18
     distancia_maxima_m: float = 4.0
