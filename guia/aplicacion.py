@@ -101,6 +101,8 @@ class Aplicacion:
         self._instruccion_encarar_dada = False
         self._rumbo_al_caminar = 0.0
         self._ultima_alerta_desvio: float | None = None
+        self._pasos_acreditados = 0
+        self._pasos_previos = 0
 
         # Busqueda de senal
         self._intento = 0
@@ -499,7 +501,7 @@ class Aplicacion:
         else:
             # Segunda vez sin senal: cambiar de lugar y reintentar.
             self.estado = Estado.CINCO_PASOS
-            self.pasos.reiniciar()
+            self._empezar_a_caminar()
             self._hablar(
                 f"No encontré la señal. Camina {self.config.pasos_objetivo} pasos."
             )
@@ -517,8 +519,9 @@ class Aplicacion:
 
     def _en_cinco_pasos(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.pasos_objetivo
-        dados = self.pasos.avanzar()
+        dados = self._creditar_pasos()
         self._etiqueta = f"Caminando - {dados}/{objetivo} pasos"
+        self._vigilar_desvio()
 
         if dados >= objetivo:
             self._hablar(
@@ -553,11 +556,7 @@ class Aplicacion:
             if self._instruccion_actual.es_giro:
                 self.giro.reiniciar()
             else:
-                self.pasos.reiniciar()
-                # Punto de partida de la linea recta: a partir de aqui
-                # el rumbo no deberia moverse mientras camina.
-                self._rumbo_al_caminar = self.rumbo.grados
-                self._ultima_alerta_desvio = None
+                self._empezar_a_caminar()
 
         instruccion = self._instruccion_actual
 
@@ -573,12 +572,47 @@ class Aplicacion:
                 self._instruccion_actual = None
 
         elif instruccion.es_pasos:
-            dados = self.pasos.avanzar()
+            dados = self._creditar_pasos()
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
             self._vigilar_desvio()
             if dados >= instruccion.cantidad:
                 self._hablar("Pasos completados. Puedes parar.")
                 self._instruccion_actual = None
+
+    def _empezar_a_caminar(self) -> None:
+        """Reinicia el tramo a pie: pasos, rumbo de partida y avisos."""
+        self.pasos.reiniciar()
+        # La referencia de la linea recta se fija con el primer paso
+        # (ver _creditar_pasos): el residuo del giro anterior, la
+        # reaccion al "ya giraste, puedes parar", no debe contaminarla.
+        self._rumbo_al_caminar = self.rumbo.grados
+        self._ultima_alerta_desvio = None
+        self._pasos_previos = 0
+        self._pasos_acreditados = 0
+
+    def _creditar_pasos(self) -> int:
+        """Pasos que cuentan hacia el tramo: solo los dados rectos.
+
+        La ruta esta medida en linea recta: un paso dado mientras la
+        persona esta desviada no la acerca al sitio medido (la curva
+        alarga el recorrido), asi que no se acredita.  Cuando
+        enderece, los pasos vuelven a contar.
+        """
+        crudos = self.pasos.avanzar()
+        nuevos = crudos - self._pasos_previos
+        self._pasos_previos = crudos
+
+        if crudos == 0:
+            # Aun no ha pisado: mientras gira por inercia la referencia
+            # sigue su rumbo.  El primer paso la bloquea.
+            self._rumbo_al_caminar = self.rumbo.grados
+        else:
+            desvio = abs(self.rumbo.grados - self._rumbo_al_caminar)
+            if desvio < self.config.desvio_maximo_grados:
+                self._pasos_acreditados += nuevos
+            elif nuevos:
+                print(f"PASO SIN CREDITO: desviado {desvio:.0f} grados")
+        return self._pasos_acreditados
 
     def _vigilar_desvio(self) -> None:
         """Avisa si al caminar se aparta de la linea recta.
@@ -607,7 +641,8 @@ class Aplicacion:
         print(f"DESVIO: {desvio:+.1f} grados respecto de la recta")
         self._hablar(
             f"Te estás desviando de la línea recta. Gira {grados} "
-            f"grados a la {sentido} para seguir derecho."
+            f"grados a la {sentido} para seguir derecho. Mientras no "
+            "endereces, los pasos no cuentan."
         )
 
     def _anunciar_instruccion(self, instruccion: Instruccion) -> None:

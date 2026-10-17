@@ -261,11 +261,16 @@ acumula más giro que `desvio_maximo_grados` (25° por defecto) respecto
 del punto donde empezó a caminar, va curvando y los pasos no
 llegarían al sitio medido. En ese caso avisa **una vez** (y como
 máximo cada `enfriamiento_desvio_s`): *"Te estás desviando de la
-línea recta. Gira 30 grados a la izquierda para seguir derecho."* —
-con el lado de la corrección calculado al revés del desvío.
+línea recta. Gira 30 grados a la izquierda para seguir derecho.
+Mientras no endereces, los pasos no cuentan."* — con el lado de la
+corrección calculado al revés del desvío.
 
-Los pasos seguirán contando; la corrección recoloca la persona sobre
-la recta sin perder el tramo.
+Y no es solo un aviso: **los pasos dados mientras está desviado no se
+acreditan**. El sensor sigue contando la marcha a ciegas, pero el
+tramo solo avanza con pasos rectos — si no, el sistema daría por
+"completos" los 6 pasos caminando en curva y diría que has llegado a
+un sitio que está en otro. Al enderezar (volver al rumbo de partida
+más menos 25°), los pasos vuelven a contar y el tramo sigue.
 
 ### Alertas de seguridad
 

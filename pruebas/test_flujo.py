@@ -716,6 +716,45 @@ def test_encarada_y_desvio() -> None:
         "pide corregir al lado contrario (desvio a la derecha)",
     )
 
+    # Sigue desviado y caminando: el sensor cuenta pasos crudos, pero
+    # NO se acreditan (la ruta medida es en linea recta).
+    locutor.frases.clear()
+    for i in range(8):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.pasos.avanzar() > 2,
+        "el sensor sigue marcando pasos crudos",
+    )
+    comprobar(
+        not any("Pasos completados" in frase for frase in locutor.frases),
+        "no da por completos los pasos dados desviado",
+    )
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "el tramo sigue abierto",
+    )
+
+    # Endereza (gira al lado contrario hasta la recta) y entonces si
+    # vuelven a contar.
+    mpu.gz = 60.0
+    for _ in range(14):
+        paso(aplicacion, detector, mpu)
+    mpu.gz = 0.0
+    for i in range(60):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+        if aplicacion.estado is Estado.ESPERANDO_DESTINO:
+            break
+    comprobar(
+        any("Pasos completados" in frase for frase in locutor.frases),
+        "tras enderezar los pasos vuelven a contar",
+    )
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO,
+        "completa el tramo y llega al bano",
+    )
+
 
 def main() -> int:
     # Salida legible con acentos en Windows.
