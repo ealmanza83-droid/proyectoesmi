@@ -35,6 +35,11 @@ from .vision.interfaz import TECLA_SALIR, VentanaDiagnostico
 # Enfoque de busqueda: girar, mirar, media vuelta, mirar, 5 pasos.
 MAX_INTENTOS_DESDE_GIRO = 2
 
+# Cada cuantos segundos se avisa por consola el avance del giro.
+# Sirve para diagnosticar en el Raspberry (consola) si la velocidad
+# de giro tiene el signo correcto o si el giro esta atascado en cero.
+AVISO_GIRO_S = 1.0
+
 
 class Aplicacion:
     """Ciclo de vida completo del asistente de orientacion."""
@@ -98,6 +103,7 @@ class Aplicacion:
         self._en_pausa = False
 
         self._etiqueta = ""
+        self._ultimo_aviso_giro = 0.0
         self._ventana = ventana or VentanaDiagnostico()
 
         self._manejadores: dict[Estado, Callable[["Aplicacion", ResultadoVision], None]] = {
@@ -131,6 +137,8 @@ class Aplicacion:
                 f"Gira {self.config.grados_giro_inicial} grados a la derecha "
                 "suavemente para buscar la señal orientadora."
             )
+            # Mientras se manipulaba el equipo no se miran caidas.
+            self.caida.reiniciar_gracia()
             self._bucle()
         except KeyboardInterrupt:
             print()
@@ -346,6 +354,23 @@ class Aplicacion:
             "Caida detectada. Di silencia cuando te hayas levantado.",
         )
 
+    def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> None:
+        """Etiqueta de diagnostico y aviso de consola del giro.
+
+        La consola muestra los grados acumulados y la velocidad de giro
+        actual (positiva = derecha).  Si al girar a la derecha la
+        velocidad sale negativa, el ``signo_derecha`` esta invertido.
+        """
+        self._etiqueta = f"Giro {sentido}: {angulo:.1f}/{objetivo} grados"
+        ahora = time.monotonic()
+        if ahora - self._ultimo_aviso_giro >= AVISO_GIRO_S:
+            self._ultimo_aviso_giro = ahora
+            velocidad = self.giro.velocidad_derecha
+            print(
+                f"GIRO {sentido}: {angulo:.1f}/{objetivo} grados"
+                f" | vel {velocidad:+.1f} dps"
+            )
+
     # ------------------------------------------------------------------
     # Manejadores de estado
     # ------------------------------------------------------------------
@@ -359,7 +384,7 @@ class Aplicacion:
     def _en_giro_inicial(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.grados_giro_inicial
         angulo = self.giro.avanzar(derecha=True)
-        self._etiqueta = f"Giro derecha: {angulo:.1f}/{objetivo} grados"
+        self._mostrar_giro("derecha", angulo, objetivo)
 
         if angulo >= objetivo:
             self._iniciar_busqueda(intento=1)
@@ -400,7 +425,7 @@ class Aplicacion:
     def _en_media_vuelta(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.grados_media_vuelta
         angulo = self.giro.avanzar(derecha=False)
-        self._etiqueta = f"Media vuelta: {angulo:.1f}/{objetivo} grados"
+        self._mostrar_giro("izquierda", angulo, objetivo)
 
         if angulo >= objetivo:
             self._iniciar_busqueda(intento=2)
@@ -451,7 +476,7 @@ class Aplicacion:
             derecha = instruccion.accion is Accion.GIRAR_DERECHA
             sentido = "derecha" if derecha else "izquierda"
             angulo = self.giro.avanzar(derecha=derecha)
-            self._etiqueta = f"Giro {sentido}: {angulo:.1f}/{instruccion.cantidad} grados"
+            self._mostrar_giro(sentido, angulo, float(instruccion.cantidad))
             if angulo >= instruccion.cantidad:
                 self._instruccion_actual = None
 

@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 
 import cv2
+import numpy as np
 from ultralytics import YOLO
 
 from ..configuracion import Configuracion
@@ -99,6 +100,23 @@ class DetectorVisual:
         self._ultimo_aviso: dict[str, float] = {}
         self._modelo = YOLO(str(config.ruta_modelo), task="detect")
         print("YOLO OK")
+        self._precalentar()
+
+    def _precalentar(self) -> None:
+        """Carga NCNN y hace una inferencia de prueba al arrancar.
+
+        Sin esto la *primera* llamada a ``analizar`` tarda varios
+        segundos (carga del modelo NCNN + calentamiento) y bloquea el
+        bucle principal justo cuando la persona esta girando.
+        """
+        try:
+            frame_negro = np.zeros(
+                (self._config.alto, self._config.ancho, 3), dtype=np.uint8
+            )
+            self._modelo(frame_negro, conf=self._config.confianza_minima, verbose=False)
+            print("YOLO CALIENTE")
+        except Exception as error:
+            print("AVISO YOLO (precalentamiento):", error)
 
     # ------------------------------------------------------------------
     # Analisis

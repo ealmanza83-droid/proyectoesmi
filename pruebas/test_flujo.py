@@ -14,6 +14,7 @@ Se ejecutan los cuatro pasos clave del asistente:
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import queue
 import sys
@@ -286,8 +287,12 @@ def test_flujo_completo() -> None:
     locutor = LocutorFalso()
     microfono = MicrofonoFalso()
 
+    # Sin gracia de arranque: en el ensayo todo ocurre en menos de un
+    # segundo y la prueba debe poder detectar la caida de inmediato.
+    config = dataclasses.replace(Configuracion(), gracia_caida_s=0.0)
+
     aplicacion = Aplicacion(
-        config=Configuracion(),
+        config=config,
         camara=CamaraFalsa(),
         mpu=mpu,
         sensor=SensorFalso(),
@@ -300,9 +305,12 @@ def test_flujo_completo() -> None:
     )
 
     # --- 3.1 Giro inicial de 90 grados -----------------------------
+    # Con el sensor plano (az=+1), girar a la derecha deja gz negativo
+    # (regla de la mano derecha); la velocidad de giro se proyecta y
+    # el signo lo convierte en positivo hacia la derecha.
     microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)  # lo hace ejecutar()
     aplicacion.giro.reiniciar()
-    mpu.gz = 100.0  # giro a derecha sostenido
+    mpu.gz = -100.0  # giro a derecha sostenido
     for _ in range(15):
         paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.BUSCAR_SENAL, "giro de 90 grados completado")
@@ -328,7 +336,7 @@ def test_flujo_completo() -> None:
     comprobar(microfono.modo is ModoMicrofono.DESPERTADOR, "sigue escuchando ordenes")
 
     # --- 3.4 Giro de la ruta (izquierda 90 grados) -----------------
-    mpu.gz = -100.0
+    mpu.gz = 100.0  # a la izquierda, gz del lado opuesto
     for _ in range(15):
         paso(aplicacion, detector, mpu)
     comprobar(
@@ -337,10 +345,12 @@ def test_flujo_completo() -> None:
         "giro de la ruta completado, sigue caminar",
     )
 
-    # --- 3.5 Camina los 6 pasos del tramo --------------------------
+    # --- 3.5 Camina los pasos del tramo ----------------------------
+    # Al caminar la magnitud *oscila* (pico, reposo, pico...): el
+    # contador la detecta por cruce de la linea base, no por nivel.
     mpu.gz = 0.0
-    mpu.az = 1.5  # picos de aceleracion al caminar
-    for _ in range(60):
+    for i in range(80):
+        mpu.az = 1.6 if i % 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is Estado.ESPERANDO_DESTINO:
             break
@@ -353,8 +363,16 @@ def test_flujo_completo() -> None:
     comprobar("¿A dónde quieres ir?" in locutor.frases, "vuelve a preguntar destino")
 
     # --- 3.7 Caida: alarma constante y orden para apagarla ---------
+    # El golpe tiene que durar varias muestras seguidas: un glitch
+    # aislado del I2C no debe bastar para alarmar.
     mpu.az = 4.0  # golpe brusco contra el suelo
     paso(aplicacion, detector, mpu)
+    comprobar(
+        not aplicacion.alarma.alarma_activa,
+        "un solo sample de golpe no dispara la alarma (glitch I2C)",
+    )
+    for _ in range(2):
+        paso(aplicacion, detector, mpu)
     comprobar(aplicacion.alarma.alarma_activa, "la caida enciende la alarma continua")
     comprobar(
         any("Caida detectada" in frase for frase in locutor.frases),
@@ -401,8 +419,9 @@ def test_giro_integra_velocidad_angular() -> None:
     mpu = MPUFalso()
     dt = config.intervalo_muestreo_mpu_s  # 0.01 s (100 Hz)
 
-    # Giro sostenido de 90 dps durante 1.1 s -> mas de 90 grados.
-    mpu.gz = 90.0
+    # Giro sostenido a la derecha (gz negativo con el sensor plano)
+    # de 90 dps durante 1.1 s -> mas de 90 grados.
+    mpu.gz = -90.0
     for _ in range(110):
         giro.en_muestra(mpu.leer(), dt)
     comprobar(
@@ -413,17 +432,21 @@ def test_giro_integra_velocidad_angular() -> None:
         giro.avanzar(derecha=False) == 0.0,
         "el giro a la derecha no suma en el contador izquierdo",
     )
+    comprobar(
+        giro.velocidad_derecha > 0.0,
+        "al girar a la derecha la velocidad de giro es positiva",
+    )
 
-    # En reposo (gz ~ offset) no se acumula angulo.
+    # En reposo no se acumula angulo.
     giro.reiniciar()
-    mpu.gz = config.offset_giroscopio
+    mpu.gz = 0.0
     for _ in range(500):
         giro.en_muestra(mpu.leer(), dt)
     comprobar(giro.avanzar(derecha=True) == 0.0, "en reposo no se acumulan grados")
 
     # Giro lento pero continuo: 10 dps durante 12 s -> 120 grados.
     giro.reiniciar()
-    mpu.gz = config.offset_giroscopio + 10.0
+    mpu.gz = -(config.offset_giroscopio + 10.0)
     for _ in range(1200):
         giro.en_muestra(mpu.leer(), dt)
     comprobar(
@@ -431,10 +454,23 @@ def test_giro_integra_velocidad_angular() -> None:
         "un giro lento (10 dps) tambien completa el objetivo",
     )
 
+    # El modulo no esta obligado a ir plano: con el sensor de canto
+    # (aceleracion sobre X) la rotacion se mide igual, porque la
+    # velocidad se proyecta sobre la vertical.
+    giro.reiniciar()
+    de_canto = LecturaMPU(1.0, 0.0, 0.0, -90.0, 0.0, 0.0)  # arriba = eje X
+    for _ in range(110):
+        giro.en_muestra(de_canto, dt)
+    comprobar(
+        giro.avanzar(derecha=True) >= 90.0,
+        "con el sensor de canto tambien mide el giro (proyeccion)",
+    )
+
 
 def test_deteccion_de_caida() -> None:
     print("\n[6] Caida: cambio brusco del acelerometro")
-    config = Configuracion()
+    # Sin gracia de arranque para poder probar la caida de inmediato.
+    config = dataclasses.replace(Configuracion(), gracia_caida_s=0.0)
     detector_caida = DetectorCaida(config)
     mpu = MPUFalso()
 
@@ -443,19 +479,52 @@ def test_deteccion_de_caida() -> None:
         detector_caida.en_muestra(mpu.leer(), dt=0.01)
     comprobar(not detector_caida.hay_caida, "en reposo no hay caida")
 
-    # Cambio brusco (golpe contra el suelo).
+    # Un glitch aislado del I2C (una sola muestra rara) no basta.
     mpu.az = 3.5
     detector_caida.en_muestra(mpu.leer(), dt=0.01)
-    comprobar(detector_caida.hay_caida, "un golpe brusco dispara la caida")
+    comprobar(
+        not detector_caida.hay_caida,
+        "una sola muestra rara no dispara la caida (glitch I2C)",
+    )
+
+    # El golpe se sostiene en las muestras siguientes: si es caida.
+    detector_caida.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(detector_caida.hay_caida, "un golpe real (varias muestras) dispara la caida")
 
     # Tras avisar, el enfriamiento evita repetir la alerta.
     detector_caida.reconocer()
     comprobar(not detector_caida.hay_caida, "al avisar se limpia el aviso")
     detector_caida.en_muestra(mpu.leer(), dt=0.01)
+    detector_caida.en_muestra(mpu.leer(), dt=0.01)
     comprobar(
         not detector_caida.hay_caida,
         "el enfriamiento evita alarmas repetidas por el mismo golpe",
     )
+
+
+def test_pasos_sin_fantasmas() -> None:
+    """El sensor sin calibrar no debe contar pasos fantasma."""
+    print("\n[9] Pasos: sin fantasma con el acelerometro sin calibrar")
+    config = Configuracion()
+    pasos = movimiento.ContadorPasos(config)
+    mpu = MPUFalso()
+
+    # El acelerometro sin calibrar se sostiene en 1.15 g: quieto no
+    # debe contar un paso cada 0.35 segundos para siempre.
+    mpu.az = 1.15
+    for _ in range(400):  # 4 segundos de reposo fingido
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        pasos.pasos == 0,
+        "con la magnitud alta sostenida no cuenta pasos fantasma",
+    )
+
+    # Al caminar la magnitud oscila (pico y reposo): ahi si cuenta.
+    pasos.reiniciar()
+    for i in range(400):
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(pasos.pasos >= 5, "al caminar si cuenta los pasos")
 
 
 def test_proximidad_se_acelera() -> None:
@@ -526,6 +595,7 @@ def main() -> int:
         test_deteccion_de_caida()
         test_proximidad_se_acelera()
         test_confirmacion_de_senal_tolerante()
+        test_pasos_sin_fantasmas()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

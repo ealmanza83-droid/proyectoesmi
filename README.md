@@ -155,9 +155,12 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
 | Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
 | Velocidad mínima para contar giro | `velocidad_minima_giro_dps` | `8.0` |
+| Delta de aceleración que vale como paso | `delta_paso_g` | `0.12` g sobre el reposo |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
 | Umbral de impacto para detectar caída | `umbral_caida_g` | `2.5` |
-| Cambio brusco de aceleración que delata una caída | `umbral_cambio_caida_g` | `1.2` |
+| Cambio brusco de aceleración que delata una caída | `umbral_cambio_caida_g` | `1.5` |
+| Muestras seguidas que confirman una caída (mata glitches I2C) | `muestras_caida_requeridas` | `2` |
+| Gracia al arrancar (ignora caidas mientras se manipula el equipo) | `gracia_caida_s` | `8` |
 | Enfriamiento tras una caída (evita dobles alarmas) | `enfriamiento_caida_s` | `15` |
 | Duración máxima del beep continuo de caída | `duracion_alarma_caida_s` | `60` |
 | Pines HC-SR04 | `pin_echo` / `pin_trigger` | `23` / `18` |
@@ -202,11 +205,26 @@ Palabra clave: **"Raspi"** (también "ras pi", "ras py").
 * **Caída**: si el acelerómetro cambia de forma brusca (impacto o salto
   grande respecto a hace un instante), el sistema anuncia *"Caida
   detectada"* y enciende un **beep continuo** (no intermitente) durante
-  60 s o hasta que la persona diga *"silencia"*.
+  60 s o hasta que la persona diga *"silencia"*. Para no alarmar por
+  nada, el cambio debe durar 2 muestras seguidas (un glitch del bus I2C
+  dura una sola lectura) y hay 8 s de gracia al arrancar, mientras se
+  manipula el equipo.
 * **Proximidad**: el ritmo de los pitidos del HC-SR04 **se acelera de
   forma continua** a medida que la persona se acerca al obstáculo
   (lineal entre 1.2 s de intervalo a 2 m y 0.1 s rozando el objeto).
   Si hay una alarma de caída en marcha, los pitidos se callan.
+
+### Diagnóstico por consola
+
+Mientras la persona gira, la consola imprime cada segundo una línea
+como::
+
+    GIRO derecha: 45.3/90 grados | vel +87.2 dps
+
+La velocidad de giro es **positiva hacia la derecha** y se proyecta
+sobre la vertical (funciona con el módulo plano, de canto o invertido).
+Si al girar a la derecha la velocidad sale negativa, cambia
+`signo_derecha` de `1` a `-1` en `guia/configuracion.py`.
 
 ---
 

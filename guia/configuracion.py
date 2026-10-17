@@ -55,16 +55,22 @@ class Configuracion:
     velocidad_minima_giro_dps: float = 8.0  # por debajo no es un giro
     velocidad_reposo_dps: float = 5.0       # rango en que se recalibra el sesgo
     constante_sesgo_s: float = 5.0          # lentitud del aprendizaje del sesgo
+    # La velocidad se proyecta sobre la vertical (montaje libre) y el
+    # signo lo da la fisica: +1 = derecha bien desde el principio.
+    # Si el giro sigue yendo al contador equivocado, cambia a -1.
     signo_derecha: int = 1
-    umbral_paso_g: float = 1.12
+    delta_paso_g: float = 0.12   # picos sobre el reposo que valen como paso
+    tau_reposo_paso_s: float = 2.0   # lentitud de la linea base del paso
     intervalo_paso_s: float = 0.35
 
     # ------------------------------------------------------------------
     # Deteccion de caidas (acelerometro)
     # ------------------------------------------------------------------
     umbral_caida_g: float = 2.5         # impacto: magnitud muy lejos de 1 g
-    umbral_cambio_caida_g: float = 1.2  # salto brusco respecto a un instante antes
+    umbral_cambio_caida_g: float = 1.5  # salto brusco respecto a un instante antes
     ventana_cambio_caida_s: float = 0.3 # margen de tiempo del "brusco"
+    muestras_caida_requeridas: int = 2  # muestras seguidas (mata glitches I2C)
+    gracia_caida_s: float = 8.0         # no mirar caidas mientras se manipula al arrancar
     enfriamiento_caida_s: float = 15.0  # una sola alerta por caida
     duracion_alarma_caida_s: float = 60.0  # beep constante maximo tras caer
 
