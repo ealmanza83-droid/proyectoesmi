@@ -233,6 +233,13 @@ solo sin pitidos de proximidad (antes ese bloqueo congelaba todo el
 sistema esperando el eco). Al reconectarlo aparece
 `HC-SR04: eco recuperado (NN cm)`.
 
+Si al arrancar aparece `AVISO HC-SR04: no se pudo usar el sensor`, la
+causa habitual son **permisos** sobre `/dev/gpiochip*`: comprueba
+`ls -l /dev/gpiochip*`, agrégate al grupo con
+`sudo usermod -aG gpio $USER` (luego cierra sesión o reinicia) o
+prueba una vez con `sudo venv/bin/python main.py`. El sensor inoperante
+**nunca detiene la guía**: solo se quedan sin pitidos.
+
 ---
 
 ## Decisiones de diseño

@@ -56,14 +56,7 @@ class SensorUltrasonico:
     """Distancia al obstaculo frontal, en centimetros (hilo propio)."""
 
     def __init__(self, config: Configuracion):
-        try:
-            import lgpio
-        except ImportError as error:
-            raise RuntimeError(
-                "Falta la libreria lgpio: sudo apt install python3-lgpio"
-            ) from error
-
-        self._lgpio = lgpio
+        self._lgpio = None
         self._trigger = config.pin_trigger
         self._echo = config.pin_echo
         self._distancia_alerta_cm = config.distancia_alerta_cm
@@ -71,12 +64,29 @@ class SensorUltrasonico:
         self._aviso_pendiente = True
         self._ultimo_aviso = 0.0
         self._detener = threading.Event()
-        self._manejo = self._abrir(config.chip_lgpio)
+        self._manejo = None
+        self._hilo: threading.Thread | None = None
 
-        self._hilo = threading.Thread(
-            target=self._bucle, name="hc-sr04", daemon=True
-        )
-        self._hilo.start()
+        try:
+            import lgpio
+
+            self._lgpio = lgpio
+        except ImportError:
+            print(
+                "AVISO HC-SR04: falta la libreria lgpio "
+                "(sudo apt install python3-lgpio). La guia sigue sin pitidos."
+            )
+
+        if self._lgpio is not None:
+            self._manejo = self._abrir(config.chip_lgpio)
+
+        # Un sensor ausente o mal conectado no puede tumbar la guia:
+        # la orientacion y la camara siguen funcionando sin pitidos.
+        if self._manejo is not None:
+            self._hilo = threading.Thread(
+                target=self._bucle, name="hc-sr04", daemon=True
+            )
+            self._hilo.start()
 
     # ------------------------------------------------------------------
     # Arranque del GPIO
@@ -112,10 +122,20 @@ class SensorUltrasonico:
             print(f"HC-SR04 OK (chip lgpio {numero})")
             return manejo
 
-        raise RuntimeError(
-            f"HC-SR04: no se pudieron reclamar los pines TRIG={self._trigger} "
-            f"ECHO={self._echo} (ultimo error: {ultimo_error})"
+        print(
+            f"AVISO HC-SR04: no se pudo usar el sensor (TRIG={self._trigger}, "
+            f"ECHO={self._echo}; ultimo error: {ultimo_error}). "
+            "La guia sigue funcionando, solo sin pitidos."
         )
+        if ultimo_error is not None and "gpiochip" in str(ultimo_error).lower():
+            print(
+                "Pista: ningun chip lgpio se pudo abrir; casi seguro son "
+                "permisos. Comprueba 'ls -l /dev/gpiochip*' y ejecuta "
+                "'sudo usermod -aG gpio $USER' (despues cierra sesion o "
+                "reinicia). Para probar sin cambiar nada: "
+                "'sudo venv/bin/python main.py'."
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Medicion
@@ -190,12 +210,14 @@ class SensorUltrasonico:
     def cerrar(self) -> None:
         """Detiene la medicion y libera los pines GPIO."""
         self._detener.set()
-        if self._hilo.is_alive():
+        if self._hilo is not None and self._hilo.is_alive():
             self._hilo.join(2.0)
-        try:
-            self._lgpio.gpiochip_close(self._manejo)
-        except Exception:
-            pass
+        if self._manejo is not None:
+            try:
+                self._lgpio.gpiochip_close(self._manejo)
+            except Exception:
+                pass
+            self._manejo = None
 
     def __enter__(self) -> "SensorUltrasonico":
         return self
