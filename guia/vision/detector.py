@@ -43,6 +43,51 @@ class ResultadoVision:
     """Obstaculos que conviene anunciar ahora (respeta el enfriamiento)."""
 
 
+class ConfirmadorSenal:
+    """Exige varias detecciones seguidas, tolerando parpadeos.
+
+    La camara y el modelo no aciertan en todos los frames: un frame
+    sin senal solo *frena* la racha, y el contador se reinicia cuando
+    se acumulan ``perdidas_senal_toleradas`` fallos seguidos.  Asi un
+    parpadeo puntual no obliga a empezar la confirmacion desde cero
+    (que era lo que hacia tardar demasiado en reconocer la senal).
+    """
+
+    def __init__(self, config: Configuracion):
+        self._requeridas = config.detecciones_senal_requeridas
+        self._toleradas = config.perdidas_senal_toleradas
+        self._clase_actual: str | None = None
+        self._racha = 0
+        self._perdidas = 0
+
+    def observar(self, senal_vista: str | None) -> str | None:
+        """Suma la observacion del frame y devuelve la zona o ``None``."""
+        if senal_vista is None:
+            if self._clase_actual is None:
+                return None
+            self._perdidas += 1
+            if self._perdidas > self._toleradas:
+                self.reiniciar()
+            return None
+
+        if senal_vista == self._clase_actual:
+            self._racha += 1
+        else:
+            self._clase_actual = senal_vista
+            self._racha = 1
+        self._perdidas = 0
+
+        if self._racha >= self._requeridas:
+            return lugar_de_senal(senal_vista)
+        return None
+
+    def reiniciar(self) -> None:
+        """Borra la racha (al cambiar de fase o tras perderla)."""
+        self._clase_actual = None
+        self._racha = 0
+        self._perdidas = 0
+
+
 class DetectorVisual:
     """Analiza frames y confirma senales sin falsos positivos."""
 
@@ -50,8 +95,7 @@ class DetectorVisual:
         self._config = config
         self._senales = SENALES_ORIENTADORAS
         self._objetos = OBJETOS_PERMITIDOS
-        self._clase_actual: str | None = None
-        self._racha = 0
+        self._confirmador = ConfirmadorSenal(config)
         self._ultimo_aviso: dict[str, float] = {}
         self._modelo = YOLO(str(config.ruta_modelo), task="detect")
         print("YOLO OK")
@@ -103,31 +147,13 @@ class DetectorVisual:
 
         return ResultadoVision(
             detecciones=tuple(detecciones),
-            senal=self._confirmar_senal(senal_vista),
+            senal=self._confirmador.observar(senal_vista),
             obstaculos=tuple(obstaculos),
         )
 
-    def _confirmar_senal(self, senal_vista: str | None) -> str | None:
-        """Pide varias detecciones seguidas para evitar parpadeos."""
-        if senal_vista is None:
-            self._clase_actual = None
-            self._racha = 0
-            return None
-
-        if senal_vista == self._clase_actual:
-            self._racha += 1
-        else:
-            self._clase_actual = senal_vista
-            self._racha = 1
-
-        if self._racha >= self._config.detecciones_senal_requeridas:
-            return lugar_de_senal(senal_vista)
-        return None
-
     def reiniciar_confirmacion(self) -> None:
         """Borra la racha de detecciones (al cambiar de fase)."""
-        self._clase_actual = None
-        self._racha = 0
+        self._confirmador.reiniciar()
 
 
 def dibujar_detecciones(frame, resultado: ResultadoVision) -> None:

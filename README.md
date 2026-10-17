@@ -89,13 +89,47 @@ pip install -r requirements.txt     # ultralytics, piper-tts, vosk, sounddevice.
 
 ## Ejecución
 
+### Desde la consola (recomendado en la Raspberry Pi)
+
+El `venv` **se crea en la Pi y dentro del proyecto**. Si copiaste la
+carpeta desde Windows, borra el `venv` anterior: los entornos de
+Windows tienen `Scripts/` en vez de `bin/` y no funcionan en Linux.
+
 ```bash
+cd ~/proyectoesmi                # la carpeta del proyecto
+
+rm -rf venv                      # solo si el venv vino de Windows
+python3 -m venv --system-site-packages venv
+source venv/bin/activate         # activa el entorno (aparece (venv) en la consola)
+
+pip install -r requirements.txt
+
 python main.py
 ```
+
+> `--system-site-packages` es importante: hace que el entorno vea
+> `picamera2` y `opencv` instalados con `apt` (si no, fallará con
+> `ModuleNotFoundError: No module named 'picamera2'`).
+
+Si al activar te dice `bash: venv/bin/activate: No such file or directory`
+o `bad interpreter`, ese `venv` es de Windows: ejecuta `rm -rf venv` y
+vuelve a crearlo con el comando de arriba.
+
+Para salir del entorno: `deactivate`.
 
 * `Escape` cierra el programa (también funciona `Ctrl+C`).
 * La ventana *"Sistema de Orientacion"* muestra distancia, estado,
   ubicación y destino (solo diagnóstico: el usuario trabaja por audio).
+
+### Desde Thonny
+
+Thonny puede usar el mismo entorno: **Herramientas → Opciones →
+Intérprete**, y en "Intérprete alternativo de Python" indica la ruta
+del Python del entorno, por ejemplo:
+
+```
+/home/pi/proyectoesmi/venv/bin/python
+```
 
 ### Prueba sin hardware
 
@@ -103,7 +137,8 @@ python main.py
 python pruebas/test_flujo.py
 ```
 
-Comprueba comandos de voz, planificación de rutas y el flujo completo
+Comprueba comandos de voz, planificación de rutas, giro por
+integración, caídas, proximidad y el flujo completo
 (giro → señal → destino → navegación → llegada) con sensores simulados.
 
 ---
@@ -114,9 +149,10 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 
 | Qué | Parámetro | Valor por defecto |
 |-----|-----------|-------------------|
-| Confianza mínima de YOLO | `confianza_minima` | `0.75` |
-| Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
+| Confianza mínima de YOLO | `confianza_minima` | `0.60` |
 | Detecciones seguidas para confirmar una señal | `detecciones_senal_requeridas` | `3` |
+| Frames perdidos tolerados antes de reiniciar la confirmación | `perdidas_senal_toleradas` | `2` |
+| Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
 | Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
 | Velocidad mínima para contar giro | `velocidad_minima_giro_dps` | `8.0` |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |

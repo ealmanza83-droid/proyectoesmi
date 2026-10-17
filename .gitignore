@@ -1,19 +1,28 @@
-
-# Archivo ZIP que no quiero subir
-mi_deteccion-20260802T041618Z-1-001.zip
-
-# Archivo ZIP comprimido del proyecto
-Proyectoesmi.zip
-
-# Entorno virtual de Python
+# Entornos virtuales: se crean en cada equipo (el de Windows no sirve
+# en Linux, asi que jamas deben subirse al repositorio).
 venv/
+.venv/
+env/
+
+# Archivos ZIP (copias de seguridad que no viajan al repo)
+mi_deteccion-20260802T041618Z-1-001.zip
+Proyectoesmi.zip
+*.zip
 
 # Archivos temporales de Python
 __pycache__/
 *.py[cod]
 *.log
+*.egg-info/
+
+# Audios generados en tiempo de ejecucion
+*.wav
 
 # Variables de entorno y credenciales
 .env
 .env.*
 !.env.example
+
+# Sistema
+.DS_Store
+Thumbs.db

@@ -24,8 +24,9 @@ class Configuracion:
     # ------------------------------------------------------------------
     ancho: int = 640
     alto: int = 480
-    confianza_minima: float = 0.75
+    confianza_minima: float = 0.60
     detecciones_senal_requeridas: int = 3
+    perdidas_senal_toleradas: int = 2
     enfriamiento_objeto_s: float = 4.0
     tiempo_busqueda_s: float = 60.0
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"

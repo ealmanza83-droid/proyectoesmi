@@ -107,7 +107,7 @@ from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
-from guia.vision.detector import ResultadoVision  # noqa: E402
+from guia.vision.detector import ConfirmadorSenal, ResultadoVision  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -471,6 +471,44 @@ def test_proximidad_se_acelera() -> None:
     )
 
 
+def test_confirmacion_de_senal_tolerante() -> None:
+    """Un frame perdido no debe reiniciar la confirmacion de la senal."""
+    print("\n[8] Senal: la confirmacion tolera parpadeos de la camara")
+    config = Configuracion()
+    confirmador = ConfirmadorSenal(config)
+
+    # Patron con parpadeos: detecta, falla, detecta, falla, detecta...
+    # (antes el primer fallo borraba la racha y casi nunca se confirmaba).
+    confirmador.observar("cow")
+    confirmador.observar(None)   # frame perdido
+    confirmador.observar("cow")
+    confirmador.observar(None)   # frame perdido
+    confirmador.observar("cow")
+    comprobar(
+        confirmador.observar("cow") == "Inicio",
+        "confirma con parpadeos intercalados",
+    )
+
+    # Demasiados fallos seguidos si reinician todo.
+    confirmador.reiniciar()
+    confirmador.observar("zebra")
+    for _ in range(config.perdidas_senal_toleradas + 1):
+        confirmador.observar(None)
+    comprobar(
+        confirmador.observar("zebra") is None,
+        "tras perder mas frames de los tolerados, empieza de cero",
+    )
+
+    # Senal distinta a la mitad: cuenta como cambio, no como racha.
+    confirmador.reiniciar()
+    confirmador.observar("cow")
+    confirmador.observar("cow")
+    comprobar(
+        confirmador.observar("giraffe") is None,
+        "cambiar de senal reinicia la cuenta",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -487,6 +525,7 @@ def main() -> int:
         test_giro_integra_velocidad_angular()
         test_deteccion_de_caida()
         test_proximidad_se_acelera()
+        test_confirmacion_de_senal_tolerante()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1
