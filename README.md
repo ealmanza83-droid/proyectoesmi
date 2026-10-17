@@ -244,17 +244,28 @@ Si al girar a la derecha la velocidad sale negativa, cambia
 `signo_derecha` de `1` a `-1` en `guia/configuracion.py`.
 
 Si el HC-SR04 no devuelve eco, la consola avisa `AVISO HC-SR04: sin
-eco (revisa VCC, GND, ECHO y TRIG)` — **la guia sigue funcionando**
-solo sin pitidos de proximidad (antes ese bloqueo congelaba todo el
-sistema esperando el eco). Al reconectarlo aparece
+eco usando el chip lgpio N (pinctrl-rp1, 54 lineas)` — **la guia sigue
+funcionando** solo sin pitidos de proximidad (antes ese bloqueo congelaba
+todo el sistema esperando el eco). Al reconectarlo aparece
 `HC-SR04: eco recuperado (NN cm)`.
 
+El chip GPIO se elige **por su etiqueta**: los pines de la cabecera
+están siempre en el chip `pinctrl-*` (`pinctrl-rp1` en la Pi 5,
+`pinctrl-bcm2711` en la Pi 4). Los demás chips (`gpio-brcmstb`, etc.)
+dejan reclamar líneas sin error pero **no van al conector**, así que se
+descartan: si el sistema usara otro chip, el pulso de TRIG no llegaría
+al sensor y nunca habría eco.
+
 Si al arrancar aparece `AVISO HC-SR04: no se pudo usar el sensor`, la
-causa habitual son **permisos** sobre `/dev/gpiochip*`: comprueba
+consola indica el motivo exacto y la etiqueta de cada chip. Las causas
+habituales son **permisos** sobre `/dev/gpiochip*` (comprueba
 `ls -l /dev/gpiochip*`, agrégate al grupo con
-`sudo usermod -aG gpio $USER` (luego cierra sesión o reinicia) o
-prueba una vez con `sudo venv/bin/python main.py`. El sensor inoperante
-**nunca detiene la guía**: solo se quedan sin pitidos.
+`sudo usermod -aG gpio $USER` y reinicia, o prueba una vez con
+`sudo venv/bin/python main.py`) o TRIG/ECHO ocupados. El sensor
+inoperante **nunca detiene la guía**: solo se quedan sin pitidos.
+Si el chip correcto está seleccionado y sigue sin haber eco, revisa el
+cableado: VCC→5V, GND→GND y ECHO con **divisor de voltaje** (el ECHO
+del HC-SR04 habla a 5V y el GPIO de la Raspberry Pi solo admite 3.3V).
 
 ---
 

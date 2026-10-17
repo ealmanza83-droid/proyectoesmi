@@ -67,6 +67,7 @@ class SensorUltrasonico:
         self._ultimo_aviso = 0.0
         self._detener = threading.Event()
         self._manejo = None
+        self._chip_info = "chip lgpio desconocido"
         self._hilo: threading.Thread | None = None
 
         try:
@@ -94,34 +95,81 @@ class SensorUltrasonico:
     # Arranque del GPIO
     # ------------------------------------------------------------------
     def _abrir(self, chip_preferido: int | None):
-        """Reclama los dos pines en el chip lgpio que los contenga.
+        """Reclama los dos pines en el chip de la cabecera GPIO.
 
-        El numero de chip del encabezado varia entre versiones del
-        sistema (en la Pi 5 suele ser el 0 o el 4), y un chip que no
-        contiene las lineas no falla al abrir: por eso se prueban en
-        orden *todos* los ``/dev/gpiochip*`` que existan.
+        En cada modelo de Raspberry Pi los pines del conector estan en
+        el chip cuya etiqueta empieza por "pinctrl" ("pinctrl-rp1" en
+        la Pi 5, "pinctrl-bcm2711" en la Pi 4, "pinctrl-bcm2835" en la
+        3).  Los demas chips dejan reclamar lineas sin error, pero no
+        van al conector: por eso el chip se identifica por su etiqueta
+        y los que no son "pinctrl" se descartan (ademas suelen controlar
+        el PCIe o el firmware, y tocarlos seria peligroso).
         """
         lgpio = self._lgpio
+        ultimo_error = "sin intentos: no hay chips gpio visibles"
 
         for numero in self._chips_candidatos(chip_preferido):
             try:
                 manejo = lgpio.gpiochip_open(numero)
-            except Exception:
+            except Exception as error:
+                ultimo_error = f"chip {numero}: no se pudo abrir ({error})"
                 continue
+
+            info = self._info_chip(manejo)
             try:
                 lgpio.gpio_claim_output(manejo, self._trigger, 0)
                 lgpio.gpio_claim_input(manejo, self._echo)
-            except Exception:
+            except Exception as error:
+                ultimo_error = f"chip {numero} ({info}): pines ocupados ({error})"
                 try:
                     lgpio.gpiochip_close(manejo)
                 except Exception:
                     pass
                 continue
-            print(f"HC-SR04 OK (chip lgpio {numero})")
-            return manejo
 
-        self._avisar_fallo_gpio()
+            if self._es_chip_cabecera(manejo):
+                self._chip_info = f"chip lgpio {numero} ({info})"
+                print(f"HC-SR04 OK ({self._chip_info})")
+                return manejo
+
+            # Lineas reclamadas, pero el chip no controla la cabecera:
+            # se libera y se sigue buscando el "pinctrl".
+            ultimo_error = (
+                f"chip {numero} ({info}): no es el de la cabecera (pinctrl)"
+            )
+            try:
+                lgpio.gpiochip_close(manejo)
+            except Exception:
+                pass
+
+        self._avisar_fallo_gpio(ultimo_error)
         return None
+
+    def _leer_info_chip(self, manejo):
+        """(lineas, nombre, etiqueta) del chip o ``None`` si no se puede."""
+        funcion = getattr(self._lgpio, "gpio_get_chip_info", None)
+        if funcion is None:
+            return None
+        try:
+            datos = funcion(manejo)
+            return int(datos[0]), str(datos[1]), str(datos[2])
+        except Exception:
+            return None
+
+    def _info_chip(self, manejo) -> str:
+        datos = self._leer_info_chip(manejo)
+        if datos is None:
+            return "etiqueta desconocida"
+        lineas, nombre, etiqueta = datos
+        return f"{etiqueta or nombre}, {lineas} lineas"
+
+    def _es_chip_cabecera(self, manejo) -> bool:
+        """El chip de la cabecera siempre se llama "pinctrl-*"."""
+        datos = self._leer_info_chip(manejo)
+        if datos is None:
+            # Sin etiqueta no se puede descartar: se acepta el chip.
+            return True
+        return "pinctrl" in datos[2].lower()
 
     def _chips_candidatos(self, chip_preferido: int | None):
         """Numeros de chip a probar: el preferido y todos los existentes."""
@@ -134,7 +182,7 @@ class SensorUltrasonico:
         lista = [chip_preferido, *sorted(encontrados), 0, 4]
         return dict.fromkeys(c for c in lista if c is not None)
 
-    def _avisar_fallo_gpio(self) -> None:
+    def _avisar_fallo_gpio(self, ultimo_error: str) -> None:
         """Diagnostico concreto: permisos, sistema o pines ocupados."""
         chips = sorted(glob.glob("/dev/gpiochip*"))
         legibles = [c for c in chips if os.access(c, os.R_OK | os.W_OK)]
@@ -143,10 +191,39 @@ class SensorUltrasonico:
             f"AVISO HC-SR04: no se pudo usar el sensor (TRIG={self._trigger}, "
             f"ECHO={self._echo}). La guia sigue funcionando, solo sin pitidos."
         )
+        print(f"Motivo: {ultimo_error}")
         print(
             f"Chips GPIO visibles: {chips or 'ninguno'} | "
             f"legibles para este usuario: {legibles or 'ninguno'}"
         )
+
+        # Etiqueta de cada chip: el de la cabecera se llama "pinctrl-*".
+        etiquetas = []
+        for ruta in chips:
+            try:
+                numero = int(ruta.rsplit("chip", 1)[1])
+            except ValueError:
+                continue
+            try:
+                manejo = self._lgpio.gpiochip_open(numero)
+            except Exception:
+                continue
+            try:
+                etiquetas.append(f"gpiochip{numero}: {self._info_chip(manejo)}")
+            finally:
+                try:
+                    self._lgpio.gpiochip_close(manejo)
+                except Exception:
+                    pass
+        if etiquetas:
+            print("Etiquetas: " + " | ".join(etiquetas))
+            if not any("pinctrl" in texto for texto in etiquetas):
+                print(
+                    "Ningun chip se llama 'pinctrl-*': el sistema no esta "
+                    "expuesto con la GPIO de la cabecera (revisa "
+                    "'sudo raspi-config' > Interfases > GPIO y reinstala "
+                    "'python3-lgpio')."
+                )
 
         if chips and not legibles:
             print(
@@ -163,8 +240,8 @@ class SensorUltrasonico:
             )
         else:
             print(
-                "Causa: los pines TRIG/ECHO no estan libres (revisa que "
-                "ningun otro programa los use) o el cableado del sensor."
+                "Causa: los pines TRIG/ECHO no estan libres en el chip de "
+                "la cabecera (revisa que ningun otro programa los use)."
             )
 
     # ------------------------------------------------------------------
@@ -221,7 +298,9 @@ class SensorUltrasonico:
             self._aviso_pendiente = True
             print("HC-SR04: se perdio el eco.")
         print(
-            "AVISO HC-SR04: sin eco (revisa VCC, GND, ECHO y TRIG). "
+            f"AVISO HC-SR04: sin eco usando el {self._chip_info}. "
+            "Revisa VCC (5V), GND, TRIG y ECHO (con divisor de voltaje: "
+            "el ECHO del sensor es de 5V y el GPIO solo admite 3.3V). "
             "La guia sigue funcionando, solo sin pitidos."
         )
 
