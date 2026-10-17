@@ -52,7 +52,7 @@ class Configuracion:
     registro_datos: int = 0x3B
     intervalo_muestreo_mpu_s: float = 0.01  # 100 muestras por segundo
     offset_giroscopio: float = 0.445992     # sesgo inicial (calibracion)
-    velocidad_minima_giro_dps: float = 8.0  # por debajo no es un giro
+    velocidad_minima_giro_dps: float = 5.0  # por debajo no es un giro (temblor)
     velocidad_reposo_dps: float = 5.0       # rango en que se recalibra el sesgo
     constante_sesgo_s: float = 5.0          # lentitud del aprendizaje del sesgo
     # La velocidad se proyecta sobre la vertical (montaje libre) y el

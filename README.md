@@ -154,7 +154,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Frames perdidos tolerados antes de reiniciar la confirmación | `perdidas_senal_toleradas` | `2` |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
 | Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
-| Velocidad mínima para contar giro | `velocidad_minima_giro_dps` | `8.0` |
+| Velocidad mínima para contar giro | `velocidad_minima_giro_dps` | `5.0` |
 | Delta de aceleración que vale como paso | `delta_paso_g` | `0.12` g sobre el reposo |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
 | Umbral de impacto para detectar caída | `umbral_caida_g` | `2.5` |

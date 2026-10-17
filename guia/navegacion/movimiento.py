@@ -22,9 +22,16 @@ import time
 from ..configuracion import Configuracion
 from ..hardware.mpu6050 import LecturaMPU, MPU6050
 
-# Tope del dt integrado: una parada del hilo no debe traducirse en un
-# salto enorme de grados.
-DT_MAXIMO_S = 0.1
+# Tope del dt integrado: protege contra paradas extremas del hilo (por
+# ejemplo un cuelgue del bus I2C).  Es generoso a proposito: si la
+# persona giro mientras el hilo estuvo atrasado, esos grados son
+# reales y hay que integrarlos (con un tope corto se perdia la mitad
+# del angulo cuando la CPU saturada retrasaba el muestreo).
+DT_MAXIMO_S = 1.0
+
+# Segundos de marcha antes de avisar por consola la tasa real de
+# muestreo (deberia rondar las 100 muestras por segundo).
+TASA_MPU_AVISO_S = 5.0
 
 # Por debajo de esta magnitud la aceleracion no sirve para saber donde
 # esta arriba (caida libre, muestras rotas): se usa el eje Z por defecto.
@@ -48,16 +55,25 @@ class MuestreadorMPU(threading.Thread):
 
     def run(self) -> None:
         anterior = time.monotonic()
+        inicio = anterior
+        muestras = 0
+        avisada_tasa = False
 
         while not self._detener.is_set():
             ahora = time.monotonic()
             dt = min(ahora - anterior, DT_MAXIMO_S)
             anterior = ahora
+            muestras += 1
 
             try:
                 self.muestrear(self._mpu.leer(), dt)
             except Exception as error:
                 print("ERROR MPU6050:", error)
+
+            if not avisada_tasa and ahora - inicio >= TASA_MPU_AVISO_S:
+                avisada_tasa = True
+                tasa = muestras / (ahora - inicio)
+                print(f"MPU: {tasa:.0f} muestras/seg")
 
             self._detener.wait(self._intervalo)
 
