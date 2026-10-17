@@ -182,14 +182,24 @@ OBJETOS_PERMITIDOS   = {"chair": "silla", "table": "mesa",
 
 ```python
 TRAMOS_DEMO = {
-    ("Inicio", "Sala"): TramoRuta(pasos=10, giros=("derecha",)),
-    ("Sala", "Baño"):   TramoRuta(pasos=6,  giros=("izquierda",)),
+    ("Inicio", "Sala"):  TramoRuta(pasos=10, giros=("derecha",)),
+    ("Sala", "Baño"):    TramoRuta(pasos=6,  giros=("izquierda",)),
+    ("Sala", "Cuarto"):  TramoRuta(pasos=8,  giros=("derecha",)),  # AJUSTAR
 }
 ```
 
-Añade aquí los tramos reales de tu casa; el planificador busca el camino
-más corto aunque la ruta sea de varios tramos (por ejemplo
-`Inicio → Sala → Baño`).
+Cada tramo se pone **en un solo sentido**; el planificador calcula
+solo el camino de vuelta con los mismos pasos y los giros espejados
+(recorrer al reves un pasillo recto: lo que fue girar a la derecha,
+de vuelta es girar a la izquierda).  Asi `Sala → Baño` implica
+tambien `Baño → Sala`, y el planificador busca el camino mas corto
+aunque la ruta cruce varios tramos (`Inicio → Sala → Baño`, y de
+vuelta `Baño → Sala → Inicio`).
+
+Para ajustar el mapa a tu casa, mide con el propio sistema: camina el
+tramo contando los pasos y anota el giro inicial; luego escribe esas
+medidas en `TRAMOS_DEMO` (el `Cuarto` viene con valores de ejemplo que
+hay que sustituir por los reales).
 
 ### Comandos de voz
 

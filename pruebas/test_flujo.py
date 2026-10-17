@@ -274,6 +274,26 @@ def test_planificacion_de_rutas() -> None:
 
     larga = planificador.planificar("Inicio", "Baño")
     comprobar(larga is not None and len(larga) == 5, "Inicio -> Baño cruza dos tramos")
+
+    # Cada tramo se puede recorrer al reves: mismos pasos y giros
+    # espejados (antes todas las rutas de vuelta decian 'no configurada').
+    vuelta = planificador.planificar("Baño", "Sala")
+    comprobar(
+        vuelta is not None
+        and vuelta[0].accion is Accion.GIRAR_DERECHA
+        and vuelta[1].cantidad == 6,
+        "Baño -> Sala: espejo del tramo (derecha, 6 pasos)",
+    )
+    comprobar(
+        planificador.planificar("Baño", "Inicio") is not None,
+        "Baño -> Inicio: ruta de dos tramos calculada",
+    )
+    comprobar(
+        planificador.planificar("Sala", "Cuarto") is not None
+        and planificador.planificar("Cuarto", "Sala") is not None,
+        "hay ruta a Cuarto en ambos sentidos",
+    )
+
     comprobar(planificador.planificar("Sala", "Cocina") is None, "sin ruta -> None")
     comprobar(planificador.planificar(None, "Sala") is None, "ubicacion desconocida -> None")
 

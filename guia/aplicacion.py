@@ -349,7 +349,7 @@ class Aplicacion:
     # ------------------------------------------------------------------
     def _anunciar_obstaculos(self, resultado: ResultadoVision) -> None:
         for nombre in resultado.obstaculos:
-            self._hablar(f"Alto, hay un {nombre}.")
+            self._hablar(f"Alto, hay un obstáculo: {nombre}.")
 
     def _vigilar_caida(self) -> None:
         """Si el acelerometro detecto una caida, alarma constante + voz.
