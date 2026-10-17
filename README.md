@@ -274,12 +274,23 @@ descartan: si el sistema usara otro chip, el pulso de TRIG no llegaría
 al sensor y nunca habría eco.
 
 Si al arrancar aparece `AVISO HC-SR04: no se pudo usar el sensor`, la
-consola indica el motivo exacto y la etiqueta de cada chip. Las causas
-habituales son **permisos** sobre `/dev/gpiochip*` (comprueba
-`ls -l /dev/gpiochip*`, agrégate al grupo con
+consola indica el motivo exacto y la etiqueta de cada chip. Para tener
+el diagnostico completo de una vez (kernel, chips, permisos, firma de
+lgpio y estado de ECHO) corre en la Pi:
+
+```bash
+cd ~/Proyectoesmi && source venv/bin/activate && git pull origin main
+python pruebas/diagnostico_gpio.py
+```
+
+Las causas habituales son **permisos** sobre `/dev/gpiochip*`
+(comprueba `ls -l /dev/gpiochip*`, agrégate al grupo con
 `sudo usermod -aG gpio $USER` y reinicia, o prueba una vez con
-`sudo venv/bin/python main.py`) o TRIG/ECHO ocupados. El sensor
-inoperante **nunca detiene la guía**: solo se quedan sin pitidos.
+`sudo venv/bin/python main.py`), TRIG/ECHO ocupados, o un **kernel sin
+la GPIO expuesta** (no aparece `pinctrl` en
+`sudo cat /sys/kernel/debug/gpio`: se arregla con
+`sudo apt full-upgrade && sudo reboot`). El sensor inoperante **nunca
+detiene la guía**: solo se quedan sin pitidos.
 Si el chip correcto está seleccionado y sigue sin haber eco, revisa el
 cableado: VCC→5V, GND→GND y ECHO con **divisor de voltaje** (el ECHO
 del HC-SR04 habla a 5V y el GPIO de la Raspberry Pi solo admite 3.3V).

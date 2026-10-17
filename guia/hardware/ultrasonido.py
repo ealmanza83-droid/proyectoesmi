@@ -117,10 +117,9 @@ class SensorUltrasonico:
 
             info = self._info_chip(manejo)
             try:
-                lgpio.gpio_claim_output(manejo, self._trigger, 0)
-                lgpio.gpio_claim_input(manejo, self._echo)
+                self._reclamar_pines(manejo)
             except Exception as error:
-                ultimo_error = f"chip {numero} ({info}): pines ocupados ({error})"
+                ultimo_error = f"chip {numero} ({info}): no se pudo reclamar ({error})"
                 try:
                     lgpio.gpiochip_close(manejo)
                 except Exception:
@@ -179,6 +178,57 @@ class SensorUltrasonico:
         if not etiqueta.strip():
             return True
         return "pinctrl" in etiqueta.lower()
+
+    def _orden_reclamo(self) -> str:
+        """Que firma usa ``lgpio.gpio_claim_*`` en esta instalacion.
+
+        Hay dos formas en circulacion: la del modulo C,
+        ``(manejo, flags, gpio)``, y la del envoltorio python,
+        ``(manejo, gpio, nivel)``.  Se distinguen por el nombre del
+        segundo parametro.  Un ``apt full-upgrade`` puede cambiar de
+        una a otra.
+        """
+        try:
+            import inspect
+
+            parametros = list(
+                inspect.signature(self._lgpio.gpio_claim_input).parameters
+            )
+        except Exception:
+            return "gpio"
+        if len(parametros) >= 3 and "flag" in parametros[1].lower():
+            return "flags"
+        return "gpio"
+
+    def _reclamar_pines(self, manejo) -> None:
+        """Reclama TRIG (salida) y ECHO (entrada) con la firma detectada.
+
+        Si la primera disposicion falla con ``TypeError`` se libera lo
+        reclamado y se prueba la otra, por si la deteccion no acerto.
+        """
+        lgpio = self._lgpio
+        ultimo_error: TypeError | None = None
+
+        for orden in (self._orden_reclamo(), None):
+            try:
+                if orden == "flags":
+                    lgpio.gpio_claim_output(manejo, 0, self._trigger, 0)
+                    lgpio.gpio_claim_input(manejo, 0, self._echo)
+                else:
+                    lgpio.gpio_claim_output(manejo, self._trigger, 0)
+                    lgpio.gpio_claim_input(manejo, self._echo)
+                return
+            except TypeError as error:
+                ultimo_error = error
+                # Se libera lo que pudo haberse reclamado mal (en el
+                # orden equivocado se coge la linea 0 por accidente).
+                for linea_gpio in (0, self._trigger, self._echo):
+                    try:
+                        lgpio.gpio_free(manejo, linea_gpio)
+                    except Exception:
+                        pass
+        assert ultimo_error is not None
+        raise ultimo_error
 
     def _chips_candidatos(self, chip_preferido: int | None):
         """Numeros de chip a probar: el preferido y todos los existentes."""
