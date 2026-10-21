@@ -203,6 +203,42 @@ def main() -> None:
             except Exception:
                 pass
 
+    _titulo("Resumen")
+    chips_info: list[tuple[int, int, str]] = []
+    for numero in _numeros_de_chips():
+        try:
+            manejo = lgpio.gpiochip_open(numero)
+        except Exception:
+            continue
+        try:
+            datos = lgpio.gpio_get_chip_info(manejo)
+            chips_info.append((numero, int(datos[0]), str(datos[2])))
+        except Exception:
+            continue
+        finally:
+            try:
+                lgpio.gpiochip_close(manejo)
+            except Exception:
+                pass
+
+    if not chips_info:
+        print("El kernel no expone NINGUN chip GPIO (/dev/gpiochip*).")
+    elif all(lineas == 0 for _, lineas, _ in chips_info):
+        print("Los chips existen pero TODOS tienen 0 lineas: el kernel no")
+        print("registro los controladores de la GPIO de la Raspberry Pi")
+        print("(en la Pi 5 la cabecera es 'pinctrl-rp1' con 54 lineas).")
+        print("Solucion: sudo apt update && sudo apt full-upgrade && reboot.")
+        print("Si persiste, reinstala la imagen oficial de Raspberry Pi OS.")
+    elif not any("pinctrl" in etiqueta.lower() for _, _, etiqueta in chips_info):
+        print("Hay chips con lineas, pero NINGUNO se llama 'pinctrl': la")
+        print("cabecera no esta expuesta por el kernel.")
+        print("Solucion: sudo raspi-config > Interfases > GPIO y reinicia.")
+    else:
+        print("Chips GPIO correctos (hay un 'pinctrl-*').")
+        print(f"Si aun asi no se pudo reclamar TRIG={config.pin_trigger}/")
+        print(f"ECHO={config.pin_echo}, esos pines los tiene ocupado otro")
+        print("programa o falta el divisor de voltaje en ECHO.")
+
     _titulo("Fin del diagnostico")
 
 

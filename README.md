@@ -259,11 +259,18 @@ minutos; por eso se vuelve a anclar en cada señal encontrada.
 Mientras la persona camina un tramo, el sistema vigila el rumbo: si
 acumula más giro que `desvio_maximo_grados` (25° por defecto) respecto
 del punto donde empezó a caminar, va curvando y los pasos no
-llegarían al sitio medido. En ese caso avisa **una vez** (y como
-máximo cada `enfriamiento_desvio_s`): *"Te estás desviando de la
-línea recta. Gira 30 grados a la izquierda para seguir derecho.
-Mientras no endereces, los pasos no cuentan."* — con el lado de la
-corrección calculado al revés del desvío.
+llegarían al sitio medido. En ese caso la corrección se guía **en
+vivo**: *"Alto un momento. Te estás desviando de la línea recta, unos
+30 grados. Gira despacio a la izquierda hasta que te diga que ya
+enderezaste"* — con el lado de la corrección calculado al revés del
+desvío. Mientras gira, el sistema integra el giro de corrección y da
+avances (*"Llevas la mitad del giro para enderezar"*, *"Ya casi
+enderezas"*); si el desvio no baja vuelve a avisar cada 6 s con el
+grados actualizado, y al entrar en la recta anuncia *"Ya enderezaste.
+Los pasos vuelven a contar"*. El número de grados del aviso es solo
+contexto (cuánto te desviaste): el criterio para parar de girar es la
+voz, no cumplir un número fijo que se quedaría viejo mientras la
+persona sigue caminando.
 
 Y no es solo un aviso: **los pasos dados mientras está desviado no se
 acreditan**. El sensor sigue contando la marcha a ciegas, pero el

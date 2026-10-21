@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import glob
 import os
+import platform
 import threading
 import time
 
@@ -101,9 +102,9 @@ class SensorUltrasonico:
         el chip cuya etiqueta empieza por "pinctrl" ("pinctrl-rp1" en
         la Pi 5, "pinctrl-bcm2711" en la Pi 4, "pinctrl-bcm2835" en la
         3).  Los demas chips dejan reclamar lineas sin error, pero no
-        van al conector: por eso el chip se identifica por su etiqueta
-        y los que no son "pinctrl" se descartan (ademas suelen controlar
-        el PCIe o el firmware, y tocarlos seria peligroso).
+        van al conector: controlan cosas internas (PCIe, PMIC, firmware),
+        asi que primero se comprueba la etiqueta del chip y solo si es
+        el de la cabecera se reclaman los pines.
         """
         lgpio = self._lgpio
         ultimo_error = "sin intentos: no hay chips gpio visibles"
@@ -116,6 +117,18 @@ class SensorUltrasonico:
                 continue
 
             info = self._info_chip(manejo)
+            if not self._es_chip_cabecera(manejo):
+                # Chip interno del sistema: ni se toca, se sigue buscando
+                # el "pinctrl" de la cabecera.
+                ultimo_error = (
+                    f"chip {numero} ({info}): no es el de la cabecera (pinctrl)"
+                )
+                try:
+                    lgpio.gpiochip_close(manejo)
+                except Exception:
+                    pass
+                continue
+
             try:
                 self._reclamar_pines(manejo)
             except Exception as error:
@@ -126,20 +139,9 @@ class SensorUltrasonico:
                     pass
                 continue
 
-            if self._es_chip_cabecera(manejo):
-                self._chip_info = f"chip lgpio {numero} ({info})"
-                print(f"HC-SR04 OK ({self._chip_info})")
-                return manejo
-
-            # Lineas reclamadas, pero el chip no controla la cabecera:
-            # se libera y se sigue buscando el "pinctrl".
-            ultimo_error = (
-                f"chip {numero} ({info}): no es el de la cabecera (pinctrl)"
-            )
-            try:
-                lgpio.gpiochip_close(manejo)
-            except Exception:
-                pass
+            self._chip_info = f"chip lgpio {numero} ({info})"
+            print(f"HC-SR04 OK ({self._chip_info})")
+            return manejo
 
         self._avisar_fallo_gpio(ultimo_error)
         return None
@@ -242,7 +244,7 @@ class SensorUltrasonico:
         return dict.fromkeys(c for c in lista if c is not None)
 
     def _avisar_fallo_gpio(self, ultimo_error: str) -> None:
-        """Diagnostico concreto: permisos, sistema o pines ocupados."""
+        """Diagnostico concreto: sistema, permisos o pines ocupados."""
         chips = sorted(glob.glob("/dev/gpiochip*"))
         legibles = [c for c in chips if os.access(c, os.R_OK | os.W_OK)]
 
@@ -251,13 +253,17 @@ class SensorUltrasonico:
             f"ECHO={self._echo}). La guia sigue funcionando, solo sin pitidos."
         )
         print(f"Motivo: {ultimo_error}")
+        print(f"Kernel: {platform.release()}")
         print(
             f"Chips GPIO visibles: {chips or 'ninguno'} | "
             f"legibles para este usuario: {legibles or 'ninguno'}"
         )
 
-        # Etiqueta de cada chip: el de la cabecera se llama "pinctrl-*".
+        # Etiqueta y lineas de cada chip: el de la cabecera se llama
+        # "pinctrl-*" y en la Raspberry Pi 5 son 54 lineas (pinctrl-rp1).
+        # Un chip con 0 lineas no deja reclamar ningun pin.
         etiquetas = []
+        lineas_vistas: list[int] = []
         for ruta in chips:
             try:
                 numero = int(ruta.rsplit("chip", 1)[1])
@@ -268,23 +274,42 @@ class SensorUltrasonico:
             except Exception:
                 continue
             try:
+                informacion = self._leer_info_chip(manejo)
+                if informacion is not None:
+                    lineas_vistas.append(int(informacion[0]))
                 etiquetas.append(f"gpiochip{numero}: {self._info_chip(manejo)}")
             finally:
                 try:
                     self._lgpio.gpiochip_close(manejo)
                 except Exception:
                     pass
+
+        sin_pinctrl = bool(etiquetas) and not any(
+            "pinctrl" in texto.lower() for texto in etiquetas
+        )
+        todos_vacios = bool(lineas_vistas) and all(
+            lineas == 0 for lineas in lineas_vistas
+        )
         if etiquetas:
             print("Etiquetas: " + " | ".join(etiquetas))
-            if not any("pinctrl" in texto for texto in etiquetas):
-                print(
-                    "Ningun chip se llama 'pinctrl-*': el sistema no esta "
-                    "expuesto con la GPIO de la cabecera (revisa "
-                    "'sudo raspi-config' > Interfases > GPIO y reinstala "
-                    "'python3-lgpio')."
-                )
 
-        if chips and not legibles:
+        if sin_pinctrl and todos_vacios:
+            print(
+                "Causa: NINGUN chip tiene lineas (todos con 0): el kernel no "
+                "registro los controladores de la GPIO.  En una Raspberry Pi "
+                "5 la cabecera es el chip 'pinctrl-rp1' con 54 lineas.  "
+                "Solucion: 'sudo apt update && sudo apt full-upgrade && "
+                "sudo reboot' (kernel y firmware se actualizan juntos).  Si "
+                "tras reiniciar sigue igual, el kernel no es el de Raspberry "
+                "Pi OS: reinstala la imagen oficial de Raspberry Pi OS."
+            )
+        elif sin_pinctrl:
+            print(
+                "Causa: ningun chip se llama 'pinctrl-*': la GPIO de la "
+                "cabecera no esta expuesta por el kernel.  Revisa "
+                "'sudo raspi-config' > Interfases > GPIO y reinicia."
+            )
+        elif chips and not legibles:
             print(
                 "Causa: PERMISOS sobre /dev/gpiochip*. Solucion: "
                 "'sudo usermod -aG gpio $USER' y despues reinicia "
