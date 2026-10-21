@@ -263,15 +263,11 @@ def test_comandos_de_voz() -> None:
         "orden 'silencia' (apaga la alarma de caida)",
     )
 
-    # La version (commit) en ejecucion: el asistente la anuncia al
-    # arrancar para no probar sin querer una copia vieja del codigo.
-    from guia.version import obtener_version, version_hablada
+    # La version (commit) en ejecucion sale por consola al arrancar
+    # (guia/version.py) para no probar sin querer una copia vieja.
+    from guia.version import obtener_version
 
     comprobar(obtener_version() != "", "version del codigo (commit) disponible")
-    comprobar(
-        version_hablada("ab12cd3") == "a, b, 1, 2, c, d, 3",
-        "version lista para leerla por voz",
-    )
 
 
 def test_planificacion_de_rutas() -> None:

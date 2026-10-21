@@ -31,7 +31,7 @@ from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
 from .navegacion.caida import DetectorCaida
 from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
 from .navegacion.rumbo import Rumbo
-from .version import obtener_version, version_hablada
+from .version import obtener_version
 from .vision.detector import DetectorVisual, ResultadoVision, dibujar_detecciones
 from .vision.interfaz import TECLA_SALIR, VentanaDiagnostico
 
@@ -43,11 +43,11 @@ MAX_INTENTOS_DESDE_GIRO = 2
 # de giro tiene el signo correcto o si el giro esta atascado en cero.
 AVISO_GIRO_S = 1.0
 
-# Recordatorio mientras se corrige el rumbo y no se esta mejorando
-# (girando al reves o siguiendo curvando): mas corto que el
-# enfriamiento del aviso de desvio, para repetir con el desvio
-# actualizado en vez del numero viejo.
-RECORDATORIO_CORRECCION_S = 6.0
+# Margen, tras el aviso del desvio, antes de volver a recordar la
+# correccion si no se esta mejorando.  El aviso mismo tarda varios
+# segundos en sonar y la persona necesita reaccion y tiempo de giro
+# despues de oirlo; el reloj cuenta desde que termina de sonar.
+RECORDATORIO_CORRECCION_S = 15.0
 
 
 class Aplicacion:
@@ -178,13 +178,6 @@ class Aplicacion:
 
         try:
             self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
-            if self.config.anunciar_version:
-                # Para no probar sin querer una copia vieja del codigo:
-                # la version se oye (y se ve por consola) antes de
-                # cualquier indicacion.
-                self._hablar(
-                    f"Versión {version_hablada(version)}.",
-                )
             self.giro.reiniciar()
             self._hablar(
                 f"Gira {self.config.grados_giro_inicial} grados a la derecha "
@@ -987,6 +980,11 @@ class Aplicacion:
                 f"recta, unos {grados} grados. Gira despacio a la "
                 f"{sentido} hasta que te diga que ya enderezaste."
             )
+            # El reloj del recordatorio arranca al TERMINAR de oirse el
+            # aviso: _hablar bloquea mientras suena el audio, y contar
+            # desde antes haria saltar el recordatorio en cuanto
+            # terminara de hablar, sin dar tiempo a reaccionar.
+            self._ultima_alerta_desvio = time.monotonic()
             return
 
         # En plena correccion: si el desvio no baja (giró al reves o
@@ -994,13 +992,13 @@ class Aplicacion:
         if abs(desvio) >= self._desvio_inicial:
             self._desvio_inicial = abs(desvio)
             if ahora - self._ultima_alerta_desvio >= RECORDATORIO_CORRECCION_S:
-                self._ultima_alerta_desvio = ahora
                 self._avances_correccion.clear()
                 print(f"DESVIO SIN MEJORAR: {desvio:+.1f} grados")
                 self._hablar(
                     f"Sigues fuera de la línea recta: {grados} grados. "
                     f"Gira despacio a la {sentido}."
                 )
+                self._ultima_alerta_desvio = time.monotonic()
             return
 
         # Avances del giro de correccion (fraccion ya recuperada).

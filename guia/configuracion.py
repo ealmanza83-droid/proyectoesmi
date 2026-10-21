@@ -106,14 +106,6 @@ class Configuracion:
     distancia_maxima_m: float = 4.0
     distancia_alerta_cm: float = 200.0
 
-    # ------------------------------------------------------------------
-    # Sistema
-    # ------------------------------------------------------------------
-    # Al arrancar, el asistente anuncia por voz la version (commit) en
-    # ejecucion: en la Raspberry se sabe asi si se esta probando el
-    # ultimo ``git pull`` o una copia vieja del codigo.
-    anunciar_version: bool = True
-
     def preparar(self) -> None:
         """Crea las carpetas que el sistema necesita para funcionar."""
         self.carpeta_audio.mkdir(parents=True, exist_ok=True)

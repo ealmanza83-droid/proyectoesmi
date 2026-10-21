@@ -1,8 +1,7 @@
 """Version del codigo en ejecucion (commit de git).
 
-Para no confundirse al probar en la Raspberry: el asistente la anuncia
-por voz y por consola al arrancar, de modo que siempre se sabe si el
-equipo corre el ultimo ``git pull`` o una copia vieja del codigo.
+Se imprime por consola al arrancar para saber, en la Raspberry, si se
+esta probando el ultimo ``git pull`` o una copia vieja del codigo.
 """
 
 from __future__ import annotations
@@ -31,8 +30,3 @@ def obtener_version() -> str:
     except Exception:
         pass
     return "desconocida"
-
-
-def version_hablada(version: str) -> str:
-    """La version letra por letra, para que Piper la lea sin trabarse."""
-    return ", ".join(version)
