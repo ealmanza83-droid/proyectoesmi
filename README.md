@@ -71,6 +71,16 @@ proyectoesmi/
 └── antiguo/                 scripts antiguos (ver antiguo/README.md)
 ```
 
+### Documentación
+
+* `README.md` (este) — comportamiento general del sistema.
+* `GUIA_PRESENTACION.md` — explicación completa módulo por módulo:
+  arquitectura, máquina de estados, algoritmos, guion de demo y
+  preguntas típicas.
+* `ECUACIONES.md` — inventario de las ecuaciones y modelos
+  matemáticos (integración del giroscopio, proyección sobre la
+  vertical, contadores de pasos, etc.).
+
 ---
 
 ## Requisitos e instalación (Raspberry Pi 5)

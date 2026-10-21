@@ -4,6 +4,49 @@ Esta es la unica pieza que coordina todo.  Cada fase del recorrido es
 un estado (:class:`Estado`) con su propio manejador, de modo que el
 bucle principal siempre hace lo mismo: mirar, escuchar, actuar y
 mostrar.
+
+Hilos en juego (la aplicacion solo ORQUESTA; el trabajo pesado corre
+en paralelo para que la camara nunca congele nada):
+
+* ``muestreador-mpu``  -> lee el MPU6050 100 veces por segundo y
+  reparte cada lectura entre MedidorGiro (grados girados + rumbo),
+  ContadorPasos y DetectorCaida.  Integrar en hilo propio evita
+  perder grados de giro cuando la camara/YOLO saturan el bucle.
+* ``alerta-proximidad`` -> vigila el HC-SR04 en su propio hilo y
+  acelera los pitidos a medida que se acerca un obstaculo.
+* ``microfono``        -> Vosk escucha en su propio hilo y publica
+  transcripciones en una cola; el modo actual (despertador, destino,
+  comando, silencio) decide que se publica y con que gramatica.
+* ``bucle principal``  -> camara + YOLO, eventos de voz, caidas,
+  obstaculos y el manejador del estado actual (un solo punto de
+  decision: ``self._manejadores[self.estado]``).
+
+Flujo completo (estados)::
+
+    GIRO_INICIAL ──90°──> BUSCAR_SENAL ──ve señal interior──> ESPERANDO_DESTINO
+         ▲                    │    ▲                              │ pide destino
+         │              no la ve   │                         ENCARAR_SENAL
+         │                    ▲    │                              │ ve la señal
+    CINCO_PASOS          MEDIA_VUELTA                      NAVEGANDO
+    (5 pasos y reintentar)  (180°)                          (giros y pasos
+                                                             de la ruta)
+                                                                   │
+                                                          pasos completados
+                                                                   v
+                                                        CONFIRMANDO_LLEGADA
+                                                        (ver la señal del
+                                                         destino: la llegada
+                                                         NUNCA se anuncia
+                                                         solo por pasos)
+                                                                   │
+                                                              "Has llegado"
+                                                                   v
+                                                        ESPERANDO_DESTINO
+
+Durante NAVEGANDO, cada señal interior vista sirve de GPS a pie: si es
+el destino se verifica la llegada; si esta en la ruta se avanza; si
+esta detras o fuera de ella (la persona se devolvio o se desvio), se
+replanifica desde la ubicacion real.
 """
 
 from __future__ import annotations
