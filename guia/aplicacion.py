@@ -42,6 +42,12 @@ MAX_INTENTOS_DESDE_GIRO = 2
 # de giro tiene el signo correcto o si el giro esta atascado en cero.
 AVISO_GIRO_S = 1.0
 
+# Recordatorio mientras se corrige el rumbo y no se esta mejorando
+# (girando al reves o siguiendo curvando): mas corto que el
+# enfriamiento del aviso de desvio, para repetir con el desvio
+# actualizado en vez del numero viejo.
+RECORDATORIO_CORRECCION_S = 6.0
+
 
 class Aplicacion:
     """Ciclo de vida completo del asistente de orientacion."""
@@ -109,7 +115,11 @@ class Aplicacion:
         self._instruccion_encarar_dada = False
         self._rumbo_al_caminar = 0.0
         self._ultima_alerta_desvio: float | None = None
-        self._en_desvio = False
+        # Correccion guiada del rumbo: el giro de vuelta a la recta se
+        # sigue en vivo (no con un numero fijo) hasta decir "para".
+        self._corrigiendo = False
+        self._desvio_inicial = 0.0
+        self._avances_correccion: set[float] = set()
         self._pasos_acreditados = 0
         self._pasos_previos = 0
         # Zonas del plan en curso: sirven para seguir el avance y para
@@ -890,7 +900,9 @@ class Aplicacion:
         # reaccion al "ya giraste, puedes parar", no debe contaminarla.
         self._rumbo_al_caminar = self.rumbo.grados
         self._ultima_alerta_desvio = None
-        self._en_desvio = False
+        self._corrigiendo = False
+        self._desvio_inicial = 0.0
+        self._avances_correccion.clear()
         self._pasos_previos = 0
         self._pasos_acreditados = 0
 
@@ -919,41 +931,79 @@ class Aplicacion:
         return self._pasos_acreditados
 
     def _vigilar_desvio(self) -> None:
-        """Avisa si al caminar se aparta de la linea recta, y al volver.
+        """Guia la correccion del rumbo hasta volver a la linea recta.
 
         El rumbo integra el giroscopio desde la ultima senal anclada:
         si mientras camina acumula mas giro que ``desvio_maximo_grados``
-        va curvando, y los pasos no llegarian al sitio medido.  Al
-        enderezar tambien se avisa: sin ese aviso, la persona no sabe
-        cuando corrigio y que los pasos vuelven a contar.
+        va curvando, y los pasos no llegarian al sitio medido.
+
+        La correccion se sigue EN VIVO: no se manda un numero fijo de
+        grados (que se queda viejo mientras la persona oye la voz y
+        sigue caminando), sino que se guia el giro con avances al 50%
+        y al 75% y se dice "ya enderezaste" al entrar en la recta.
+        Asi la persona sabe cuando PARAR de girar y no termina
+        caminando en la direccion contraria.
         """
         desvio = self.rumbo.grados - self._rumbo_al_caminar
+
         if abs(desvio) < self.config.desvio_maximo_grados:
-            if self._en_desvio:
-                self._en_desvio = False
+            if self._corrigiendo:
+                self._corrigiendo = False
+                self._avances_correccion.clear()
+                self._ultima_alerta_desvio = None
                 self._hablar("Ya enderezaste. Los pasos vuelven a contar.")
             return
 
         ahora = time.monotonic()
-        if (
-            self._ultima_alerta_desvio is not None
-            and ahora - self._ultima_alerta_desvio
-            < self.config.enfriamiento_desvio_s
-        ):
-            return
-        self._ultima_alerta_desvio = ahora
-        self._en_desvio = True
-
-        # Desvio positivo = giro a la derecha: para enderezar hay que
-        # corregir al lado contrario.
+        # Desvio positivo = giro a la derecha: para volver a la recta
+        # hay que girar al lado contrario.
         sentido = "izquierda" if desvio > 0 else "derecha"
         grados = round(abs(desvio))
-        print(f"DESVIO: {desvio:+.1f} grados respecto de la recta")
-        self._hablar(
-            f"Te estás desviando de la línea recta. Gira {grados} "
-            f"grados a la {sentido} para seguir derecho. Mientras no "
-            "endereces, los pasos no cuentan."
-        )
+
+        if not self._corrigiendo:
+            if (
+                self._ultima_alerta_desvio is not None
+                and ahora - self._ultima_alerta_desvio
+                < self.config.enfriamiento_desvio_s
+            ):
+                return
+            self._ultima_alerta_desvio = ahora
+            self._corrigiendo = True
+            self._desvio_inicial = abs(desvio)
+            self._avances_correccion.clear()
+            print(f"DESVIO: {desvio:+.1f} grados -> corregir a la {sentido}")
+            self._hablar(
+                f"Alto un momento. Te estás desviando de la línea "
+                f"recta, unos {grados} grados. Gira despacio a la "
+                f"{sentido} hasta que te diga que ya enderezaste."
+            )
+            return
+
+        # En plena correccion: si el desvio no baja (giró al reves o
+        # sigue curvando), se recuerda pronto con el valor actual.
+        if abs(desvio) >= self._desvio_inicial:
+            self._desvio_inicial = abs(desvio)
+            if ahora - self._ultima_alerta_desvio >= RECORDATORIO_CORRECCION_S:
+                self._ultima_alerta_desvio = ahora
+                self._avances_correccion.clear()
+                print(f"DESVIO SIN MEJORAR: {desvio:+.1f} grados")
+                self._hablar(
+                    f"Sigues fuera de la línea recta: {grados} grados. "
+                    f"Gira despacio a la {sentido}."
+                )
+            return
+
+        # Avances del giro de correccion (fraccion ya recuperada).
+        self._desvio_inicial = max(self._desvio_inicial, abs(desvio))
+        fraccion = 1.0 - abs(desvio) / max(self._desvio_inicial, 1.0)
+        for parte, texto in (
+            (0.75, "Ya casi enderezado."),
+            (0.5, "Vas por la mitad del giro."),
+        ):
+            if parte not in self._avances_correccion and fraccion >= parte:
+                self._avances_correccion.add(parte)
+                self._hablar(texto)
+                return
 
     def _anunciar_instruccion(self, instruccion: Instruccion) -> None:
         if instruccion.accion is Accion.GIRAR_DERECHA:

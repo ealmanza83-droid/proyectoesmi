@@ -738,6 +738,10 @@ def test_encarada_y_desvio() -> None:
         any("izquierda" in frase for frase in locutor.frases),
         "pide corregir al lado contrario (desvio a la derecha)",
     )
+    comprobar(
+        any("hasta que te diga" in frase for frase in locutor.frases),
+        "promete avisar cuando parar de girar",
+    )
 
     # Sigue desviado y caminando: el sensor cuenta pasos crudos, pero
     # NO se acreditan (la ruta medida es en linea recta).
@@ -772,6 +776,10 @@ def test_encarada_y_desvio() -> None:
     comprobar(
         any("vuelven a contar" in frase for frase in locutor.frases),
         "recuerda que los pasos vuelven a contar",
+    )
+    comprobar(
+        any("mitad del giro" in frase for frase in locutor.frases),
+        "da avances mientras corrige el rumbo",
     )
     mpu.gz = 0.0
     for i in range(60):
