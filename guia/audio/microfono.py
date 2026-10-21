@@ -18,7 +18,12 @@ from vosk import KaldiRecognizer, Model, SetLogLevel
 
 from ..configuracion import Configuracion
 from ..dominio.comandos import contiene_despertador
-from .gramaticas import GRAMATICA_COMANDO, GRAMATICA_DESPERTADOR, GRAMATICA_DESTINO
+from .gramaticas import (
+    GRAMATICA_COMANDO,
+    GRAMATICA_DESPERTADOR,
+    GRAMATICA_DESTINO,
+    GRAMATICA_SILENCIO,
+)
 
 
 class ModoMicrofono(Enum):
@@ -28,6 +33,8 @@ class ModoMicrofono(Enum):
     DESPERTADOR = auto()
     DESTINO = auto()
     COMANDO = auto()
+    SILENCIO = auto()
+    """Alarma de caida sonando: solo se escucha la orden que la apaga."""
 
 
 # Gramatica que corresponde a cada modo.
@@ -35,6 +42,7 @@ GRAMATICAS: dict[ModoMicrofono, str] = {
     ModoMicrofono.DESPERTADOR: GRAMATICA_DESPERTADOR,
     ModoMicrofono.DESTINO: GRAMATICA_DESTINO,
     ModoMicrofono.COMANDO: GRAMATICA_COMANDO,
+    ModoMicrofono.SILENCIO: GRAMATICA_SILENCIO,
 }
 
 
@@ -211,7 +219,11 @@ class Microfono:
             # Solo interesa si trae la palabra clave "Raspi".
             if contiene_despertador(texto):
                 self.eventos.put(EventoVoz(ModoMicrofono.DESPERTADOR, texto))
-        elif modo in (ModoMicrofono.DESTINO, ModoMicrofono.COMANDO):
+        elif modo in (
+            ModoMicrofono.DESTINO,
+            ModoMicrofono.COMANDO,
+            ModoMicrofono.SILENCIO,
+        ):
             self.eventos.put(EventoVoz(modo, texto))
 
 

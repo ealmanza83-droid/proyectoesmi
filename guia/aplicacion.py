@@ -109,6 +109,7 @@ class Aplicacion:
         self._instruccion_encarar_dada = False
         self._rumbo_al_caminar = 0.0
         self._ultima_alerta_desvio: float | None = None
+        self._en_desvio = False
         self._pasos_acreditados = 0
         self._pasos_previos = 0
         # Zonas del plan en curso: sirven para seguir el avance y para
@@ -204,6 +205,15 @@ class Aplicacion:
             self._vigilar_caida()
             self._anunciar_obstaculos(resultado)
 
+            # Si la alarma de caida se apago sola (se acabo el tiempo),
+            # el micro no puede quedarse para siempre escuchando solo
+            # "silencia": vuelve al despertador.
+            if (
+                self.microfono.modo is ModoMicrofono.SILENCIO
+                and not self.alarma.alarma_activa
+            ):
+                self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
+
             # Un solo punto de decision: el manejador del estado actual.
             self._manejadores[self.estado](self, resultado)
 
@@ -297,6 +307,11 @@ class Aplicacion:
                 self._ejecutar_comando(evento.texto)
                 self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
 
+            elif evento.modo is ModoMicrofono.SILENCIO:
+                # Con la alarma de caida sonando solo se escucha para
+                # apagarla (ya no hace falta la palabra "Raspi").
+                self._ejecutar_comando(evento.texto)
+
     def _cerrar_ventana_de_comando_expirada(self) -> None:
         if self._fin_ventana_comando and time.monotonic() > self._fin_ventana_comando:
             self._fin_ventana_comando = 0.0
@@ -322,6 +337,7 @@ class Aplicacion:
             # Apaga la alarma continua de una caida si esta sonando.
             if self.alarma.alarma_activa:
                 self.alarma.silenciar_alarma()
+                self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
                 self._hablar("Alarma apagada.")
 
         elif comando.tipo is TipoComando.GIRAR_DERECHA:
@@ -669,6 +685,9 @@ class Aplicacion:
         self._hablar(
             "Caida detectada. Di silencia cuando te hayas levantado.",
         )
+        # Con el tono sonando, la gramatica se reduce a la orden que lo
+        # apaga: se reconoce sin palabras clave y mucho mas rapido.
+        self.microfono.cambiar_modo(ModoMicrofono.SILENCIO)
 
     def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> bool:
         """Etiqueta de diagnostico, aviso de consola y voz del giro.
@@ -871,6 +890,7 @@ class Aplicacion:
         # reaccion al "ya giraste, puedes parar", no debe contaminarla.
         self._rumbo_al_caminar = self.rumbo.grados
         self._ultima_alerta_desvio = None
+        self._en_desvio = False
         self._pasos_previos = 0
         self._pasos_acreditados = 0
 
@@ -899,14 +919,19 @@ class Aplicacion:
         return self._pasos_acreditados
 
     def _vigilar_desvio(self) -> None:
-        """Avisa si al caminar se aparta de la linea recta.
+        """Avisa si al caminar se aparta de la linea recta, y al volver.
 
         El rumbo integra el giroscopio desde la ultima senal anclada:
         si mientras camina acumula mas giro que ``desvio_maximo_grados``
-        va curvando, y los pasos no llegarian al sitio medido.
+        va curvando, y los pasos no llegarian al sitio medido.  Al
+        enderezar tambien se avisa: sin ese aviso, la persona no sabe
+        cuando corrigio y que los pasos vuelven a contar.
         """
         desvio = self.rumbo.grados - self._rumbo_al_caminar
         if abs(desvio) < self.config.desvio_maximo_grados:
+            if self._en_desvio:
+                self._en_desvio = False
+                self._hablar("Ya enderezaste. Los pasos vuelven a contar.")
             return
 
         ahora = time.monotonic()
@@ -917,6 +942,7 @@ class Aplicacion:
         ):
             return
         self._ultima_alerta_desvio = ahora
+        self._en_desvio = True
 
         # Desvio positivo = giro a la derecha: para enderezar hay que
         # corregir al lado contrario.

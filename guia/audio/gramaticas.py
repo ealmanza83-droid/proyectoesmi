@@ -61,6 +61,21 @@ GRAMATICA_DESTINO = json.dumps(
     ensure_ascii=False,
 )
 
+# Alarma de caida sonando: solo la orden que la apaga.  Con la
+# gramatica minima Vosk la reconoce mas rapido, incluso con el tono
+# de 1200 Hz saliendo del altavoz mientras la persona habla.
+GRAMATICA_SILENCIO = json.dumps(
+    [
+        "silencia",
+        "silenciar",
+        "apaga",
+        "ya me recupere",
+        "estoy bien",
+        "[unk]",
+    ],
+    ensure_ascii=False,
+)
+
 # Ventana corta de comandos tras decir "Raspi" sin orden.
 GRAMATICA_COMANDO = json.dumps(
     [

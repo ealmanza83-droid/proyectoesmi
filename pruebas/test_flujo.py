@@ -423,10 +423,18 @@ def test_flujo_completo() -> None:
         any("Caida detectada" in frase for frase in locutor.frases),
         "anuncia la caida por voz",
     )
+    comprobar(
+        microfono.modo is ModoMicrofono.SILENCIO,
+        "con la alarma sonando solo se escucha la orden que la apaga",
+    )
 
-    microfono.eventos.put(EventoVoz(ModoMicrofono.DESPERTADOR, "Raspi silencia"))
+    microfono.eventos.put(EventoVoz(ModoMicrofono.SILENCIO, "silencia"))
     paso(aplicacion, detector, mpu)
     comprobar(not aplicacion.alarma.alarma_activa, "la orden 'silencia' apaga la alarma")
+    comprobar(
+        microfono.modo is ModoMicrofono.DESPERTADOR,
+        "apagada la alarma vuelve a escuchar el despertador",
+    )
 
 
 def test_destino_sin_ubicacion() -> None:
@@ -751,10 +759,20 @@ def test_encarada_y_desvio() -> None:
     )
 
     # Endereza (gira al lado contrario hasta la recta) y entonces si
-    # vuelven a contar.
+    # vuelven a contar.  Ademas ahora el sistema avisa cuando la
+    # correccion ya esta hecha (antes los pasos volvian en silencio).
+    locutor.frases.clear()
     mpu.gz = 60.0
     for _ in range(14):
         paso(aplicacion, detector, mpu)
+    comprobar(
+        any("enderezaste" in frase for frase in locutor.frases),
+        "avisa cuando ya corrigio el desvio",
+    )
+    comprobar(
+        any("vuelven a contar" in frase for frase in locutor.frases),
+        "recuerda que los pasos vuelven a contar",
+    )
     mpu.gz = 0.0
     for i in range(60):
         mpu.az = 1.6 if i % 2 else 1.0
