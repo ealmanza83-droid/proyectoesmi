@@ -31,6 +31,7 @@ from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
 from .navegacion.caida import DetectorCaida
 from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
 from .navegacion.rumbo import Rumbo
+from .version import obtener_version, version_hablada
 from .vision.detector import DetectorVisual, ResultadoVision, dibujar_detecciones
 from .vision.interfaz import TECLA_SALIR, VentanaDiagnostico
 
@@ -163,9 +164,11 @@ class Aplicacion:
     # ------------------------------------------------------------------
     def ejecutar(self) -> None:
         """Arranca los hilos, corre el bucle y garantiza la limpieza."""
+        version = obtener_version()
         print()
         print("======================================")
         print("INICIANDO SISTEMA")
+        print(f"Version del codigo: {version}")
         print("======================================")
 
         self.muestreador.start()
@@ -175,6 +178,13 @@ class Aplicacion:
 
         try:
             self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
+            if self.config.anunciar_version:
+                # Para no probar sin querer una copia vieja del codigo:
+                # la version se oye (y se ve por consola) antes de
+                # cualquier indicacion.
+                self._hablar(
+                    f"Versión {version_hablada(version)}.",
+                )
             self.giro.reiniciar()
             self._hablar(
                 f"Gira {self.config.grados_giro_inicial} grados a la derecha "

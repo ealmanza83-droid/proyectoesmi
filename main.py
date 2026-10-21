@@ -18,6 +18,7 @@ from guia.configuracion import Configuracion
 from guia.hardware.camara import Camara
 from guia.hardware.mpu6050 import MPU6050
 from guia.hardware.ultrasonido import SensorUltrasonico
+from guia.version import obtener_version
 from guia.vision.detector import DetectorVisual
 
 
@@ -51,6 +52,7 @@ def main() -> int:
     print()
     print("======================================")
     print("GUIA DE ORIENTACION - RASPBERRY PI 5")
+    print(f"Version del codigo: {obtener_version()}")
     print("======================================")
 
     aplicacion: Aplicacion | None = None
