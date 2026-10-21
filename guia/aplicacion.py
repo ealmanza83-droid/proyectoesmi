@@ -16,6 +16,7 @@ from .audio.alarma import ReproductorBeep
 from .audio.locutor import Locutor
 from .audio.microfono import Microfono, ModoMicrofono
 from .configuracion import Configuracion
+from .dominio.catalogo import LADO_INTERIOR, LADO_PASILLO
 from .dominio.comandos import (
     TipoComando,
     contiene_despertador,
@@ -74,6 +75,13 @@ class Aplicacion:
 
         self.estado = Estado.GIRO_INICIAL
         self.ubicacion: str | None = None
+        self.lado_puerta: str | None = None
+        """Lado de la puerta desde el que se vio la senal (o ``None``).
+
+        Solo la cara interior de la puerta confirma "la persona esta
+        en la zona": desde el lado del pasillo esta al otro lado de
+        la puerta y la ruta no debe arrancar.
+        """
         self.destino: str | None = None
 
         # Movimiento: el muestreador lee el MPU6050 a 100 Hz y reparte
@@ -103,6 +111,11 @@ class Aplicacion:
         self._ultima_alerta_desvio: float | None = None
         self._pasos_acreditados = 0
         self._pasos_previos = 0
+        # Zonas del plan en curso: sirven para seguir el avance y para
+        # detectar si la persona se devolvio (y replanificar a tiempo).
+        self._camino: list[str] = []
+        self._indice_zona = 0
+        self._inicio_llegada = 0.0
 
         # Busqueda de senal
         self._intento = 0
@@ -114,6 +127,10 @@ class Aplicacion:
 
         self._etiqueta = ""
         self._ultimo_aviso_giro = 0.0
+        # Enfriamiento de los avisos hablados que dependen de lo que
+        # se ve con la camara (puerta del lado del pasillo, senal de
+        # otra zona): una senal confirmada se repite en varios frames.
+        self._ultima_advertencia: dict[str, float] = {}
         # Avisos de avance del giro en curso (0.5 y 0.75 del objetivo)
         self._avances_anunciados: set[float] = set()
         self._ultimo_angulo_giro = 0.0
@@ -127,6 +144,7 @@ class Aplicacion:
             Estado.ESPERANDO_DESTINO: Aplicacion._en_esperando_destino,
             Estado.ENCARAR_SENAL: Aplicacion._en_encarar_senal,
             Estado.NAVEGANDO: Aplicacion._en_navegando,
+            Estado.CONFIRMANDO_LLEGADA: Aplicacion._en_confirmando_llegada,
         }
 
     # ------------------------------------------------------------------
@@ -217,6 +235,23 @@ class Aplicacion:
         self.locutor.hablar(texto)
         self.microfono.cambiar_modo(cambiar_a if cambiar_a is not None else modo_anterior)
 
+    def _advertecer(self, clave: str, texto: str) -> None:
+        """Habla un aviso solo una vez por encuentro (con enfriamiento).
+
+        Una senal confirmada se mantiene visible varios frames seguidos:
+        sin enfriamiento, la misma advertencia se repetiria en cada
+        frame mientras la persona tenga la puerta a la vista.
+        """
+        ahora = time.monotonic()
+        if (
+            ahora - self._ultima_advertencia.get(clave, 0.0)
+            < self.config.enfriamiento_objeto_s
+        ):
+            return
+        self._ultima_advertencia[clave] = ahora
+        print("AVISO:", texto)
+        self._hablar(texto)
+
     def _procesar_voz(self) -> None:
         """Atiende los eventos del microfono sin bloquear el video."""
         self._cerrar_ventana_de_comando_expirada()
@@ -295,8 +330,37 @@ class Aplicacion:
         elif comando.tipo is TipoComando.GIRAR_IZQUIERDA:
             self._hablar("Gira a la izquierda suavemente.")
 
+        elif comando.tipo is TipoComando.DEVOLVERME:
+            self._devolverme()
+
+        elif comando.tipo is TipoComando.OTRA_RUTA:
+            self._otra_ruta()
+
         else:
             self._hablar("No entendí la orden.")
+
+    def _devolverme(self) -> None:
+        """Orden de volver a la zona anterior por la que paso la ruta."""
+        if self.estado not in (Estado.NAVEGANDO, Estado.CONFIRMANDO_LLEGADA):
+            self._hablar("Ahora no hay ninguna ruta en curso.")
+            return
+        indice = self._indice_zona - 1
+        if indice < 0 or indice >= len(self._camino):
+            self._hablar(f"Antes de {self.ubicacion} no hay otra zona en la ruta.")
+            return
+        # El plan se recalcula desde la ubicacion real (no desde donde
+        # el contador de pasos cree que esta la persona).
+        self._asignar_destino(self._camino[indice])
+
+    def _otra_ruta(self) -> None:
+        """Orden de recalcular la ruta hacia el mismo destino actual."""
+        if self.estado not in (Estado.NAVEGANDO, Estado.CONFIRMANDO_LLEGADA):
+            self._hablar("Ahora no hay ninguna ruta en curso.")
+            return
+        if self.destino is None:
+            self._hablar("No hay ningún destino en curso.")
+            return
+        self._asignar_destino(self.destino)
 
     # ------------------------------------------------------------------
     # Destino y navegacion
@@ -319,6 +383,15 @@ class Aplicacion:
                 "Todavía no sé en qué zona estamos. "
                 "Acércate a una señal orientadora."
             )
+        elif self.lado_puerta == LADO_PASILLO:
+            # Los tramos del mapa se midieron de frente a la senal
+            # interior: del lado del pasillo los giros saldrian dados
+            # al reves.  Primero hay que cruzar la puerta.
+            self._volver_a_preguntar(
+                f"Estás del lado del pasillo de la puerta de "
+                f"{self.ubicacion}. Cruza hacia dentro y vuelve a "
+                "pedir la ruta."
+            )
         else:
             plan = self._planificador.planificar(self.ubicacion, destino)
             if plan is None:
@@ -333,25 +406,52 @@ class Aplicacion:
     def _iniciar_encarada(self, plan: list[Instruccion]) -> None:
         """Prepara la ruta: antes hay que encarar la senal de la zona.
 
-        Las instrucciones del mapa se dan "de frente a la senal" (asi
-        se midieron los pasos).  Si la camara no la ve ahora, se pide
-        girar despacio hasta encontrarla antes de arrancar.
+        Las instrucciones del mapa se dan "de frente a la senal
+        interior de la puerta" (asi se midieron los pasos).  Si la
+        camara no la ve ahora, se pide girar despacio hasta
+        encontrarla antes de arrancar.
         """
         self._ruta_pendiente = plan
         self._instruccion_encarar_dada = False
         self.estado = Estado.ENCARAR_SENAL
 
     def _en_encarar_senal(self, resultado: ResultadoVision) -> None:
-        """Arranca la ruta al confirmar la senal enfrente (rumbo = 0)."""
-        if resultado.senal is not None:
-            self.rumbo.anclar()
-            print("RUMBO ANCLADO: señal de", resultado.senal, "enfrente")
-            plan = self._ruta_pendiente or []
-            self._ruta_pendiente = None
-            if self._instruccion_encarar_dada:
-                self._hablar("La señal está frente a ti.")
-            self._iniciar_navegacion(plan)
-            return
+        """Arranca la ruta al confirmar la senal interior enfrente.
+
+        Solo sirve como referencia la senal de LA zona actual y por su
+        cara interior: la de otra zona, o la del lado del pasillo,
+        no indican el frente medido y se avisa sin arrancar.
+        """
+        senal = resultado.senal
+        if senal is not None:
+            if senal.zona != self.ubicacion:
+                # Senal de otra zona: no vale como "frente" (antes se
+                # anclaba el rumbo con cualquier senal y el resto de
+                # la ruta salia orientada al reves).
+                self._advertecer(
+                    f"otra:{senal.zona}",
+                    f"Veo la señal de {senal.zona}, pero tu zona es "
+                    f"{self.ubicacion}. Gira despacio hasta encontrar "
+                    "la señal de tu zona.",
+                )
+            elif senal.lado != LADO_INTERIOR:
+                # Misma zona pero al otro lado de la puerta.
+                self.lado_puerta = senal.lado
+                self._advertecer(
+                    f"pasillo:{senal.zona}",
+                    f"Estás del lado del pasillo de la puerta de "
+                    f"{senal.zona}. Cruza hacia dentro para comenzar.",
+                )
+            else:
+                self.lado_puerta = senal.lado
+                self.rumbo.anclar()
+                print("RUMBO ANCLADO: señal de", senal.zona, "enfrente")
+                plan = self._ruta_pendiente or []
+                self._ruta_pendiente = None
+                if self._instruccion_encarar_dada:
+                    self._hablar("La señal está frente a ti.")
+                self._iniciar_navegacion(plan)
+                return
 
         self._etiqueta = "Encarando la senal orientadora"
         if not self._instruccion_encarar_dada:
@@ -369,18 +469,179 @@ class Aplicacion:
         self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
 
     def _iniciar_navegacion(self, plan: list[Instruccion]) -> None:
+        self._reiniciar_plan(plan)
+
+    def _reiniciar_plan(self, plan: list[Instruccion]) -> None:
+        """Carga un plan nuevo hacia el destino desde la ubicacion actual."""
         self._plan = plan
         self._indice_plan = 0
         self._instruccion_actual = None
         self._en_pausa = False
+        self._pasos_acreditados = 0
+        self._pasos_previos = 0
+        # Zonas del recorrido: la primera es donde se parte, y cada
+        # senal interior confirmada va avanzando por la lista.
+        self._camino = self._planificador.camino(self.ubicacion, self.destino) or []
+        self._indice_zona = 0
         self.estado = Estado.NAVEGANDO
 
-    def _finalizar_navegacion(self) -> None:
+    def _seguir_senal(self, resultado: ResultadoVision) -> bool:
+        """Corrige ubicacion y rumbo con lo que se ve en el camino.
+
+        El plan es una estimacion a pasos con deriva posible: cada
+        senal interior confirmada dice donde esta la persona de
+        verdad.  Si es el destino, la llegada queda verificada; si
+        esta en la ruta, avanza el indice de zona; si esta detras o
+        fuera de la ruta (se devolvio o tomo otro camino), se
+        replanifica en vez de seguir instrucciones viejas.
+        Devuelve ``True`` si el frame quedo resuelto.
+        """
+        senal = resultado.senal
+        if senal is None:
+            return False
+
+        if senal.lado != LADO_INTERIOR:
+            # Cara del pasillo: solo orienta.  La del destino avisa
+            # que la puerta esta aqui y que hay que entrar.
+            if senal.zona == self.destino:
+                self._advertecer(
+                    f"pasillo:{senal.zona}",
+                    f"Estás frente a la puerta de {self.destino}, del "
+                    "lado del pasillo. Entra hacia dentro.",
+                )
+            else:
+                self._advertecer(
+                    f"pasillo:{senal.zona}",
+                    f"Frente a ti está la puerta de {senal.zona}, del "
+                    "lado del pasillo.",
+                )
+            return False
+
+        # Senal interior: la persona esta en esa zona (o muy cerca de
+        # su puerta) y mas o menos de frente: rumbo de referencia.
+        self.rumbo.anclar()
+        self._rumbo_al_caminar = self.rumbo.grados
+        self.ubicacion = senal.zona
+        self.lado_puerta = senal.lado
+
+        if senal.zona == self.destino:
+            print("LLEGADA verificada:", senal.zona)
+            self._anunciar_llegada()
+            return True
+
+        indice = (
+            self._camino.index(senal.zona) if senal.zona in self._camino else -1
+        )
+
+        if indice == self._indice_zona:
+            # Sigue en la zona de la que partio el tramo: si aun no
+            # habia avanzado, es solo un reanclaje (arranco viendo su
+            # propia puerta); si ya hay pasos dados, se devolvio.
+            if self._pasos_acreditados == 0:
+                return False
+        elif indice == self._indice_zona + 1:
+            # Avance normal: acaba de entrar en la siguiente zona.
+            self._indice_zona = indice
+            print("AVANCE de ruta: ahora en", senal.zona)
+            return False
+
+        # Detras del plan o fuera de el: el tramo ya no sirve.
+        self._indice_zona = max(indice, 0)
+        self._replanificar_desde()
+        return True
+
+    def _replanificar_desde(self) -> None:
+        """Rehace la ruta desde la ubicacion real (la persona se desvio)."""
         destino = self.destino
-        self.ubicacion = destino
+        plan = self._planificador.planificar(self.ubicacion, destino)
+        self._instruccion_actual = None  # el tramo en curso se descarta
+        if plan is None:
+            self._hablar(
+                f"Estás en {self.ubicacion} y no hay ruta hacia {destino}."
+            )
+            self._abandonar_ruta()
+            return
+        self._hablar(
+            f"Te saliste de la ruta hacia {destino}. Estás en "
+            f"{self.ubicacion}. Vamos de nuevo."
+        )
+        self._reiniciar_plan(plan)
+
+    def _abandonar_ruta(self) -> None:
+        """Deja la navegacion sin mentir y vuelve a pedir destino."""
         self.destino = None
         self._plan = []
         self._indice_plan = 0
+        self._instruccion_actual = None
+        self.estado = Estado.ESPERANDO_DESTINO
+        self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
+
+    def _empezar_a_confirmar_llegada(self) -> None:
+        """Tras los pasos medidos, falta VER la senal del destino.
+
+        Los pasos se acreditan en linea recta, pero la deriva puede
+        dejar a la persona a un lado de la puerta: anunciar la
+        llegada solo por el contador seria dar una indicacion errada.
+        """
+        self.estado = Estado.CONFIRMANDO_LLEGADA
+        self._inicio_llegada = time.monotonic()
+        self._hablar(
+            f"Para confirmar la llegada, gira despacio hasta encontrar "
+            f"la señal de {self.destino}."
+        )
+
+    def _en_confirmando_llegada(self, resultado: ResultadoVision) -> None:
+        """Solo anuncia la llegada si ve la senal interior del destino."""
+        self._etiqueta = f"Confirmando llegada a {self.destino}"
+        senal = resultado.senal
+
+        if senal is not None and senal.zona == self.destino:
+            if senal.lado == LADO_INTERIOR:
+                print("LLEGADA verificada:", senal.zona)
+                self._anunciar_llegada()
+                return
+            # La puerta del destino esta aqui, pero del lado del
+            # pasillo: que cruce hacia dentro para confirmar.
+            self.lado_puerta = senal.lado
+            self._advertecer(
+                f"pasillo:{senal.zona}",
+                f"Estás frente a la puerta de {self.destino}, pero del "
+                "lado del pasillo. Entra hacia dentro.",
+            )
+            return
+
+        if senal is not None and senal.lado == LADO_INTERIOR:
+            # Senal de otra zona: se paso de largo.
+            print("LLEGADA falsa: la senal vista es de", senal.zona)
+            self.ubicacion = senal.zona
+            self.lado_puerta = senal.lado
+            self.rumbo.anclar()
+            self._hablar(f"Parece que pasaste de largo. Estás en {senal.zona}.")
+            self._abandonar_ruta()
+            return
+
+        # Sin senal del destino todavia: sin anuncio (para no mentir),
+        # pero con un recordatorio periodico por si quedo a un lado.
+        if (
+            time.monotonic() - self._inicio_llegada
+            >= self.config.tiempo_llegada_s
+        ):
+            self._inicio_llegada = time.monotonic()
+            self._hablar(
+                f"Todavía no veo la señal de {self.destino}. Gira "
+                "despacio hasta encontrarla."
+            )
+
+    def _anunciar_llegada(self) -> None:
+        """Da la llegada por VERIFICADA: se vio la senal del destino."""
+        destino = self.destino
+        self.ubicacion = destino
+        self.lado_puerta = LADO_INTERIOR
+        self.destino = None
+        self._plan = []
+        self._indice_plan = 0
+        self._camino = []
+        self._indice_zona = 0
         self._instruccion_actual = None
         self.estado = Estado.ESPERANDO_DESTINO
 
@@ -475,13 +736,29 @@ class Aplicacion:
     def _en_buscar_senal(self, resultado: ResultadoVision) -> None:
         self._etiqueta = f"Buscando senal - intento {self._intento}"
 
-        if resultado.senal is not None:
-            self.ubicacion = resultado.senal
+        senal = resultado.senal
+        if senal is not None:
             self.rumbo.anclar()  # se mira la senal: rumbo conocido
-            print("SEÑAL ENCONTRADA:", self.ubicacion)
-            self._hablar(f"Estás en {self.ubicacion}.")
-            self.estado = Estado.ESPERANDO_DESTINO
-            self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
+            if senal.lado == LADO_INTERIOR:
+                # La cara interior confirma que la persona esta en la
+                # zona (los tramos de ruta se midieron desde ahi).
+                self.ubicacion = senal.zona
+                self.lado_puerta = senal.lado
+                print("SEÑAL ENCONTRADA:", self.ubicacion)
+                self._hablar(f"Estás en {self.ubicacion}.")
+                self.estado = Estado.ESPERANDO_DESTINO
+                self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
+                return
+            # Cara del pasillo: la persona esta al otro lado de la
+            # puerta, no dentro de la zona (antes cualquier senal
+            # fijaba la ubicacion y la ruta partia de un origen falso).
+            print("PUERTA vista del lado del pasillo:", senal.zona)
+            self._advertecer(
+                f"pasillo:{senal.zona}",
+                f"Frente a ti está la puerta de {senal.zona}, pero "
+                "estás del lado del pasillo. Entra por ella o acércate "
+                "a otra señal para saber dónde estás.",
+            )
             return
 
         agotado = (
@@ -540,16 +817,23 @@ class Aplicacion:
             self._etiqueta = "Navegacion en pausa"
             return
 
+        # Las senales del camino corrigen la ubicacion real: si la
+        # persona se devolvio o tomo otro camino, se replanifica en
+        # vez de seguir instrucciones viejas (o se anuncia la llegada
+        # si la senal del destino esta a la vista).
+        if self._seguir_senal(resultado):
+            return
+
         if self._instruccion_actual is None:
             if self._indice_plan >= len(self._plan):
-                self._finalizar_navegacion()
+                self._empezar_a_confirmar_llegada()
                 return
 
             self._instruccion_actual = self._plan[self._indice_plan]
             self._indice_plan += 1
 
             if self._instruccion_actual.accion is Accion.LLEGADA:
-                self._finalizar_navegacion()
+                self._empezar_a_confirmar_llegada()
                 return
 
             self._anunciar_instruccion(self._instruccion_actual)

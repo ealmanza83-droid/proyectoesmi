@@ -55,6 +55,13 @@ class Instruccion:
 # vuelta (B -> A) se calcula solo, con los mismos pasos y los giros en
 # sentido contrario.  Para el Cuarto pon tus medidas reales (pasos
 # desde Sala y el giro inicial al salir de Sala).
+#
+# IMPORTANTE: cada tramo se midio de frente a la senal INTERIOR de la
+# zona de partida (la cara de la su puerta que se ve estando dentro,
+# ver catalogo.py).  Por eso la ruta no arranca hasta que la camara
+# confirma esa cara (Aplicacion._en_encarar_senal): si la persona
+# esta del lado del pasillo, los giros del plan saldrian dados al
+# reves.
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
     ("Inicio", "Sala"): TramoRuta(pasos=10, giros=("derecha",)),
     ("Sala", "Baño"): TramoRuta(pasos=6, giros=("izquierda",)),
@@ -91,6 +98,11 @@ class PlanificadorRutas:
 
         Recorrer al reves un pasillo recto da los mismos pasos y los
         giros espejados (y en orden inverso si el tramo lleva varios).
+
+        El espejo supone que el tramo directo TERMINA de frente a la
+        senal interior del destino (asi se midio): por eso la llegada
+        debe confirmarse con esa senal antes de dar por hecho el
+        sentido de la ruta de vuelta.
         """
         completos = dict(tramos)
         for (origen, destino), tramo in tramos.items():
@@ -118,6 +130,16 @@ class PlanificadorRutas:
     def existe_ruta(self, origen: str | None, destino: str | None) -> bool:
         """Comprueba si el mapa conoce un camino entre dos zonas."""
         return self.planificar(origen, destino) is not None
+
+    def camino(self, origen: str | None, destino: str | None) -> list[str] | None:
+        """Zonas en orden que une la ruta, o ``None`` si no hay.
+
+        La navegacion lo usa para seguir el avance: saber que zona le
+        toca confirmar despues y detectar si la persona se devolvio.
+        """
+        if origen is None or destino is None:
+            return None
+        return self._camino_mas_corto(origen, destino)
 
     def planificar(self, origen: str | None, destino: str | None) -> list[Instruccion] | None:
         """Devuelve las instrucciones para ir de ``origen`` a ``destino``.

@@ -19,6 +19,7 @@ import importlib
 import queue
 import sys
 import threading
+import time
 import types
 from pathlib import Path
 
@@ -102,8 +103,9 @@ from guia.aplicacion import Aplicacion  # noqa: E402
 from guia.audio.microfono import EventoVoz, ModoMicrofono  # noqa: E402
 from guia.configuracion import Configuracion  # noqa: E402
 from guia.dominio.comandos import TipoComando, extraer_destino, quitar_despertador, reconocer  # noqa: E402
+from guia.dominio.catalogo import LADO_INTERIOR, LADO_PASILLO, Senal  # noqa: E402
 from guia.dominio.estados import Estado  # noqa: E402
-from guia.dominio.rutas import Accion, PlanificadorRutas  # noqa: E402
+from guia.dominio.rutas import Accion, Instruccion, PlanificadorRutas  # noqa: E402
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
@@ -198,7 +200,7 @@ class MicrofonoFalso:
 
 class DetectorFalso:
     def __init__(self) -> None:
-        self.senal: str | None = None
+        self.senal: Senal | None = None
         self.obstaculos: tuple[str, ...] = ()
 
     def analizar(self, frame) -> ResultadoVision:
@@ -348,7 +350,7 @@ def test_flujo_completo() -> None:
     )
 
     # --- 3.2 Aparece la senal orientadora --------------------------
-    detector.senal = "Sala"
+    detector.senal = Senal("Sala", LADO_INTERIOR)
     paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.ESPERANDO_DESTINO, "senal detectada")
     comprobar(aplicacion.ubicacion == "Sala", "ubicacion actualizada a Sala")
@@ -365,6 +367,7 @@ def test_flujo_completo() -> None:
     comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en la senal")
     comprobar(aplicacion.destino == "Baño", "destino registrado")
     comprobar(microfono.modo is ModoMicrofono.DESPERTADOR, "sigue escuchando ordenes")
+    detector.senal = None  # la persona giro y dejo la senal atras
 
     # --- 3.4 Giro de la ruta (izquierda 90 grados) -----------------
     mpu.gz = 100.0  # a la izquierda, gz del lado opuesto
@@ -383,12 +386,23 @@ def test_flujo_completo() -> None:
     for i in range(80):
         mpu.az = 1.6 if i % 2 else 1.0
         paso(aplicacion, detector, mpu)
-        if aplicacion.estado is Estado.ESPERANDO_DESTINO:
+        if aplicacion.estado is Estado.CONFIRMANDO_LLEGADA:
             break
 
-    # --- 3.6 Llegada ------------------------------------------------
+    # --- 3.6 Llegada verificada con la senal del destino ----------
+    comprobar(
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "los pasos no bastan: pide confirmar la llegada",
+    )
+    comprobar(
+        not any("Has llegado" in frase for frase in locutor.frases),
+        "sin la senal no anuncia una llegada falsa",
+    )
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.ESPERANDO_DESTINO, "navegacion terminada")
     comprobar(aplicacion.ubicacion == "Baño", "ubicacion final: Baño")
+    comprobar(aplicacion.lado_puerta == LADO_INTERIOR, "lado confirmado al llegar")
     comprobar(aplicacion.destino is None, "destino limpio tras la llegada")
     comprobar("Has llegado a Baño." in locutor.frases, "anuncio de llegada")
     comprobar("¿A dónde quieres ir?" in locutor.frases, "vuelve a preguntar destino")
@@ -608,8 +622,8 @@ def test_confirmacion_de_senal_tolerante() -> None:
     confirmador.observar(None)   # frame perdido
     confirmador.observar("cow")
     comprobar(
-        confirmador.observar("cow") == "Inicio",
-        "confirma con parpadeos intercalados",
+        confirmador.observar("cow") == Senal("Inicio", LADO_INTERIOR),
+        "confirma con parpadeos intercalados (zona y lado de puerta)",
     )
 
     # Demasiados fallos seguidos si reinician todo.
@@ -678,7 +692,7 @@ def test_encarada_y_desvio() -> None:
     comprobar(aplicacion._ruta_pendiente is not None, "la ruta queda pendiente")
 
     # Aparece la senal: se ancla el rumbo y arranca la navegacion.
-    detector.senal = "Sala"
+    detector.senal = Senal("Sala", LADO_INTERIOR)
     paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion.estado is Estado.NAVEGANDO,
@@ -689,6 +703,7 @@ def test_encarada_y_desvio() -> None:
         "confirma que la senal esta enfrente",
     )
     comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en cero")
+    detector.senal = None  # la persona giro hacia el destino: senal atras
 
     # Giro de la ruta (Sala -> Baño: izquierda) completado.
     mpu.gz = 90.0
@@ -744,16 +759,254 @@ def test_encarada_y_desvio() -> None:
     for i in range(60):
         mpu.az = 1.6 if i % 2 else 1.0
         paso(aplicacion, detector, mpu)
-        if aplicacion.estado is Estado.ESPERANDO_DESTINO:
+        if aplicacion.estado is Estado.CONFIRMANDO_LLEGADA:
             break
     comprobar(
         any("Pasos completados" in frase for frase in locutor.frases),
         "tras enderezar los pasos vuelven a contar",
     )
     comprobar(
-        aplicacion.estado is Estado.ESPERANDO_DESTINO,
-        "completa el tramo y llega al bano",
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "completa el tramo y pide confirmar la llegada",
     )
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO,
+        "la senal del bano confirma la llegada",
+    )
+
+
+def test_lados_de_puerta() -> None:
+    """La cara de la puerta decide si la persona esta dentro o fuera."""
+    print("\n[11] Lados de la puerta: interior vs pasillo")
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # 11.1 Cara del pasillo: identifica la puerta, pero NO la zona.
+    aplicacion.estado = Estado.BUSCAR_SENAL
+    detector.senal = Senal("Baño", LADO_PASILLO)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.BUSCAR_SENAL,
+        "el lado del pasillo no confirma la zona",
+    )
+    comprobar(aplicacion.ubicacion is None, "sin ubicacion por la cara del pasillo")
+    comprobar(
+        any("pasillo" in frase for frase in locutor.frases),
+        "avisa que se esta al otro lado de la puerta",
+    )
+
+    # 11.2 Sigue viendo la misma puerta: el aviso no se repite cada frame.
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        not any("pasillo" in frase for frase in locutor.frases),
+        "el aviso de la puerta respeta el enfriamiento",
+    )
+
+    # 11.3 Cara interior: si confirma la zona.
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO,
+        "la cara interior si confirma la zona",
+    )
+    comprobar(aplicacion.ubicacion == "Baño", "ubicacion = Baño")
+    comprobar(aplicacion.lado_puerta == LADO_INTERIOR, "lado de puerta registrado")
+
+    # 11.4 Encarada: la senal de OTRA zona no sirve como referencia.
+    detector.senal = Senal("Sala", LADO_INTERIOR)
+    aplicacion.estado = Estado.ENCARAR_SENAL
+    aplicacion._ruta_pendiente = [Instruccion(Accion.CAMINAR, 3)]
+    aplicacion._instruccion_encarar_dada = True  # ya se explico antes
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "no arranca con la senal de otra zona",
+    )
+    comprobar(aplicacion._ruta_pendiente is not None, "la ruta sigue pendiente")
+    comprobar(
+        any("Sala" in frase for frase in locutor.frases),
+        "explica que esa senal no es de su zona",
+    )
+
+    # 11.5 Senal propia pero del lado del pasillo: que cruce la puerta.
+    detector.senal = Senal("Baño", LADO_PASILLO)
+    aplicacion._ultima_advertencia.clear()  # enfriamiento del aviso 11.1
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "del lado del pasillo no arranca",
+    )
+    comprobar(
+        any("pasillo" in frase for frase in locutor.frases),
+        "pide cruzar hacia dentro de la puerta",
+    )
+
+    # 11.6 Cara interior de su zona: ancla el rumbo y arranca.
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(aplicacion.estado is Estado.NAVEGANDO, "con la cara interior si arranca")
+    comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en la senal")
+
+    # 11.7 Pedido de destino del lado del pasillo: que cruce primero.
+    aplicacion.estado = Estado.ESPERANDO_DESTINO
+    aplicacion.lado_puerta = LADO_PASILLO
+    locutor.frases.clear()
+    aplicacion._asignar_destino("Sala")
+    comprobar(
+        any("pasillo" in frase for frase in locutor.frases),
+        "del lado del pasillo no planifica la ruta",
+    )
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO,
+        "no navega hasta cruzar la puerta",
+    )
+
+
+def test_relocalizacion_y_devolucion() -> None:
+    """Navegando, las senales corrigen la ubicacion real de la persona."""
+    print("\n[12] Re-localizacion, llegada verificada y devolucion")
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # 12.1 Los pasos medidos NO anuncian llegada: falta ver la senal.
+    aplicacion.ubicacion = "Sala"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.destino = "Baño"
+    aplicacion._iniciar_navegacion(
+        [Instruccion(Accion.CAMINAR, 2), Instruccion(Accion.LLEGADA)]
+    )
+    detector.senal = None
+    mpu.gz = 0.0
+    for i in range(40):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+        if aplicacion.estado is not Estado.NAVEGANDO:
+            break
+    comprobar(
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "los pasos no bastan: pasa a confirmar la llegada",
+    )
+    comprobar(
+        not any("Has llegado" in frase for frase in locutor.frases),
+        "sin la senal no anuncia una llegada falsa",
+    )
+
+    # 12.2 La senal del destino a la vista: ahi si llegada verificada.
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(aplicacion.estado is Estado.ESPERANDO_DESTINO, "la senal confirma la llegada")
+    comprobar(aplicacion.ubicacion == "Baño", "ubicacion actualizada al llegar")
+    comprobar("Has llegado a Baño." in locutor.frases, "anuncio de llegada verificada")
+
+    # 12.3 Se paso de largo: ve la senal de otra zona y lo corrige.
+    aplicacion.estado = Estado.CONFIRMANDO_LLEGADA
+    aplicacion.destino = "Baño"
+    aplicacion._inicio_llegada = time.monotonic()
+    detector.senal = Senal("Sala", LADO_INTERIOR)
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        any("pasaste de largo" in frase for frase in locutor.frases),
+        "detecta que se paso de largo",
+    )
+    comprobar(aplicacion.ubicacion == "Sala", "corrige la ubicacion a la senal vista")
+    comprobar(aplicacion.estado is Estado.ESPERANDO_DESTINO, "vuelve a preguntar destino")
+
+    # 12.4 Se devuelve en medio del tramo: replanifica con la verdad.
+    detector.senal = None
+    aplicacion.ubicacion = "Sala"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.destino = "Baño"
+    aplicacion._iniciar_navegacion([Instruccion(Accion.CAMINAR, 6)])
+    for i in range(10):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+    comprobar(aplicacion._pasos_acreditados > 0, "acredita algunos pasos rectos")
+    detector.senal = Senal("Sala", LADO_INTERIOR)  # miro hacia atras: sigue en Sala
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        any("saliste de la ruta" in frase for frase in locutor.frases),
+        "avisa de que se salio de la ruta",
+    )
+    comprobar(aplicacion.estado is Estado.NAVEGANDO, "sigue navegando con plan nuevo")
+    comprobar(aplicacion._pasos_acreditados == 0, "el plan nuevo reinicia los pasos")
+
+    # 12.5 Ordenes de voz para devolverse o recalcular la ruta.
+    comprobar(
+        reconocer("quiero devolverme").tipo is TipoComando.DEVOLVERME,
+        "reconoce 'devolverme'",
+    )
+    comprobar(
+        reconocer("otra ruta").tipo is TipoComando.OTRA_RUTA,
+        "reconoce 'otra ruta'",
+    )
+    comprobar(
+        reconocer("vuelve a la sala").tipo is TipoComando.DESTINO,
+        "'vuelve a la sala' sigue siendo un destino",
+    )
+
+    # Con ruta en curso hacia Baño, "devolverme" apunta a la zona
+    # anterior del camino (Inicio) y pide encarar antes de arrancar.
+    detector.senal = None
+    aplicacion.ubicacion = "Sala"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.destino = "Baño"
+    aplicacion.estado = Estado.NAVEGANDO
+    aplicacion._camino = ["Inicio", "Sala", "Baño"]
+    aplicacion._indice_zona = 1
+    locutor.frases.clear()
+    aplicacion._ejecutar_comando("quiero devolverme")
+    comprobar(aplicacion.destino == "Inicio", "'devolverme' cambia el destino")
+    comprobar(aplicacion.estado is Estado.ENCARAR_SENAL, "pide encarar antes de volver")
+
+    # "otra ruta" recalcula hacia el mismo destino desde la ubicacion
+    # real (que las senales van corrigiendo).
+    aplicacion.estado = Estado.NAVEGANDO
+    aplicacion.destino = "Baño"
+    aplicacion.ubicacion = "Sala"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    locutor.frases.clear()
+    aplicacion._ejecutar_comando("otra ruta")
+    comprobar(aplicacion.estado is Estado.ENCARAR_SENAL, "'otra ruta' recalcula la ruta")
+    comprobar(aplicacion.destino == "Baño", "mantiene el destino original")
 
 
 def main() -> int:
@@ -775,6 +1028,8 @@ def main() -> int:
         test_confirmacion_de_senal_tolerante()
         test_pasos_sin_fantasmas()
         test_encarada_y_desvio()
+        test_lados_de_puerta()
+        test_relocalizacion_y_devolucion()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

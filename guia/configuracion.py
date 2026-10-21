@@ -89,6 +89,11 @@ class Configuracion:
     # curvando la ruta y se le avisa que enderece.
     desvio_maximo_grados: float = 25.0
     enfriamiento_desvio_s: float = 12.0
+    # Tras los pasos medidos la llegada NO se da por hecha: hay que
+    # ver la senal interior del destino.  Este es el tiempo maximo
+    # antes de volver a avisar ("gira despacio hasta encontrarla"),
+    # sin anunciar jamas una llegada falsa.
+    tiempo_llegada_s: float = 15.0
 
     # ------------------------------------------------------------------
     # HC-SR04 (alerta de proximidad)

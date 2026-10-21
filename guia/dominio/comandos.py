@@ -23,6 +23,15 @@ _PATRON_SILENCIAR = re.compile(
 )
 _PATRON_DERECHA = re.compile(r"\b(gira|girar)\b.*\bderecha\b")
 _PATRON_IZQUIERDA = re.compile(r"\b(gira|girar)\b.*\bizquierda\b")
+# Recuperacion en medio de la ruta: volver a la zona anterior o
+# recalcular hacia el mismo destino.
+_PATRON_DEVOLVERME = re.compile(
+    r"\b(devuelvete|devolverme|devuelve|regresa|regresar|vuelve|volver)\b"
+)
+_PATRON_OTRA_RUTA = re.compile(
+    r"\b(otra ruta|otro camino|ruta distinta|cambiar de ruta|"
+    r"replanifica\w*|recalcula\w*)\b"
+)
 
 # Puntuacion que puede acompañar a la palabra clave ("Raspi, ve a la sala").
 _PUNTUACION = str.maketrans("", "", ".,;:!?¿¡\"'()")
@@ -37,6 +46,8 @@ class TipoComando(Enum):
     SILENCIAR = auto()
     GIRAR_DERECHA = auto()
     GIRAR_IZQUIERDA = auto()
+    DEVOLVERME = auto()
+    OTRA_RUTA = auto()
     DESCONOCIDO = auto()
 
 
@@ -94,6 +105,14 @@ def reconocer(texto: str) -> Comando:
 
     if _PATRON_SILENCIAR.search(normal):
         return Comando(TipoComando.SILENCIAR)
+
+    # "vuelve a la sala" es un destino (extraer_destino ya gano arriba):
+    # aqui solo quedan las órdenes puras de devolucion/recalculo.
+    if _PATRON_DEVOLVERME.search(normal):
+        return Comando(TipoComando.DEVOLVERME)
+
+    if _PATRON_OTRA_RUTA.search(normal):
+        return Comando(TipoComando.OTRA_RUTA)
 
     if _PATRON_DERECHA.search(normal):
         return Comando(TipoComando.GIRAR_DERECHA)

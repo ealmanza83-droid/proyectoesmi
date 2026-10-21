@@ -18,7 +18,8 @@ from ..dominio.catalogo import (
     CLASES_PERMITIDAS,
     OBJETOS_PERMITIDOS,
     SENALES_ORIENTADORAS,
-    lugar_de_senal,
+    Senal,
+    senal_de_clase,
 )
 
 
@@ -38,8 +39,8 @@ class ResultadoVision:
     """Lo que la camara descubrio en un frame."""
 
     detecciones: tuple[Deteccion, ...] = ()
-    senal: str | None = None
-    """Zona confirmada (3 detecciones seguidas) o ``None``."""
+    senal: Senal | None = None
+    """Senal confirmada (3 detecciones seguidas): zona y lado de puerta."""
     obstaculos: tuple[str, ...] = ()
     """Obstaculos que conviene anunciar ahora (respeta el enfriamiento)."""
 
@@ -61,8 +62,8 @@ class ConfirmadorSenal:
         self._racha = 0
         self._perdidas = 0
 
-    def observar(self, senal_vista: str | None) -> str | None:
-        """Suma la observacion del frame y devuelve la zona o ``None``."""
+    def observar(self, senal_vista: str | None) -> Senal | None:
+        """Suma la observacion del frame y devuelve la senal o ``None``."""
         if senal_vista is None:
             if self._clase_actual is None:
                 return None
@@ -79,7 +80,7 @@ class ConfirmadorSenal:
         self._perdidas = 0
 
         if self._racha >= self._requeridas:
-            return lugar_de_senal(senal_vista)
+            return senal_de_clase(senal_vista)
         return None
 
     def reiniciar(self) -> None:
