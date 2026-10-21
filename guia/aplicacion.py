@@ -996,9 +996,11 @@ class Aplicacion:
         # Avances del giro de correccion (fraccion ya recuperada).
         self._desvio_inicial = max(self._desvio_inicial, abs(desvio))
         fraccion = 1.0 - abs(desvio) / max(self._desvio_inicial, 1.0)
+        # Frases propias de la correccion (no las de los giros de la
+        # ruta): la persona debe poder distinguir de cual giro se habla.
         for parte, texto in (
-            (0.75, "Ya casi enderezado."),
-            (0.5, "Vas por la mitad del giro."),
+            (0.75, "Ya casi enderezas."),
+            (0.5, "Llevas la mitad del giro para enderezar."),
         ):
             if parte not in self._avances_correccion and fraccion >= parte:
                 self._avances_correccion.add(parte)
