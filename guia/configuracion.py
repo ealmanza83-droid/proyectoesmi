@@ -111,8 +111,14 @@ class Configuracion:
     # Numero de chip lgpio del encabezado GPIO; en la Pi 5 suele ser el
     # 0 o el 4.  ``None`` = autodetectar reclamando los pines.
     chip_lgpio: int | None = None
-    pin_echo: int = 23
-    pin_trigger: int = 18
+    # Pines BCM del HC-SR04: libres de conflictos (el MPU6050 ocupa
+    # I2C en GPIO2/3 y la camara la interfaz CSI).  Evitar GPIO0/1 y
+    # GPIO14/15 (UART), GPIO7-11 (SPI) y GPIO18-21 (I2S si se usa
+    # audio por I2S).
+    # OJO: ECHO habla a 5V y el GPIO solo admite 3.3V: va con divisor
+    # de voltaje siempre.
+    pin_echo: int = 27
+    pin_trigger: int = 17
     distancia_maxima_m: float = 4.0
     distancia_alerta_cm: float = 200.0
 
