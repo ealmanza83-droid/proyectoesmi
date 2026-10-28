@@ -174,7 +174,7 @@ class ContadorPasos:
     por encima de ella.  Ademas solo cuenta cuando la magnitud *cruza*
     el umbral de abajo hacia arriba (modo borde, no nivel): si la
     aceleracion se queda alta sostenida, no vuelve a contar pasos
-    fantasma cada 0.35 segundos.
+    fantasma cada ``intervalo_paso_s`` segundos.
     """
 
     def __init__(self, config: Configuracion):

@@ -49,12 +49,27 @@ class Instruccion:
 
 
 # Orden dentro de un tramo: primero se gira para encarar y luego se
-# camina.  Anade aqui los tramos reales de tu casa.
+# camina.
+#
+# La casa es una cadena: Inicio -> Cuarto -> Sala -> Baño (cada zona
+# colinda con la siguiente).  Las senales van impresas del lado
+# DERECHO del pasillo, asi que caminando hacia adelante la persona
+# gira a la IZQUIERDA para encarar la imagen de cada puerta; en el
+# camino de vuelta las imagenes quedarian a su izquierda y el giro se
+# invierte solo (derecha), como calcula _ampliar de abajo.
+#
+# Pasos calculados con la zancada real de la persona (0.46 m por paso,
+# ver configuracion.py) a partir de las distancias medidas desde
+# Inicio:
+#   Inicio -> Cuarto   6.1 m               6.1 / 0.46 = 13 pasos
+#   Cuarto -> Sala     10.5 - 6.1 = 4.4 m   4.4 / 0.46 = 10 pasos
+#   Sala   -> Baño     30.2 - 10.5 = 19.7 m 19.7 / 0.46 = 43 pasos
 #
 # Basta con poner cada tramo en UN solo sentido (A -> B): el camino de
 # vuelta (B -> A) se calcula solo, con los mismos pasos y los giros en
-# sentido contrario.  Para el Cuarto pon tus medidas reales (pasos
-# desde Sala y el giro inicial al salir de Sala).
+# sentido contrario.  Asi "Sala -> Baño" implica tambien "Baño ->
+# Sala", y el planificador busca el camino mas corto aunque la ruta
+# cruce varios tramos ("Inicio -> Cuarto -> Sala -> Baño").
 #
 # IMPORTANTE: cada tramo se midio de frente a la senal INTERIOR de la
 # zona de partida (la cara de la su puerta que se ve estando dentro,
@@ -63,11 +78,9 @@ class Instruccion:
 # esta del lado del pasillo, los giros del plan saldrian dados al
 # reves.
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-    ("Inicio", "Sala"): TramoRuta(pasos=10, giros=("derecha",)),
-    ("Sala", "Baño"): TramoRuta(pasos=6, giros=("izquierda",)),
-    # AJUSTAR a la casa real: pasos desde Sala hasta el Cuarto y el
-    # giro de salida (derecha o izquierda).
-    ("Sala", "Cuarto"): TramoRuta(pasos=8, giros=("derecha",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=13, giros=("izquierda",)),
+    ("Cuarto", "Sala"): TramoRuta(pasos=10, giros=("izquierda",)),
+    ("Sala", "Baño"): TramoRuta(pasos=43, giros=("izquierda",)),
 }
 
 _ACCIONES_POR_GIRO: dict[str, Accion] = {

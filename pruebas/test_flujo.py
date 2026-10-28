@@ -274,27 +274,45 @@ def test_planificacion_de_rutas() -> None:
     print("\n[2] Planificacion de rutas")
     planificador = PlanificadorRutas()
 
+    # La casa es una cadena (Inicio -> Cuarto -> Sala -> Baño): ir a
+    # la Sala cruza dos tramos y cada uno aporta su giro y sus pasos.
     simple = planificador.planificar("Inicio", "Sala")
-    comprobar(simple is not None and len(simple) == 3, "Inicio -> Sala: 3 instrucciones")
-    comprobar(simple[0].accion is Accion.GIRAR_DERECHA, "primero gira a la derecha")
-    comprobar(simple[1].accion is Accion.CAMINAR and simple[1].cantidad == 10, "luego 10 pasos")
-    comprobar(simple[2].accion is Accion.LLEGADA, "cierra con la llegada")
+    comprobar(
+        simple is not None and len(simple) == 5,
+        "Inicio -> Sala: 5 instrucciones (dos tramos)",
+    )
+    comprobar(simple[0].accion is Accion.GIRAR_IZQUIERDA, "primero gira a la izquierda")
+    comprobar(
+        simple[1].accion is Accion.CAMINAR and simple[1].cantidad == 13,
+        "luego 13 pasos al Cuarto",
+    )
+    comprobar(
+        simple[2].accion is Accion.GIRAR_IZQUIERDA,
+        "nuevo giro izquierda al salir del Cuarto",
+    )
+    comprobar(
+        simple[3].accion is Accion.CAMINAR and simple[3].cantidad == 10,
+        "luego 10 pasos a la Sala",
+    )
+    comprobar(simple[4].accion is Accion.LLEGADA, "cierra con la llegada")
 
     larga = planificador.planificar("Inicio", "Baño")
-    comprobar(larga is not None and len(larga) == 5, "Inicio -> Baño cruza dos tramos")
+    comprobar(larga is not None and len(larga) == 7, "Inicio -> Baño cruza tres tramos")
 
     # Cada tramo se puede recorrer al reves: mismos pasos y giros
     # espejados (antes todas las rutas de vuelta decian 'no configurada').
+    # De vuelta las imagenes quedan al otro lado del pasillo: el giro
+    # se invierte solo (izquierda -> derecha).
     vuelta = planificador.planificar("Baño", "Sala")
     comprobar(
         vuelta is not None
         and vuelta[0].accion is Accion.GIRAR_DERECHA
-        and vuelta[1].cantidad == 6,
-        "Baño -> Sala: espejo del tramo (derecha, 6 pasos)",
+        and vuelta[1].cantidad == 43,
+        "Baño -> Sala: espejo del tramo (derecha, 43 pasos)",
     )
     comprobar(
         planificador.planificar("Baño", "Inicio") is not None,
-        "Baño -> Inicio: ruta de dos tramos calculada",
+        "Baño -> Inicio: ruta de tres tramos calculada",
     )
     comprobar(
         planificador.planificar("Sala", "Cuarto") is not None
@@ -388,8 +406,10 @@ def test_flujo_completo() -> None:
     # --- 3.5 Camina los pasos del tramo ----------------------------
     # Al caminar la magnitud *oscila* (pico, reposo, pico...): el
     # contador la detecta por cruce de la linea base, no por nivel.
+    # El tramo Sala -> Baño son 43 pasos: cada pico vale un paso, asi
+    # que hacen falta ~2 vueltas por paso.
     mpu.gz = 0.0
-    for i in range(80):
+    for i in range(110):
         mpu.az = 1.6 if i % 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is Estado.CONFIRMANDO_LLEGADA:
@@ -788,7 +808,8 @@ def test_encarada_y_desvio() -> None:
         "da avances mientras corrige el rumbo",
     )
     mpu.gz = 0.0
-    for i in range(60):
+    # El tramo completo Sala -> Baño son 43 pasos (dos vueltas por paso).
+    for i in range(110):
         mpu.az = 1.6 if i % 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is Estado.CONFIRMANDO_LLEGADA:
@@ -1016,17 +1037,17 @@ def test_relocalizacion_y_devolucion() -> None:
     )
 
     # Con ruta en curso hacia Baño, "devolverme" apunta a la zona
-    # anterior del camino (Inicio) y pide encarar antes de arrancar.
+    # anterior del camino (Cuarto) y pide encarar antes de arrancar.
     detector.senal = None
     aplicacion.ubicacion = "Sala"
     aplicacion.lado_puerta = LADO_INTERIOR
     aplicacion.destino = "Baño"
     aplicacion.estado = Estado.NAVEGANDO
-    aplicacion._camino = ["Inicio", "Sala", "Baño"]
+    aplicacion._camino = ["Cuarto", "Sala", "Baño"]
     aplicacion._indice_zona = 1
     locutor.frases.clear()
     aplicacion._ejecutar_comando("quiero devolverme")
-    comprobar(aplicacion.destino == "Inicio", "'devolverme' cambia el destino")
+    comprobar(aplicacion.destino == "Cuarto", "'devolverme' cambia el destino")
     comprobar(aplicacion.estado is Estado.ENCARAR_SENAL, "pide encarar antes de volver")
 
     # "otra ruta" recalcula hacia el mismo destino desde la ubicacion

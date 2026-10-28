@@ -167,6 +167,9 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
 | Velocidad mínima para contar giro | `velocidad_minima_giro_dps` | `5.0` |
 | Delta de aceleración que vale como paso | `delta_paso_g` | `0.12` g sobre el reposo |
+| Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
+| Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` |
+| Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
 | Umbral de impacto para detectar caída | `umbral_caida_g` | `2.5` |
 | Cambio brusco de aceleración que delata una caída | `umbral_cambio_caida_g` | `1.5` |
@@ -191,26 +194,43 @@ OBJETOS_PERMITIDOS   = {"chair": "silla", "table": "mesa",
 
 ### Mapa de la casa (`guia/dominio/rutas.py`)
 
+La casa es una cadena: **Inicio → Cuarto → Sala → Baño**. Las señales
+van impresas del lado **derecho** del pasillo, así que caminando hacia
+adelante la persona gira a la **izquierda** para encarar la imagen de
+cada puerta; al volver, las imágenes quedan a su izquierda y el
+sistema invierte el giro solo (derecha).
+
 ```python
 TRAMOS_DEMO = {
-    ("Inicio", "Sala"):  TramoRuta(pasos=10, giros=("derecha",)),
-    ("Sala", "Baño"):    TramoRuta(pasos=6,  giros=("izquierda",)),
-    ("Sala", "Cuarto"):  TramoRuta(pasos=8,  giros=("derecha",)),  # AJUSTAR
+    ("Inicio", "Cuarto"): TramoRuta(pasos=13, giros=("izquierda",)),
+    ("Cuarto", "Sala"):   TramoRuta(pasos=10, giros=("izquierda",)),
+    ("Sala", "Baño"):     TramoRuta(pasos=43, giros=("izquierda",)),
 }
 ```
 
+Los pasos salen de dividir la distancia del tramo entre la zancada de
+la persona (0.46 m):
+
+| Tramo | Distancia | Pasos |
+|-------|-----------|-------|
+| Inicio → Cuarto | 6.1 m | 6.1 / 0.46 = 13 |
+| Cuarto → Sala | 10.5 - 6.1 = 4.4 m | 4.4 / 0.46 = 10 |
+| Sala → Baño | 30.2 - 10.5 = 19.7 m | 19.7 / 0.46 = 43 |
+
+(las distancias se midieron desde Inicio; el tramo intermedio es la
+diferencia entre una medida y la siguiente).
+
 Cada tramo se pone **en un solo sentido**; el planificador calcula
 solo el camino de vuelta con los mismos pasos y los giros espejados
-(recorrer al reves un pasillo recto: lo que fue girar a la derecha,
-de vuelta es girar a la izquierda).  Asi `Sala → Baño` implica
+(recorrer al reves un pasillo recto: lo que fue girar a la izquierda,
+de vuelta es girar a la derecha).  Asi `Sala → Baño` implica
 tambien `Baño → Sala`, y el planificador busca el camino mas corto
-aunque la ruta cruce varios tramos (`Inicio → Sala → Baño`, y de
-vuelta `Baño → Sala → Inicio`).
+aunque la ruta cruce varios tramos (`Inicio → Cuarto → Sala → Baño`,
+y de vuelta `Baño → Sala → Cuarto → Inicio`).
 
-Para ajustar el mapa a tu casa, mide con el propio sistema: camina el
-tramo contando los pasos y anota el giro inicial; luego escribe esas
-medidas en `TRAMOS_DEMO` (el `Cuarto` viene con valores de ejemplo que
-hay que sustituir por los reales).
+Para ajustar el mapa a tu casa, mide la distancia de cada tramo,
+divídela entre `zancada_m` (0.46) y anota el giro inicial con el que
+se encara la señal de cada puerta.
 
 ### Comandos de voz
 
@@ -285,7 +305,7 @@ persona sigue caminando.
 Y no es solo un aviso: **los pasos dados mientras está desviado no se
 acreditan**. El sensor sigue contando la marcha a ciegas, pero el
 tramo solo avanza con pasos rectos — si no, el sistema daría por
-"completos" los 6 pasos caminando en curva y diría que has llegado a
+"completos" los pasos del tramo caminando en curva y diría que has llegado a
 un sitio que está en otro. Al enderezar (volver al rumbo de partida
 más menos 25°), los pasos vuelven a contar y el tramo sigue.
 

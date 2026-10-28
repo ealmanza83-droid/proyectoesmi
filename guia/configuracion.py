@@ -61,7 +61,12 @@ class Configuracion:
     signo_derecha: int = 1
     delta_paso_g: float = 0.12   # picos sobre el reposo que valen como paso
     tau_reposo_paso_s: float = 2.0   # lentitud de la linea base del paso
-    intervalo_paso_s: float = 0.35
+    # Ritmo real de la persona: zancada de 0.46 m a 1.85 m/s da un paso
+    # cada ~0.25 s.  El intervalo minimo entre picos tiene que quedar
+    # por DEBAJO de ese lapso: con el valor viejo (0.35 s) el contador
+    # descartaba casi la mitad de los pasos reales y los tramos largos
+    # (p. ej. 43 pasos) nunca se completaban.
+    intervalo_paso_s: float = 0.18
 
     # ------------------------------------------------------------------
     # Deteccion de caidas (acelerometro)
@@ -80,6 +85,11 @@ class Configuracion:
     grados_giro_inicial: int = 90
     grados_media_vuelta: int = 180
     pasos_objetivo: int = 5
+    # Marcha de la persona (medidas reales): de aqui salen los pasos de
+    # cada tramo de la ruta (distancia / zancada, ver dominio/rutas.py)
+    # y el ritmo que soporta el contador de pasos (intervalo_paso_s).
+    zancada_m: float = 0.46       # metros que avanza con un paso
+    velocidad_m_s: float = 1.85   # velocidad de desplazamiento (m/s)
 
     # ------------------------------------------------------------------
     # Navegacion asistida (rumbo y linea recta)
