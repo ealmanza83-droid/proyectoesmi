@@ -123,13 +123,26 @@ class SensorUltrasonico:
             f"La guia sigue funcionando, solo sin pitidos."
         )
         print(f"Motivo: {motivo}")
-        print(
-            "Solucion: instalar gpiozero "
-            "('(venv/bin/)pip install gpiozero' o 'sudo apt install "
-            "python3-gpiozero') y comprobar el cableado: TRIG en GPIO18 "
-            "(pin fisico 12), ECHO en GPIO23 (pin fisico 16) con divisor "
-            "de voltaje. Ver pruebas/prueba_ultrasonido.py"
-        )
+        if "busy" in motivo.lower():
+            # Los pines ya los tiene reclamados OTRO proceso (o este
+            # mismo, si se creo el sensor dos veces).
+            print(
+                "Causa: otro proceso esta usando los pines GPIO ahora "
+                "mismo.  Habitual: la ventana de Thonny con "
+                "prueba_ultrasonido.py abierta, o un main.py anterior "
+                "dejado en segundo plano con Ctrl+Z (para matarlo: "
+                "'jobs', luego 'kill %1').  Para ver quien los tiene: "
+                "'sudo lsof /dev/gpiochip15'.  Cierra ese proceso y "
+                "vuelve a arrancar main.py."
+            )
+        else:
+            print(
+                "Solucion: instalar gpiozero "
+                "('(venv/bin/)pip install gpiozero' o 'sudo apt install "
+                "python3-gpiozero') y comprobar el cableado: TRIG en GPIO18 "
+                "(pin fisico 12), ECHO en GPIO23 (pin fisico 16) con divisor "
+                "de voltaje. Ver pruebas/prueba_ultrasonido.py"
+            )
 
     def _bucle(self) -> None:
         """Hilo propio: mide sin tocar el bucle principal.
