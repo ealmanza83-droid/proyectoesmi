@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import threading
 import time
+import warnings
 
 from ..configuracion import Configuracion
 from ..audio.alarma import ReproductorBeep
@@ -84,6 +85,15 @@ class SensorUltrasonico:
         try:
             from gpiozero import DistanceSensor
             from gpiozero.pins.lgpio import LGPIOFactory
+            from gpiozero.exc import DistanceSensorNoEcho, PWMSoftwareFallback
+
+            # gpiozero avisa EN CADA intento de eco fallido; cuando no
+            # hay nada a menos de 4 m (pasillo libre) eso llena la
+            # consola y se come la salida de PASO/DESVIO.  El aviso de
+            # "usa pigpio" tampoco aplica aqui: pigpio no soporta la
+            # Raspberry Pi 5.
+            warnings.filterwarnings("ignore", category=DistanceSensorNoEcho)
+            warnings.filterwarnings("ignore", category=PWMSoftwareFallback)
         except Exception as error:
             self._avisar_sin_sensor(f"no se pudo importar gpiozero ({error})")
             return
