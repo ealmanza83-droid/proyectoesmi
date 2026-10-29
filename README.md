@@ -51,7 +51,7 @@ proyectoesmi/
 │   ├── hardware/
 │   │   ├── camara.py        Picamera2
 │   │   ├── mpu6050.py       giroscopio + acelerómetro (I2C)
-│   │   └── ultrasonido.py   HC-SR04 + hilo de pitidos
+│   │   └── ultrasonido.py   HC-SR04 (gpiozero) + hilo de pitidos
 │   ├── audio/
 │   │   ├── locutor.py       Piper (voz) con caché de audios
 │   │   ├── microfono.py     Vosk (escucha) en hilo propio
@@ -65,6 +65,7 @@ proyectoesmi/
 │       ├── rumbo.py         Rumbo (orientación relativa anclada a la señal)
 │       └── caida.py         DetectorCaida (acelerómetro)
 ├── pruebas/test_flujo.py    prueba completa sin hardware
+├── pruebas/prueba_ultrasonido.py  verificación del HC-SR04 en la Pi
 ├── mi_deteccion/            modelos YOLO (best.pt, yolo11n_ncnn_model…)
 ├── piper_voices/            voces Piper (es_MX-claude-high…)
 ├── vosk/                    modelo Vosk en español
@@ -178,7 +179,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Enfriamiento tras una caída (evita dobles alarmas) | `enfriamiento_caida_s` | `15` |
 | Duración máxima del beep continuo de caída | `duracion_alarma_caida_s` | `60` |
 | Pines HC-SR04 | `pin_echo` / `pin_trigger` | `23` / `18` (BCM) |
-| Chip lgpio del encabezado (None = autodetectar) | `chip_lgpio` | `15` |
+| Chip gpiozero del HC-SR04 (`/dev/gpiochipN`) | `chip_lgpio` | `15` |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
@@ -348,48 +349,44 @@ sobre la vertical (funciona con el módulo plano, de canto o invertido).
 Si al girar a la derecha la velocidad sale negativa, cambia
 `signo_derecha` de `1` a `-1` en `guia/configuracion.py`.
 
-Si el HC-SR04 no devuelve eco, la consola avisa `AVISO HC-SR04: sin
-eco usando el chip lgpio N (...)` junto con el **estado de la línea
-ECHO**: `SIEMPRE EN ALTO` significa casi seguro ECHO conectado a 5V
-sin divisor de voltaje, `SIEMPRE EN BAJO` que el sensor no tiene
-alimentación o TRIG no llega, y `alterna correctamente` que el eco
-llega pero la medición falla. **La guia sigue funcionando** solo sin
-pitidos de proximidad (antes ese bloqueo congelaba todo el sistema
-esperando el eco). Al reconectarlo aparece
+La medición del HC-SR04 se hace con **gpiozero** (`DistanceSensor` con
+`LGPIOFactory`), exactamente igual que el script verificado en esta
+Raspberry Pi 5 (`pruebas/prueba_ultrasonido.py`): chip lgpio 15, TRIG
+en GPIO18 y ECHO en GPIO23. La primera lectura de `sensor.distance`
+espera el primer eco (gpiozero tarda hasta ~0.5 s mientras calienta
+su cola de muestras), por eso **solo se lee en el hilo propio** del
+sensor: el bucle principal nunca se bloquea esperando el eco (antes
+ese bloqueo congelaba la guía entera).
+
+Si el sensor no devuelve eco, la consola avisa `AVISO HC-SR04: sin
+eco (...)`. **La guia sigue funcionando** solo sin pitidos de
+proximidad; al reconectarlo aparece
 `HC-SR04: eco recuperado (NN cm)`.
 
-El chip GPIO se elige **primero por el valor de `chip_lgpio`** (en esta
-Raspberry Pi funciona el `15`, el mismo con el que se verificó el
-sensor; ese número va cambiando con las actualizaciones del kernel).
-Si ese chip falta o no deja reclamar los pines, se autodetecta **por su
-etiqueta**: los pines de la cabecera están siempre en el chip
-`pinctrl-*` (`pinctrl-rp1` en la Pi 5, `pinctrl-bcm2711` en la Pi 4).
-Los demás chips (`gpio-brcmstb`, etc.)
-dejan reclamar líneas sin error pero **no van al conector**, así que se
-descartan: si el sistema usara otro chip, el pulso de TRIG no llegaría
-al sensor y nunca habría eco.
+El chip GPIO se elige por `chip_lgpio` (en esta Raspberry Pi funciona
+el `15`; ese número va cambiando con las actualizaciones del kernel).
+El número real de cada chip se ve con `ls /dev/gpiochip*`.
 
 Si al arrancar aparece `AVISO HC-SR04: no se pudo usar el sensor`, la
-consola indica el motivo exacto y la etiqueta de cada chip. Para tener
-el diagnostico completo de una vez (kernel, chips, permisos, firma de
-lgpio y estado de ECHO) corre en la Pi:
+consola indica el motivo exacto. Para verificar el sensor por separado
+(con la aplicación principal **cerrada**, si no los dos pelean por los
+pines) corre en la Pi:
 
 ```bash
 cd ~/Proyectoesmi && source venv/bin/activate && git pull origin main
-python pruebas/diagnostico_gpio.py
+python pruebas/prueba_ultrasonido.py
 ```
 
-Las causas habituales son **permisos** sobre `/dev/gpiochip*`
+Si la ventana muestra la distancia cambiando al poner la mano delante,
+el sensor y su cableado están bien. Las causas habituales del fallo
+son: gpiozero sin instalar (`sudo apt install python3-gpiozero` o
+`venv/bin/pip install gpiozero`), **permisos** sobre `/dev/gpiochip*`
 (comprueba `ls -l /dev/gpiochip*`, agrégate al grupo con
-`sudo usermod -aG gpio $USER` y reinicia, o prueba una vez con
-`sudo venv/bin/python main.py`), TRIG/ECHO ocupados, o un **kernel sin
-la GPIO expuesta** (no aparece `pinctrl` en
-`sudo cat /sys/kernel/debug/gpio`: se arregla con
-`sudo apt full-upgrade && sudo reboot`). El sensor inoperante **nunca
-detiene la guía**: solo se quedan sin pitidos.
-Si el chip correcto está seleccionado y sigue sin haber eco, revisa el
-cableado: VCC→5V, GND→GND y ECHO con **divisor de voltaje** (el ECHO
+`sudo usermod -aG gpio $USER` y reinicia), o TRIG/ECHO ocupados o mal
+conectados: VCC→5V, GND→GND y ECHO con **divisor de voltaje** (el ECHO
 del HC-SR04 habla a 5V y el GPIO de la Raspberry Pi solo admite 3.3V).
+El sensor inoperante **nunca detiene la guía**: solo se queda sin
+pitidos.
 
 ---
 

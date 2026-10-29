@@ -115,10 +115,10 @@ class Configuracion:
     # ------------------------------------------------------------------
     # HC-SR04 (alerta de proximidad)
     # ------------------------------------------------------------------
-    # Numero de chip lgpio del encabezado GPIO.  El numero CAMBIA con
-    # las actualizaciones del kernel: en esta Raspberry Pi 5 el que
-    # funciona es el 15 (el mismo con el que se verifico el sensor con
-    # gpiozero).  ``None`` = autodetectar reclamando los pines.
+    # Numero de chip lgpio de /dev/gpiochip*.  El numero CAMBIA con las
+    # actualizaciones del kernel: en esta Raspberry Pi 5 el que funciona
+    # es el 15, el mismo con el que se verifico el sensor con el script
+    # pruebas/prueba_ultrasonido.py (ver ``ls /dev/gpiochip*``).
     chip_lgpio: int | None = 15
     # Pines BCM del HC-SR04: los del cableado real del sensor, tal como
     # se verifico con gpiozero (TRIG en GPIO18 = pin fisico 12, ECHO en

@@ -73,10 +73,10 @@ guia/
   hardware/                 Adaptadores al equipo real
     mpu6050.py              Lectura cruda del sensor (escala del datasheet)
     camara.py               Captura de frames
-    ultrasonido.py          HC-SR04 en hilo propio + alerta de proximidad
+    ultrasonido.py          HC-SR04 (gpiozero) en hilo propio + alerta
 pruebas/
-  test_flujo.py             12 pruebas automatizadas sin hardware
-  diagnostico_gpio.py       Diagnóstico del GPIO de la Raspberry
+  test_flujo.py             14 pruebas automatizadas sin hardware
+  prueba_ultrasonido.py     Verificación directa del HC-SR04 en la Pi
 mi_deteccion/               Modelos YOLO (yolo11n COCO activo)
 piper_voices/  vosk/        Modelos de voz (TTS y reconocimiento)
 ```
@@ -408,7 +408,7 @@ confirmar.
 
 **¿Cuánto cuesta / consume?** Raspberry Pi 5 + periféricos
 comerciales; el software es todo de código abierto (YOLO, Vosk, Piper,
-lgpio).
+gpiozero).
 
 **¿Por qué "Raspi"?** Es el despertador: sin palabra clave, el
 reconocedor publicaría transcripciones falsas (ruido) las 24 horas.
