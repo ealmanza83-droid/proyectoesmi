@@ -65,6 +65,11 @@ class Instruccion:
 #   Cuarto -> Sala     10.5 - 6.1 = 4.4 m   4.4 / 0.46 = 10 pasos
 #   Sala   -> Baño     30.2 - 10.5 = 19.7 m 19.7 / 0.46 = 43 pasos
 #
+# Verificacion con el resto de las medidas (la casa es una sola
+# linea recta Inicio -> Cuarto -> Sala -> Baño):
+#   6.1 + 4.4 = 10.5 (Inicio-Sala), 10.5 + 19.7 = 30.2 (Inicio-Baño)
+#   y 4.4 + 19.7 = 24.1 (Baño-Cuarto).
+#
 # Basta con poner cada tramo en UN solo sentido (A -> B): el camino de
 # vuelta (B -> A) se calcula solo, con los mismos pasos y los giros en
 # sentido contrario.  Asi "Sala -> Baño" implica tambien "Baño ->
@@ -78,9 +83,9 @@ class Instruccion:
 # esta del lado del pasillo, los giros del plan saldrian dados al
 # reves.
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=7, giros=("izquierda",)),
-    ("Cuarto", "Sala"): TramoRuta(pasos=7, giros=("izquierda",)),
-    ("Sala", "Baño"): TramoRuta(pasos=5, giros=("izquierda",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=13, giros=("izquierda",)),
+    ("Cuarto", "Sala"): TramoRuta(pasos=10, giros=("izquierda",)),
+    ("Sala", "Baño"): TramoRuta(pasos=43, giros=("izquierda",)),
 }
 
 _ACCIONES_POR_GIRO: dict[str, Accion] = {
