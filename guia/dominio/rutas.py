@@ -78,9 +78,9 @@ class Instruccion:
 # esta del lado del pasillo, los giros del plan saldrian dados al
 # reves.
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=13, giros=("izquierda",)),
-    ("Cuarto", "Sala"): TramoRuta(pasos=10, giros=("izquierda",)),
-    ("Sala", "Baño"): TramoRuta(pasos=43, giros=("izquierda",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=7, giros=("izquierda",)),
+    ("Cuarto", "Sala"): TramoRuta(pasos=7, giros=("izquierda",)),
+    ("Sala", "Baño"): TramoRuta(pasos=5, giros=("izquierda",)),
 }
 
 _ACCIONES_POR_GIRO: dict[str, Accion] = {

@@ -105,7 +105,7 @@ from guia.configuracion import Configuracion  # noqa: E402
 from guia.dominio.comandos import TipoComando, extraer_destino, quitar_despertador, reconocer  # noqa: E402
 from guia.dominio.catalogo import LADO_INTERIOR, LADO_PASILLO, Senal  # noqa: E402
 from guia.dominio.estados import Estado  # noqa: E402
-from guia.dominio.rutas import Accion, Instruccion, PlanificadorRutas  # noqa: E402
+from guia.dominio.rutas import Accion, Instruccion, PlanificadorRutas, TRAMOS_DEMO  # noqa: E402
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
@@ -289,16 +289,18 @@ def test_planificacion_de_rutas() -> None:
     )
     comprobar(simple[0].accion is Accion.GIRAR_IZQUIERDA, "primero gira a la izquierda")
     comprobar(
-        simple[1].accion is Accion.CAMINAR and simple[1].cantidad == 13,
-        "luego 13 pasos al Cuarto",
+        simple[1].accion is Accion.CAMINAR
+        and simple[1].cantidad == TRAMOS_DEMO[("Inicio", "Cuarto")].pasos,
+        "luego los pasos del tramo Inicio -> Cuarto",
     )
     comprobar(
         simple[2].accion is Accion.GIRAR_IZQUIERDA,
         "nuevo giro izquierda al salir del Cuarto",
     )
     comprobar(
-        simple[3].accion is Accion.CAMINAR and simple[3].cantidad == 10,
-        "luego 10 pasos a la Sala",
+        simple[3].accion is Accion.CAMINAR
+        and simple[3].cantidad == TRAMOS_DEMO[("Cuarto", "Sala")].pasos,
+        "luego los pasos del tramo Cuarto -> Sala",
     )
     comprobar(simple[4].accion is Accion.LLEGADA, "cierra con la llegada")
 
@@ -313,8 +315,8 @@ def test_planificacion_de_rutas() -> None:
     comprobar(
         vuelta is not None
         and vuelta[0].accion is Accion.GIRAR_DERECHA
-        and vuelta[1].cantidad == 43,
-        "Baño -> Sala: espejo del tramo (derecha, 43 pasos)",
+        and vuelta[1].cantidad == TRAMOS_DEMO[("Sala", "Baño")].pasos,
+        "Baño -> Sala: espejo del tramo (derecha, mismos pasos)",
     )
     comprobar(
         planificador.planificar("Baño", "Inicio") is not None,
@@ -412,7 +414,7 @@ def test_flujo_completo() -> None:
     # --- 3.5 Camina los pasos del tramo ----------------------------
     # Al caminar la magnitud *oscila* (pico, reposo, pico...): el
     # contador la detecta por cruce de la linea base, no por nivel.
-    # El tramo Sala -> Baño son 43 pasos: cada pico vale un paso, asi
+    # El tramo completo Sala -> Baño: cada pico vale un paso, asi
     # que hacen falta ~2 vueltas por paso.
     mpu.gz = 0.0
     for i in range(110):
@@ -814,7 +816,7 @@ def test_encarada_y_desvio() -> None:
         "da avances mientras corrige el rumbo",
     )
     mpu.gz = 0.0
-    # El tramo completo Sala -> Baño son 43 pasos (dos vueltas por paso).
+    # El tramo completo Sala -> Baño (dos vueltas por paso).
     for i in range(110):
         mpu.az = 1.6 if i % 2 else 1.0
         paso(aplicacion, detector, mpu)
