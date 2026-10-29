@@ -686,8 +686,8 @@ class Aplicacion:
         self.estado = Estado.CONFIRMANDO_LLEGADA
         self._inicio_llegada = time.monotonic()
         # La puerta del destino esta en el mismo lado que las demas:
-        # en el sentido del viaje la imagen se encara a la izquierda,
-        # y en el de vuelta a la derecha.
+        # en el sentido del viaje la imagen se encara a la derecha,
+        # y en el de vuelta a la izquierda.
         lado = self._planificador.lado_encarada(self.ubicacion, self.destino)
         self._hablar(
             f"Para confirmar la llegada, gira despacio a la {lado} hasta "

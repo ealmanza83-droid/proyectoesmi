@@ -1075,24 +1075,33 @@ def test_encarada_por_sentido() -> None:
     print("\n[13] Encarada: el giro depende del sentido de la ruta")
     planificador = PlanificadorRutas()
 
+    # TODAS las combinaciones posibles de la casa (4 zonas en linea =
+    # 12 pares de ruta).  Las imagenes estan del lado derecho del
+    # pasillo al recorrerla de Inicio al Bano: todo viaje que avanza
+    # hacia el Bano encara a la DERECHA y todo viaje que regresa
+    # hacia el Inicio (mas lejano -> mas cercano) encara a la
+    # IZQUIERDA.
+    orden = ["Inicio", "Cuarto", "Sala", "Baño"]
+    malos: list[str] = []
+    for origen in orden:
+        for destino in orden:
+            if origen == destino:
+                continue
+            esperado = (
+                "derecha"
+                if orden.index(destino) > orden.index(origen)
+                else "izquierda"
+            )
+            real = planificador.lado_encarada(origen, destino)
+            if real != esperado:
+                malos.append(f"{origen}->{destino}: era {real}, queria {esperado}")
     comprobar(
-        planificador.lado_encarada("Inicio", "Cuarto") == "izquierda",
-        "sentido normal: la imagen esta a la derecha, se encara a la izquierda",
+        not malos,
+        "las 12 combinaciones encaran al lado correcto"
+        + (f" -> {malos}" if malos else ""),
     )
     comprobar(
-        planificador.lado_encarada("Inicio", "Baño") == "izquierda",
-        "una ruta de tres tramos tambien en el sentido normal",
-    )
-    comprobar(
-        planificador.lado_encarada("Baño", "Sala") == "derecha",
-        "del Bano a la Sala la indicacion se invierte (derecha)",
-    )
-    comprobar(
-        planificador.lado_encarada("Cuarto", "Inicio") == "derecha",
-        "al volver de un solo tramo tambien se invierte",
-    )
-    comprobar(
-        planificador.lado_encarada("Sala", "Sala") == "izquierda",
+        planificador.lado_encarada("Sala", "Sala") == "derecha",
         "sin tramo que recorrer se queda en el giro normal",
     )
 
@@ -1127,8 +1136,8 @@ def test_encarada_por_sentido() -> None:
         "pide encarar antes de arrancar",
     )
     comprobar(
-        any("Gira despacio a la izquierda" in frase for frase in locutor.frases),
-        "de Inicio a Cuarto pide girar a la izquierda",
+        any("Gira despacio a la derecha" in frase for frase in locutor.frases),
+        "de Inicio a Cuarto pide girar a la derecha",
     )
 
     # Sentido inverso: Bano -> Sala.
@@ -1143,11 +1152,11 @@ def test_encarada_por_sentido() -> None:
         "en el viaje de vuelta tambien encara antes de arrancar",
     )
     comprobar(
-        any("Gira despacio a la derecha" in frase for frase in locutor.frases),
-        "del Bano a la Sala pide girar a la derecha",
+        any("Gira despacio a la izquierda" in frase for frase in locutor.frases),
+        "del Bano a la Sala pide girar a la izquierda",
     )
     comprobar(
-        not any("Gira despacio a la izquierda" in frase for frase in locutor.frases),
+        not any("Gira despacio a la derecha" in frase for frase in locutor.frases),
         "ya no da la indicacion del sentido normal",
     )
 

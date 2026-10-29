@@ -97,13 +97,14 @@ _GIRO_ESPEJO: dict[str, str] = {
 
 # Giro con el que hay que encarar la senal de la puerta (ver
 # PlanificadorRutas.lado_encarada).  Las imagenes van impresas del
-# lado DERECHO del pasillo: recorriendo la casa en el sentido en que
-# se midieron los tramos la persona gira a la IZQUIERDA para poner la
-# imagen enfrente, y en el sentido inverso (por ejemplo ir del Bano a
-# la Sala, donde la imagen le quedaria a su izquierda) la indicacion
-# se invierte y hay que girar a la DERECHA.
-GIRO_SENAL_NORMAL = "izquierda"
-GIRO_SENAL_INVERSO = "derecha"
+# lado DERECHO del pasillo: recorriendo la casa de Inicio al Bano (el
+# sentido en que se midieron los tramos) la persona gira a la
+# DERECHA para poner la imagen enfrente, y en el sentido inverso (por
+# ejemplo ir del Bano a la Sala, donde la imagen le quedaria a su
+# izquierda) la indicacion se invierte y hay que girar a la
+# IZQUIERDA.
+GIRO_SENAL_NORMAL = "derecha"
+GIRO_SENAL_INVERSO = "izquierda"
 
 
 class PlanificadorRutas:
@@ -174,9 +175,9 @@ class PlanificadorRutas:
         El mapa se midio recorriendo la casa en un solo sentido, con
         las imagenes del lado derecho del pasillo.  Si la ruta sigue
         ese sentido (por ejemplo Inicio -> Cuarto) la imagen esta a la
-        derecha y la encarada es a la IZQUIERDA; si la ruta va al
-        reves (por ejemplo Bano -> Sala) la imagen le queda al otro
-        lado y el giro se invierte (DERECHA).
+        derecha y la encarada es a la DERECHA; si la ruta va al reves
+        (por ejemplo Bano -> Sala) la imagen le queda al otro lado y
+        el giro se invierte (IZQUIERDA).
 
         Mira solo el sentido del camino entre las dos zonas, asi que
         sirve igual para el tramo de salida y para confirmar la

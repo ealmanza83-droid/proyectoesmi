@@ -134,11 +134,11 @@ código se convierte en banderas globales imposibles de explicar.
 3. Destino: *"Raspi, ve a la sala"* → *"Entendido. Vamos a Sala."*
 4. **Encarada**: como las rutas se midieron mirando la señal, se pide
    ponerla enfrente: *"Para saber hacia dónde miras, primero encárate
-   con la señal de esta zona. Gira despacio a la izquierda hasta que
+   con la señal de esta zona. Gira despacio a la derecha hasta que
    te diga que la tienes frente a ti."* → al verla: `RUMBO ANCLADO`
    (rumbo = 0°) → *"La señal está frente a ti."* El lado en el que
-   gira sale del sentido de la ruta: a la izquierda en el sentido
-   normal y a la derecha al volver, porque las imágenes cambian de
+   gira sale del sentido de la ruta: a la derecha en el sentido
+   normal y a la izquierda al volver, porque las imágenes cambian de
    lado.
 5. Navegación: *"Gira a la izquierda 90 grados"* → *"Vas por la
    mitad"* → *"Giro completo. Puedes parar."* → *"Camina 13 pasos"*
@@ -434,4 +434,4 @@ cada tramo solo se mide en un sentido; el inverso se calcula con los
 mismos pasos y los giros espejados. Ese mismo sentido decide el giro
 de encarada (`PlanificadorRutas.lado_encarada`): las imágenes están
 del lado derecho en el sentido normal, así que se encara a la
-izquierda, y al volver la indicación se invierte (derecha).
+derecha, y al volver la indicación se invierte (izquierda).

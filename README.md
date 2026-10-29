@@ -282,7 +282,7 @@ Por eso, al pedir un destino el sistema **no arranca a ciegas**:
   ancla el rumbo y se dan las instrucciones, que así se miden desde
   una orientación conocida. **El lado en el que hay que girar sale
   del sentido de la ruta** (`PlanificadorRutas.lado_encarada`): a la
-  izquierda en el sentido normal y a la derecha al volver, porque las
+  derecha en el sentido normal y a la izquierda al volver, porque las
   imágenes cambian de lado (ver *Mapa de la casa*). Lo mismo vale
   para confirmar la llegada a la puerta del destino.
 
