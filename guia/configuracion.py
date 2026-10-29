@@ -66,7 +66,11 @@ class Configuracion:
     # signo lo da la fisica: +1 = derecha bien desde el principio.
     # Si el giro sigue yendo al contador equivocado, cambia a -1.
     signo_derecha: int = 1
-    delta_paso_g: float = 0.12   # picos sobre el reposo que valen como paso
+    delta_paso_g: float = 0.09   # picos sobre el reposo que valen como paso
+    # Con el sensor en la cintura el vaiven de la zancada es mas corto
+    # que en la mano: con 0.12 se quedaban pasos sin contar (20 pasos
+    # dados, 19 impresos pero menos acreditados).  Si aun faltan
+    # pasos, baja un poco mas; si cuenta pasos fantasma, subelo.
     tau_reposo_paso_s: float = 2.0   # lentitud de la linea base del paso
     # Ritmo real de la persona: zancada de 0.46 m a 1.85 m/s da un paso
     # cada ~0.25 s.  El intervalo minimo entre picos tiene que quedar

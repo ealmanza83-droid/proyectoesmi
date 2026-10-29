@@ -285,6 +285,11 @@ Por eso, al pedir un destino el sistema **no arranca a ciegas**:
   derecha en el sentido normal y a la izquierda al volver, porque las
   imágenes cambian de lado (ver *Mapa de la casa*). Lo mismo vale
   para confirmar la llegada a la puerta del destino.
+* **Encarada intermedia**: al terminar los pasos de un tramo (quedan
+  más tramos por delante) la persona normalmente queda mirando hacia
+  donde vino, así que antes del giro del siguiente tramo se vuelve a
+  pedir encarar la señal de la zona alcanzada; recién entonces se
+  anuncia *"Gira a la izquierda 90 grados"* del tramo siguiente.
 
 La deriva del giroscopio hace que el rumbo pierda precisión con los
 minutos; por eso se vuelve a anclar en cada señal encontrada.

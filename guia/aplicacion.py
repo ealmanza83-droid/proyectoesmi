@@ -190,6 +190,11 @@ class Aplicacion:
         # detectar si la persona se devolvio (y replanificar a tiempo).
         self._camino: list[str] = []
         self._indice_zona = 0
+        # Avance por tramos: al terminar cada tramo (los pasos
+        # completados) falta encarar la senal de la zona alcanzada
+        # ANTES del giro del siguiente tramo, igual que al arrancar.
+        self._tramos_completados = 0
+        self._falta_encarar = False
         self._inicio_llegada = 0.0
 
         # Busqueda de senal
@@ -513,6 +518,36 @@ class Aplicacion:
         )
         self.estado = Estado.ENCARAR_SENAL
 
+    def _encarar_zona_alcanzada(self) -> None:
+        """Encara la senal de la zona alcanzada al terminar un tramo.
+
+        Los pasos del tramo dejan a la persona en la siguiente zona,
+        normalmente mirando hacia donde vino (al terminar el giro del
+        tramo anterior y corregir el desvio).  Como las senales van
+        del lado derecho del pasillo, hay que decirle que gire hasta
+        verla ANTES del giro del siguiente tramo: si no, el giro de
+        la ruta se daria contra una orientacion que no es la medida.
+
+        No hay plan nuevo que cargar (``_ruta_pendiente`` queda en
+        ``None``): la ruta en curso sigue donde estaba y al confirmar
+        la senal se retoma desde la instruccion siguiente.
+        """
+        if self._camino:
+            indice = min(self._tramos_completados, len(self._camino) - 1)
+            self.ubicacion = self._camino[indice]
+            self._indice_zona = indice
+        self._ruta_pendiente = None
+        self._instruccion_encarar_dada = False
+        # El tramo anterior ya quedo acreditado: si la senal de la zona
+        # sigue a la vista al retomar, _seguir_senal no debe leer esos
+        # pasos como "se devolvio" y replanificar sin mas.
+        self._pasos_acreditados = 0
+        self._pasos_previos = 0
+        self._lado_encarada = self._planificador.lado_encarada(
+            self.ubicacion, self.destino
+        )
+        self.estado = Estado.ENCARAR_SENAL
+
     def _en_encarar_senal(self, resultado: ResultadoVision) -> None:
         """Arranca la ruta al confirmar la senal interior enfrente.
 
@@ -545,11 +580,17 @@ class Aplicacion:
                 self.lado_puerta = senal.lado
                 self.rumbo.anclar()
                 print("RUMBO ANCLADO: señal de", senal.zona, "enfrente")
-                plan = self._ruta_pendiente or []
+                plan = self._ruta_pendiente
                 self._ruta_pendiente = None
                 if self._instruccion_encarar_dada:
                     self._hablar("La señal está frente a ti.")
-                self._iniciar_navegacion(plan)
+                if plan is None:
+                    # Encarada intermedia (fin de tramo): no hay plan
+                    # nuevo; la ruta en curso sigue y el giro del
+                    # siguiente tramo espera en el indice.
+                    self.estado = Estado.NAVEGANDO
+                else:
+                    self._iniciar_navegacion(plan)
                 return
 
         self._etiqueta = "Encarando la senal orientadora"
@@ -583,6 +624,8 @@ class Aplicacion:
         # senal interior confirmada va avanzando por la lista.
         self._camino = self._planificador.camino(self.ubicacion, self.destino) or []
         self._indice_zona = 0
+        self._tramos_completados = 0
+        self._falta_encarar = False
         self.estado = Estado.NAVEGANDO
 
     def _seguir_senal(self, resultado: ResultadoVision) -> bool:
@@ -963,7 +1006,18 @@ class Aplicacion:
                 self._empezar_a_confirmar_llegada()
                 return
 
-            self._instruccion_actual = self._plan[self._indice_plan]
+            siguiente = self._plan[self._indice_plan]
+            if self._falta_encarar and siguiente.es_giro:
+                # Acaba de terminar un tramo y quedan mas: la persona
+                # esta de espalda a la senal de la zona alcanzada (las
+                # imagenes van del lado derecho del pasillo), asi que
+                # antes del giro del siguiente tramo hay que encararla.
+                self._falta_encarar = False
+                self._encarar_zona_alcanzada()
+                return
+
+            self._falta_encarar = False
+            self._instruccion_actual = siguiente
             self._indice_plan += 1
 
             if self._instruccion_actual.accion is Accion.LLEGADA:
@@ -995,6 +1049,8 @@ class Aplicacion:
             self._vigilar_desvio()
             if dados >= instruccion.cantidad:
                 self._hablar("Pasos completados. Puedes parar.")
+                self._tramos_completados += 1
+                self._falta_encarar = True
                 self._instruccion_actual = None
 
     def _empezar_a_caminar(self) -> None:

@@ -209,7 +209,10 @@ class ContadorPasos:
             self._pasos += 1
             self._ultimo_paso = ahora
             self._en_pico = True
-            print(f"PASO: {self._pasos}")
+            # El pico se imprime junto al paso para poder calibrar el
+            # umbral (delta_paso_g) en la casa: si el pico de un paso
+            # real queda por debajo del umbral, el paso no se cuenta.
+            print(f"PASO: {self._pasos} (pico {magnitud:.2f} g, umbral {umbral_alto:.2f} g)")
 
         # Linea base que sigue la deriva lenta del sensor; solo se
         # actualiza fuera de los picos para no subir con cada paso.

@@ -141,10 +141,14 @@ código se convierte en banderas globales imposibles de explicar.
    normal y a la izquierda al volver, porque las imágenes cambian de
    lado.
 5. Navegación: *"Gira a la izquierda 90 grados"* → *"Vas por la
-   mitad"* → *"Giro completo. Puedes parar."* → *"Camina 13 pasos"*
+   mitad"* → *"Giro completo. Puedes parar."* → *"Camina 7 pasos"*
    (hasta el Cuarto) → cuenta solo pasos rectos → *"Pasos
-   completados. Puedes parar."* → segundo tramo: otro giro a la
-   izquierda y *"Camina 10 pasos"* hasta la Sala.
+   completados. Puedes parar."* → **encarada intermedia**: como al
+   terminar el tramo la persona queda de espaldas a la señal de esa
+   zona, pide *"Gira despacio a la derecha hasta encontrar la señal
+   de esta zona"* → al verla (*"La señal está frente a ti."*) sigue
+   el segundo tramo: otro giro a la izquierda y *"Camina 7 pasos"*
+   hasta la Sala.
 6. Llegada verificada: *"Para confirmar la llegada, gira despacio a
    la izquierda hasta encontrar la señal de Sala"* → al verla:
    *"Has llegado a Sala. ¿A dónde quieres ir?"*

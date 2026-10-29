@@ -1244,6 +1244,148 @@ def test_obstaculos_en_medio() -> None:
     )
 
 
+def test_encarada_intermedia_de_tramo() -> None:
+    """Al terminar un tramo falta encarar la zona alcanzada.
+
+    La ruta Inicio -> Sala tiene dos tramos: despues de los pasos del
+    primero la persona esta en el Cuarto mirando hacia donde vino, y
+    las senales van del lado derecho del pasillo.  Antes del giro del
+    segundo tramo hay que pedir girar a la derecha hasta ver la senal
+    de esa zona (antes se daba el giro de 90 grados directamente y la
+    persona se quedaba mirando al otro lado).
+    """
+    print("\n[15] Encarada intermedia al terminar un tramo")
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # La persona esta en Inicio viendo su senal y pide la Sala: la
+    # ruta cruza dos tramos (Inicio -> Cuarto -> Sala).
+    aplicacion.ubicacion = "Inicio"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.estado = Estado.ESPERANDO_DESTINO
+    microfono.cambiar_modo(ModoMicrofono.DESTINO)
+    detector.senal = Senal("Inicio", LADO_INTERIOR)
+    microfono.eventos.put(EventoVoz(ModoMicrofono.DESTINO, "quiero ir a la sala"))
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "con la senal enfrente arranca la ruta",
+    )
+
+    # --- Giro y pasos del primer tramo (Inicio -> Cuarto) -----------
+    detector.senal = None  # la persona giro: la senal queda atras
+    locutor.frases.clear()
+    mpu.gz = 100.0  # giro izquierda del tramo
+    for _ in range(15):
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._instruccion_actual is not None
+        and aplicacion._instruccion_actual.es_pasos,
+        "giro del primer tramo completado, sigue caminar",
+    )
+
+    mpu.gz = 0.0
+    pasos = TRAMOS_DEMO[("Inicio", "Cuarto")].pasos
+    for i in range(pasos * 8):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+        if aplicacion.estado is not Estado.NAVEGANDO:
+            break
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "al completar los pasos pide encarar la zona alcanzada",
+    )
+    comprobar(aplicacion.ubicacion == "Cuarto", "ubica a la persona en el Cuarto")
+    comprobar(
+        aplicacion._ruta_pendiente is None,
+        "no hay plan nuevo: la ruta en curso sigue intacta",
+    )
+
+    # Sin verla aun, pide girar a la derecha (las senales estan del
+    # lado derecho en el sentido de la ruta) y NO el giro de 90.
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        any("Gira despacio a la derecha" in frase for frase in locutor.frases),
+        "pide girar a la derecha para ver la senal del Cuarto",
+    )
+    comprobar(
+        not any("90 grados" in frase for frase in locutor.frases),
+        "todavia no da el giro del siguiente tramo",
+    )
+
+    # --- Aparece la senal del Cuarto: ancla y retoma la ruta --------
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "con la senal del Cuarto en vista retoma la ruta",
+    )
+    comprobar(
+        any("frente a ti" in frase for frase in locutor.frases),
+        "confirma que la senal esta enfrente",
+    )
+    comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en el Cuarto")
+
+    # --- Giro y pasos del segundo tramo (Cuarto -> Sala) ------------
+    detector.senal = None
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        any("Gira a la izquierda 90 grados" in frase for frase in locutor.frases),
+        "ya si anuncia el giro del segundo tramo",
+    )
+    comprobar(
+        aplicacion._instruccion_actual is not None
+        and aplicacion._instruccion_actual.es_giro,
+        "el giro del Cuarto queda en curso",
+    )
+
+    mpu.gz = 100.0
+    for _ in range(15):
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._instruccion_actual is not None
+        and aplicacion._instruccion_actual.es_pasos,
+        "giro del segundo tramo completado",
+    )
+
+    mpu.gz = 0.0
+    pasos = TRAMOS_DEMO[("Cuarto", "Sala")].pasos
+    for i in range(pasos * 8):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+        if aplicacion.estado is not Estado.NAVEGANDO:
+            break
+    comprobar(
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "terminado el ultimo tramo pasa a confirmar la llegada",
+    )
+
+    # La senal del destino confirma: viaje completo Inicio -> Sala.
+    detector.senal = Senal("Sala", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(aplicacion.estado is Estado.ESPERANDO_DESTINO, "navegacion terminada")
+    comprobar(aplicacion.ubicacion == "Sala", "ubicacion final: Sala")
+    comprobar("Has llegado a Sala." in locutor.frases, "anuncio de llegada")
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -1267,6 +1409,7 @@ def main() -> int:
         test_relocalizacion_y_devolucion()
         test_encarada_por_sentido()
         test_obstaculos_en_medio()
+        test_encarada_intermedia_de_tramo()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1
