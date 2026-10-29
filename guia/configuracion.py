@@ -29,6 +29,13 @@ class Configuracion:
     perdidas_senal_toleradas: int = 2
     enfriamiento_objeto_s: float = 4.0
     tiempo_busqueda_s: float = 60.0
+    # Franja central del frame que se considera "en medio del camino".
+    # La camara mira hacia adelante: un obstaculo cuyo centro cae
+    # entre estos limites (fraccion del ancho del frame) puede
+    # cruzarse en la ruta y se anuncia con mas enfasis; los de los
+    # lados se nombra con su lado.
+    obstaculo_centro_min: float = 0.30
+    obstaculo_centro_max: float = 0.70
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
 
     # ------------------------------------------------------------------

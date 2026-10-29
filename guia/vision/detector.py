@@ -34,6 +34,23 @@ class Deteccion:
     es_obstaculo: bool
 
 
+# Posicion de un obstaculo respecto al camino de la persona (valor de
+# ``ObstaculoVisto.lado``): o esta en medio del frame, donde puede
+# cruzarse, o se queda a un lado.
+EN_MEDIO_DEL_CAMINO = "centro"
+
+
+@dataclass(frozen=True)
+class ObstaculoVisto:
+    """Un obstaculo por anunciar y donde esta respecto a la persona."""
+
+    nombre: str
+    """Nombre en espanol (ver catalogo.OBJETOS_PERMITIDOS)."""
+
+    lado: str
+    """``EN_MEDIO_DEL_CAMINO`` o el lado del frame en el que esta."""
+
+
 @dataclass(frozen=True)
 class ResultadoVision:
     """Lo que la camara descubrio en un frame."""
@@ -41,8 +58,30 @@ class ResultadoVision:
     detecciones: tuple[Deteccion, ...] = ()
     senal: Senal | None = None
     """Senal confirmada (3 detecciones seguidas): zona y lado de puerta."""
-    obstaculos: tuple[str, ...] = ()
+    obstaculos: tuple[ObstaculoVisto, ...] = ()
     """Obstaculos que conviene anunciar ahora (respeta el enfriamiento)."""
+
+
+def posicion_en_frame(
+    caja: tuple[int, int, int, int],
+    *,
+    ancho: int,
+    minimo: float,
+    maximo: float,
+) -> str:
+    """Dice si el obstaculo esta en medio del camino o a un lado.
+
+    La camara mira hacia adelante, asi que la posicion horizontal del
+    objeto en el frame indica si se cruza en la ruta (centro) o si
+    queda a la izquierda o a la derecha de la persona.
+    """
+    x1, _, x2, _ = caja
+    centro = (x1 + x2) / 2 / ancho
+    if centro < minimo:
+        return "izquierda"
+    if centro > maximo:
+        return "derecha"
+    return EN_MEDIO_DEL_CAMINO
 
 
 class ConfirmadorSenal:
@@ -130,7 +169,7 @@ class DetectorVisual:
         ahora = time.monotonic()
 
         detecciones: list[Deteccion] = []
-        obstaculos: list[str] = []
+        obstaculos: list[ObstaculoVisto] = []
         senal_vista: str | None = None
 
         for caja in resultados[0].boxes:
@@ -162,7 +201,19 @@ class DetectorVisual:
                 # Enfriamiento: no repetir "alto, hay una silla" cada frame.
                 if ahora - self._ultimo_aviso.get(objeto, 0.0) >= self._config.enfriamiento_objeto_s:
                     self._ultimo_aviso[objeto] = ahora
-                    obstaculos.append(objeto)
+                    # Con la posicion: lo de en medio del camino se
+                    # anuncia aparte y con mas enfasis.
+                    obstaculos.append(
+                        ObstaculoVisto(
+                            nombre=objeto,
+                            lado=posicion_en_frame(
+                                (x1, y1, x2, y2),
+                                ancho=self._config.ancho,
+                                minimo=self._config.obstaculo_centro_min,
+                                maximo=self._config.obstaculo_centro_max,
+                            ),
+                        )
+                    )
 
         return ResultadoVision(
             detecciones=tuple(detecciones),

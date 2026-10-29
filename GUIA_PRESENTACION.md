@@ -134,14 +134,20 @@ código se convierte en banderas globales imposibles de explicar.
 3. Destino: *"Raspi, ve a la sala"* → *"Entendido. Vamos a Sala."*
 4. **Encarada**: como las rutas se midieron mirando la señal, se pide
    ponerla enfrente: *"Para saber hacia dónde miras, primero encárate
-   con la señal de esta zona..."* → al verla: `RUMBO ANCLADO` (rumbo =
-   0°) → *"La señal está frente a ti."*
-5. Navegación: *"Gira a la derecha 90 grados"* → *"Vas por la mitad"*
-   → *"Giro completo. Puedes parar."* → *"Camina 10 pasos"* →
-   cuenta solo pasos rectos → *"Pasos completados. Puedes parar."*
-6. Llegada verificada: *"Para confirmar la llegada, gira despacio
-   hasta encontrar la señal de Sala"* → al verla: *"Has llegado a
-   Sala. ¿A dónde quieres ir?"*
+   con la señal de esta zona. Gira despacio a la izquierda hasta que
+   te diga que la tienes frente a ti."* → al verla: `RUMBO ANCLADO`
+   (rumbo = 0°) → *"La señal está frente a ti."* El lado en el que
+   gira sale del sentido de la ruta: a la izquierda en el sentido
+   normal y a la derecha al volver, porque las imágenes cambian de
+   lado.
+5. Navegación: *"Gira a la izquierda 90 grados"* → *"Vas por la
+   mitad"* → *"Giro completo. Puedes parar."* → *"Camina 13 pasos"*
+   (hasta el Cuarto) → cuenta solo pasos rectos → *"Pasos
+   completados. Puedes parar."* → segundo tramo: otro giro a la
+   izquierda y *"Camina 10 pasos"* hasta la Sala.
+6. Llegada verificada: *"Para confirmar la llegada, gira despacio a
+   la izquierda hasta encontrar la señal de Sala"* → al verla:
+   *"Has llegado a Sala. ¿A dónde quieres ir?"*
 
 ---
 
@@ -229,8 +235,15 @@ Los pasos de la corrección **tampoco se acreditan** hasta enderezar.
 detecciones por el catálogo (`dominio/catalogo.py`):
 
 * **Señales orientadoras** (una foto por zona por cara de puerta).
-* **Obstáculos** que se anuncian en voz alta: silla, mesa (*"dining
-  table"*, el nombre real en COCO), maceta.
+* **Obstáculos** que se anuncian en voz alta con su nombre: silla,
+  mesa (*"dining table"*, el nombre real en COCO), maceta. Si el
+  objeto cae en la franja central del frame (0.30–0.70 del ancho) se
+  considera **en medio del camino** y se avisa en una sola frase
+  (*"Alto, en medio del camino hay un obstáculo: silla"*, o
+  *"…hay obstáculos: silla y mesa"* si hay varias); los de los lados
+  se nombra con su lado (*"Alto, hay un obstáculo a tu izquierda:
+  maceta"*). La posición la calcula `posicion_en_frame` en
+  `vision/detector.py`.
 
 La cámara parpadea (una señal se ve 2 de cada 5 frames), así que una
 señal solo se acepta tras **3 detecciones seguidas** (tolerando 2
@@ -418,4 +431,7 @@ Todo umbral vive en `guia/configuracion.py`:
 
 La casa (mapa) se define en `guia/dominio/rutas.py` (`TRAMOS_DEMO`):
 cada tramo solo se mide en un sentido; el inverso se calcula con los
-mismos pasos y los giros espejados.
+mismos pasos y los giros espejados. Ese mismo sentido decide el giro
+de encarada (`PlanificadorRutas.lado_encarada`): las imágenes están
+del lado derecho en el sentido normal, así que se encara a la
+izquierda, y al volver la indicación se invierte (derecha).

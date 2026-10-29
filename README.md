@@ -279,7 +279,11 @@ Por eso, al pedir un destino el sistema **no arranca a ciegas**:
   girar despacio hasta encontrarla ("Para saber hacia dónde miras,
   primero encárate con la señal de esta zona..."); solo entonces se
   ancla el rumbo y se dan las instrucciones, que así se miden desde
-  una orientación conocida.
+  una orientación conocida. **El lado en el que hay que girar sale
+  del sentido de la ruta** (`PlanificadorRutas.lado_encarada`): a la
+  izquierda en el sentido normal y a la derecha al volver, porque las
+  imágenes cambian de lado (ver *Mapa de la casa*). Lo mismo vale
+  para confirmar la llegada a la puerta del destino.
 
 La deriva del giroscopio hace que el rumbo pierda precisión con los
 minutos; por eso se vuelve a anclar en cada señal encontrada.
@@ -322,6 +326,15 @@ más menos 25°), los pasos vuelven a contar y el tramo sigue.
   forma continua** a medida que la persona se acerca al obstáculo
   (lineal entre 1.2 s de intervalo a 2 m y 0.1 s rozando el objeto).
   Si hay una alarma de caída en marcha, los pitidos se callan.
+* **Obstáculos vistos con la cámara**: además de los pitidos, la
+  cámara **nombra** lo que tiene delante. Lo que cae **en medio del
+  camino** se anuncia primero y en una sola frase — *"Alto, en medio
+  del camino hay un obstáculo: silla"* / *"…hay obstáculos: silla y
+  mesa"* — y lo de los lados se nombra con su lado: *"Alto, hay un
+  obstáculo a tu izquierda: maceta"*. Qué es "en medio" lo decide la
+  franja central del frame (`obstaculo_centro_min/max`, de 0.30 a
+  0.70 del ancho) y el anuncio respeta el enfriamiento de 4 s por
+  objeto.
 
 ### Diagnóstico por consola
 

@@ -68,14 +68,24 @@ from .dominio.comandos import (
     reconocer,
 )
 from .dominio.estados import Estado
-from .dominio.rutas import Accion, Instruccion, PlanificadorRutas
+from .dominio.rutas import (
+    Accion,
+    GIRO_SENAL_NORMAL,
+    Instruccion,
+    PlanificadorRutas,
+)
 from .hardware.mpu6050 import MPU6050
 from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
 from .navegacion.caida import DetectorCaida
 from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
 from .navegacion.rumbo import Rumbo
 from .version import obtener_version
-from .vision.detector import DetectorVisual, ResultadoVision, dibujar_detecciones
+from .vision.detector import (
+    EN_MEDIO_DEL_CAMINO,
+    DetectorVisual,
+    ResultadoVision,
+    dibujar_detecciones,
+)
 from .vision.interfaz import TECLA_SALIR, VentanaDiagnostico
 
 # Enfoque de busqueda: girar, mirar, media vuelta, mirar, 5 pasos.
@@ -91,6 +101,13 @@ AVISO_GIRO_S = 1.0
 # segundos en sonar y la persona necesita reaccion y tiempo de giro
 # despues de oirlo; el reloj cuenta desde que termina de sonar.
 RECORDATORIO_CORRECCION_S = 15.0
+
+
+def _unir_nombres(nombres: list[str]) -> str:
+    """Une una lista de nombres en espanol: 'silla', 'silla y mesa'."""
+    if len(nombres) == 1:
+        return nombres[0]
+    return ", ".join(nombres[:-1]) + " y " + nombres[-1]
 
 
 class Aplicacion:
@@ -157,6 +174,9 @@ class Aplicacion:
         self._instruccion_actual: Instruccion | None = None
         self._ruta_pendiente: list[Instruccion] | None = None
         self._instruccion_encarar_dada = False
+        # Lado en el que girar para encarar la senal: depende del
+        # sentido de la ruta (ver PlanificadorRutas.lado_encarada).
+        self._lado_encarada: str = GIRO_SENAL_NORMAL
         self._rumbo_al_caminar = 0.0
         self._ultima_alerta_desvio: float | None = None
         # Correccion guiada del rumbo: el giro de vuelta a la recta se
@@ -485,6 +505,12 @@ class Aplicacion:
         """
         self._ruta_pendiente = plan
         self._instruccion_encarar_dada = False
+        # De que lado girar para encarar la senal: las imagenes estan
+        # a la derecha del pasillo en el sentido en que se midio la
+        # casa, y en el viaje de vuelta le quedan al otro lado.
+        self._lado_encarada = self._planificador.lado_encarada(
+            self.ubicacion, self.destino
+        )
         self.estado = Estado.ENCARAR_SENAL
 
     def _en_encarar_senal(self, resultado: ResultadoVision) -> None:
@@ -503,7 +529,8 @@ class Aplicacion:
                 self._advertecer(
                     f"otra:{senal.zona}",
                     f"Veo la señal de {senal.zona}, pero tu zona es "
-                    f"{self.ubicacion}. Gira despacio hasta encontrar "
+                    f"{self.ubicacion}. Gira despacio a la "
+                    f"{self._lado_encarada} hasta encontrar "
                     "la señal de tu zona.",
                 )
             elif senal.lado != LADO_INTERIOR:
@@ -530,8 +557,9 @@ class Aplicacion:
             self._instruccion_encarar_dada = True
             self._hablar(
                 "Para saber hacia dónde miras, primero encárate con la "
-                "señal de esta zona. Gira despacio a la izquierda hasta "
-                "que te diga que la tienes frente a ti."
+                "señal de esta zona. Gira despacio a la "
+                f"{self._lado_encarada} hasta que te diga que la tienes "
+                "frente a ti."
             )
 
     def _volver_a_preguntar(self, motivo: str) -> None:
@@ -657,9 +685,13 @@ class Aplicacion:
         """
         self.estado = Estado.CONFIRMANDO_LLEGADA
         self._inicio_llegada = time.monotonic()
+        # La puerta del destino esta en el mismo lado que las demas:
+        # en el sentido del viaje la imagen se encara a la izquierda,
+        # y en el de vuelta a la derecha.
+        lado = self._planificador.lado_encarada(self.ubicacion, self.destino)
         self._hablar(
-            f"Para confirmar la llegada, gira despacio hasta encontrar "
-            f"la señal de {self.destino}."
+            f"Para confirmar la llegada, gira despacio a la {lado} hasta "
+            f"encontrar la señal de {self.destino}."
         )
 
     def _en_confirmando_llegada(self, resultado: ResultadoVision) -> None:
@@ -699,9 +731,12 @@ class Aplicacion:
             >= self.config.tiempo_llegada_s
         ):
             self._inicio_llegada = time.monotonic()
+            lado = self._planificador.lado_encarada(
+                self.ubicacion, self.destino
+            )
             self._hablar(
                 f"Todavía no veo la señal de {self.destino}. Gira "
-                "despacio hasta encontrarla."
+                f"despacio a la {lado} hasta encontrarla."
             )
 
     def _anunciar_llegada(self) -> None:
@@ -724,8 +759,32 @@ class Aplicacion:
     # Obstaculos y seguridad
     # ------------------------------------------------------------------
     def _anunciar_obstaculos(self, resultado: ResultadoVision) -> None:
-        for nombre in resultado.obstaculos:
-            self._hablar(f"Alto, hay un obstáculo: {nombre}.")
+        """Nombra los objetos que tiene la persona delante.
+
+        Lo que esta EN MEDIO del camino se anuncia primero y en una
+        sola frase: es lo que puede cruzarse mientras la persona
+        camina.  Lo de los lados se nombra con su lado, para que sepa
+        que hay y donde.  El detector ya aplico el enfriamiento por
+        objeto; aqui solo se redacta el aviso.
+        """
+        en_medio = [
+            obstaculo.nombre
+            for obstaculo in resultado.obstaculos
+            if obstaculo.lado == EN_MEDIO_DEL_CAMINO
+        ]
+        if en_medio:
+            articulo = "un obstáculo" if len(en_medio) == 1 else "obstáculos"
+            self._hablar(
+                f"Alto, en medio del camino hay {articulo}: "
+                f"{_unir_nombres(en_medio)}."
+            )
+
+        for obstaculo in resultado.obstaculos:
+            if obstaculo.lado != EN_MEDIO_DEL_CAMINO:
+                self._hablar(
+                    f"Alto, hay un obstáculo a tu {obstaculo.lado}: "
+                    f"{obstaculo.nombre}."
+                )
 
     def _vigilar_caida(self) -> None:
         """Si el acelerometro detecto una caida, alarma constante + voz.

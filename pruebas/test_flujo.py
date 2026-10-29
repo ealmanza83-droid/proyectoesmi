@@ -110,7 +110,13 @@ from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
-from guia.vision.detector import ConfirmadorSenal, ResultadoVision  # noqa: E402
+from guia.vision.detector import (  # noqa: E402
+    EN_MEDIO_DEL_CAMINO,
+    ConfirmadorSenal,
+    ObstaculoVisto,
+    ResultadoVision,
+    posicion_en_frame,
+)
 
 
 # ----------------------------------------------------------------------
@@ -201,7 +207,7 @@ class MicrofonoFalso:
 class DetectorFalso:
     def __init__(self) -> None:
         self.senal: Senal | None = None
-        self.obstaculos: tuple[str, ...] = ()
+        self.obstaculos: tuple[ObstaculoVisto, ...] = ()
 
     def analizar(self, frame) -> ResultadoVision:
         return ResultadoVision(senal=self.senal, obstaculos=self.obstaculos)
@@ -1062,6 +1068,171 @@ def test_relocalizacion_y_devolucion() -> None:
     comprobar(aplicacion.destino == "Baño", "mantiene el destino original")
 
 
+def test_encarada_por_sentido() -> None:
+    """Las imagenes estan a la derecha: al volver el giro se invierte."""
+    print("\n[13] Encarada: el giro depende del sentido de la ruta")
+    planificador = PlanificadorRutas()
+
+    comprobar(
+        planificador.lado_encarada("Inicio", "Cuarto") == "izquierda",
+        "sentido normal: la imagen esta a la derecha, se encara a la izquierda",
+    )
+    comprobar(
+        planificador.lado_encarada("Inicio", "Baño") == "izquierda",
+        "una ruta de tres tramos tambien en el sentido normal",
+    )
+    comprobar(
+        planificador.lado_encarada("Baño", "Sala") == "derecha",
+        "del Bano a la Sala la indicacion se invierte (derecha)",
+    )
+    comprobar(
+        planificador.lado_encarada("Cuarto", "Inicio") == "derecha",
+        "al volver de un solo tramo tambien se invierte",
+    )
+    comprobar(
+        planificador.lado_encarada("Sala", "Sala") == "izquierda",
+        "sin tramo que recorrer se queda en el giro normal",
+    )
+
+    # Y la frase que se le dice a la persona usa ese lado.
+    movimiento.time = RelojFalso()
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=planificador,
+        ventana=VentanaFalsa(),
+    )
+
+    # Sentido normal: Inicio -> Cuarto.
+    aplicacion.ubicacion = "Inicio"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.estado = Estado.ESPERANDO_DESTINO
+    microfono.cambiar_modo(ModoMicrofono.DESTINO)
+    microfono.eventos.put(EventoVoz(ModoMicrofono.DESTINO, "quiero ir al cuarto"))
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "pide encarar antes de arrancar",
+    )
+    comprobar(
+        any("Gira despacio a la izquierda" in frase for frase in locutor.frases),
+        "de Inicio a Cuarto pide girar a la izquierda",
+    )
+
+    # Sentido inverso: Bano -> Sala.
+    aplicacion.ubicacion = "Baño"
+    aplicacion.estado = Estado.ESPERANDO_DESTINO
+    locutor.frases.clear()
+    microfono.cambiar_modo(ModoMicrofono.DESTINO)
+    microfono.eventos.put(EventoVoz(ModoMicrofono.DESTINO, "quiero ir a la sala"))
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "en el viaje de vuelta tambien encara antes de arrancar",
+    )
+    comprobar(
+        any("Gira despacio a la derecha" in frase for frase in locutor.frases),
+        "del Bano a la Sala pide girar a la derecha",
+    )
+    comprobar(
+        not any("Gira despacio a la izquierda" in frase for frase in locutor.frases),
+        "ya no da la indicacion del sentido normal",
+    )
+
+
+def test_obstaculos_en_medio() -> None:
+    """Los objetos se anuncian nombrados y con la posicion en la que estan."""
+    print("\n[14] Obstaculos: en medio del camino y a los lados")
+    config = Configuracion()
+
+    def donde(caja: tuple[int, int, int, int]) -> str:
+        return posicion_en_frame(
+            caja,
+            ancho=config.ancho,
+            minimo=config.obstaculo_centro_min,
+            maximo=config.obstaculo_centro_max,
+        )
+
+    comprobar(
+        donde((300, 80, 340, 240)) == EN_MEDIO_DEL_CAMINO,
+        "un objeto centrado esta en medio del camino",
+    )
+    comprobar(
+        donde((10, 80, 90, 240)) == "izquierda",
+        "el de la izquierda se queda a la izquierda",
+    )
+    comprobar(
+        donde((560, 80, 630, 240)) == "derecha",
+        "el de la derecha se queda a la derecha",
+    )
+
+    movimiento.time = RelojFalso()
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    detector.obstaculos = (
+        ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+        ObstaculoVisto("maceta", "izquierda"),
+    )
+    aplicacion._anunciar_obstaculos(detector.analizar(None))
+    comprobar(
+        any(
+            "en medio del camino" in frase and "silla" in frase
+            for frase in locutor.frases
+        ),
+        "nombra el objeto que esta en medio del camino",
+    )
+    comprobar(
+        any(
+            "a tu izquierda" in frase and "maceta" in frase
+            for frase in locutor.frases
+        ),
+        "nombra el lateral con su lado",
+    )
+
+    # Varias en el centro: una sola frase con todos los nombres.
+    locutor.frases.clear()
+    detector.obstaculos = (
+        ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+        ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
+    )
+    aplicacion._anunciar_obstaculos(detector.analizar(None))
+    comprobar(
+        any(
+            "en medio del camino" in frase and "silla y mesa" in frase
+            for frase in locutor.frases
+        ),
+        "agrupa los objetos del medio en una sola frase",
+    )
+    comprobar(
+        len(locutor.frases) == 1,
+        "los del medio no se anuncian uno por uno",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -1083,6 +1254,8 @@ def main() -> int:
         test_encarada_y_desvio()
         test_lados_de_puerta()
         test_relocalizacion_y_devolucion()
+        test_encarada_por_sentido()
+        test_obstaculos_en_medio()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

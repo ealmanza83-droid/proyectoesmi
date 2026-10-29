@@ -95,12 +95,26 @@ _GIRO_ESPEJO: dict[str, str] = {
     "izquierda": "derecha",
 }
 
+# Giro con el que hay que encarar la senal de la puerta (ver
+# PlanificadorRutas.lado_encarada).  Las imagenes van impresas del
+# lado DERECHO del pasillo: recorriendo la casa en el sentido en que
+# se midieron los tramos la persona gira a la IZQUIERDA para poner la
+# imagen enfrente, y en el sentido inverso (por ejemplo ir del Bano a
+# la Sala, donde la imagen le quedaria a su izquierda) la indicacion
+# se invierte y hay que girar a la DERECHA.
+GIRO_SENAL_NORMAL = "izquierda"
+GIRO_SENAL_INVERSO = "derecha"
+
 
 class PlanificadorRutas:
     """Calcula la ruta entre dos zonas del mapa."""
 
     def __init__(self, tramos: dict[tuple[str, str], TramoRuta] | None = None):
-        self._tramos = self._ampliar(TRAMOS_DEMO if tramos is None else tramos)
+        base = TRAMOS_DEMO if tramos is None else tramos
+        # Tramos tal como se midieron (un solo sentido): con ellos se
+        # sabe por que lado quedan las imagenes al recorrer la ruta.
+        self._directos = frozenset(base)
+        self._tramos = self._ampliar(base)
         self._grafo = self._construir_grafo()
 
     @staticmethod
@@ -153,6 +167,34 @@ class PlanificadorRutas:
         if origen is None or destino is None:
             return None
         return self._camino_mas_corto(origen, destino)
+
+    def lado_encarada(self, origen: str | None, destino: str | None) -> str:
+        """Sentido en el que hay que girar para encarar la senal.
+
+        El mapa se midio recorriendo la casa en un solo sentido, con
+        las imagenes del lado derecho del pasillo.  Si la ruta sigue
+        ese sentido (por ejemplo Inicio -> Cuarto) la imagen esta a la
+        derecha y la encarada es a la IZQUIERDA; si la ruta va al
+        reves (por ejemplo Bano -> Sala) la imagen le queda al otro
+        lado y el giro se invierte (DERECHA).
+
+        Mira solo el sentido del camino entre las dos zonas, asi que
+        sirve igual para el tramo de salida y para confirmar la
+        llegada a la puerta del destino.
+        """
+        camino = self.camino(origen, destino)
+        if camino is None or len(camino) < 2:
+            return GIRO_SENAL_NORMAL
+
+        directos = 0
+        inversos = 0
+        for tramo in zip(camino, camino[1:]):
+            if tramo in self._directos:
+                directos += 1
+            elif tramo[::-1] in self._directos:
+                inversos += 1
+
+        return GIRO_SENAL_INVERSO if inversos > directos else GIRO_SENAL_NORMAL
 
     def planificar(self, origen: str | None, destino: str | None) -> list[Instruccion] | None:
         """Devuelve las instrucciones para ir de ``origen`` a ``destino``.
