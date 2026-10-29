@@ -177,8 +177,8 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Gracia al arrancar (ignora caidas mientras se manipula el equipo) | `gracia_caida_s` | `8` |
 | Enfriamiento tras una caída (evita dobles alarmas) | `enfriamiento_caida_s` | `15` |
 | Duración máxima del beep continuo de caída | `duracion_alarma_caida_s` | `60` |
-| Pines HC-SR04 | `pin_echo` / `pin_trigger` | `27` / `17` (BCM) |
-| Chip lgpio del encabezado (None = autodetectar) | `chip_lgpio` | `None` |
+| Pines HC-SR04 | `pin_echo` / `pin_trigger` | `23` / `18` (BCM) |
+| Chip lgpio del encabezado (None = autodetectar) | `chip_lgpio` | `15` |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
@@ -358,9 +358,13 @@ pitidos de proximidad (antes ese bloqueo congelaba todo el sistema
 esperando el eco). Al reconectarlo aparece
 `HC-SR04: eco recuperado (NN cm)`.
 
-El chip GPIO se elige **por su etiqueta**: los pines de la cabecera
-están siempre en el chip `pinctrl-*` (`pinctrl-rp1` en la Pi 5,
-`pinctrl-bcm2711` en la Pi 4). Los demás chips (`gpio-brcmstb`, etc.)
+El chip GPIO se elige **primero por el valor de `chip_lgpio`** (en esta
+Raspberry Pi funciona el `15`, el mismo con el que se verificó el
+sensor; ese número va cambiando con las actualizaciones del kernel).
+Si ese chip falta o no deja reclamar los pines, se autodetecta **por su
+etiqueta**: los pines de la cabecera están siempre en el chip
+`pinctrl-*` (`pinctrl-rp1` en la Pi 5, `pinctrl-bcm2711` en la Pi 4).
+Los demás chips (`gpio-brcmstb`, etc.)
 dejan reclamar líneas sin error pero **no van al conector**, así que se
 descartan: si el sistema usara otro chip, el pulso de TRIG no llegaría
 al sensor y nunca habría eco.

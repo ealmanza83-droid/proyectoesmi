@@ -96,15 +96,18 @@ class SensorUltrasonico:
     # Arranque del GPIO
     # ------------------------------------------------------------------
     def _abrir(self, chip_preferido: int | None):
-        """Reclama los dos pines en el chip de la cabecera GPIO.
+        """Reclama los dos pines en el chip indicado por la configuracion.
 
-        En cada modelo de Raspberry Pi los pines del conector estan en
-        el chip cuya etiqueta empieza por "pinctrl" ("pinctrl-rp1" en
-        la Pi 5, "pinctrl-bcm2711" en la Pi 4, "pinctrl-bcm2835" en la
-        3).  Los demas chips dejan reclamar lineas sin error, pero no
-        van al conector: controlan cosas internas (PCIe, PMIC, firmware),
-        asi que primero se comprueba la etiqueta del chip y solo si es
-        el de la cabecera se reclaman los pines.
+        Primero se usa el chip de ``configuracion.py`` (el que se
+        verifico con el sensor en esta Raspberry Pi: su numero va
+        cambiando con las actualizaciones del kernel) sin exigirle
+        etiqueta alguna.  Si ese chip falta o no deja reclamar los
+        pines, se autodetecta el de la cabecera: en cada modelo esta
+        en el chip cuya etiqueta empieza por "pinctrl" ("pinctrl-rp1"
+        en la Pi 5, "pinctrl-bcm2711" en la Pi 4).  Los demas chips
+        dejan reclamar lineas sin error, pero no van al conector:
+        controlan cosas internas (PCIe, PMIC, firmware), asi que a
+        ellos si se les exige la etiqueta "pinctrl".
         """
         lgpio = self._lgpio
         ultimo_error = "sin intentos: no hay chips gpio visibles"
@@ -117,7 +120,7 @@ class SensorUltrasonico:
                 continue
 
             info = self._info_chip(manejo)
-            if not self._es_chip_cabecera(manejo):
+            if numero != chip_preferido and not self._es_chip_cabecera(manejo):
                 # Chip interno del sistema: ni se toca, se sigue buscando
                 # el "pinctrl" de la cabecera.
                 ultimo_error = (
@@ -205,13 +208,19 @@ class SensorUltrasonico:
     def _reclamar_pines(self, manejo) -> None:
         """Reclama TRIG (salida) y ECHO (entrada) con la firma detectada.
 
-        Si la primera disposicion falla con ``TypeError`` se libera lo
-        reclamado y se prueba la otra, por si la deteccion no acerto.
+        lgpio circula en dos formas: la del modulo C, ``(manejo, flags,
+        gpio)``, y la del envoltorio python, ``(manejo, gpio, ...)``.
+        Se intenta la detectada y, si revienta, se libera lo reclamado y
+        se prueba la contraria.  (Antes la segunda prueba solo existia
+        cuando la detectada era "flags": con la detectada "gpio" el
+        reintento repetia el mismo orden equivocado.)
         """
         lgpio = self._lgpio
-        ultimo_error: TypeError | None = None
+        detectado = self._orden_reclamo()
+        contrario = "flags" if detectado == "gpio" else "gpio"
+        errores: list[Exception] = []
 
-        for orden in (self._orden_reclamo(), None):
+        for orden in (detectado, contrario):
             try:
                 if orden == "flags":
                     lgpio.gpio_claim_output(manejo, 0, self._trigger, 0)
@@ -220,8 +229,8 @@ class SensorUltrasonico:
                     lgpio.gpio_claim_output(manejo, self._trigger, 0)
                     lgpio.gpio_claim_input(manejo, self._echo)
                 return
-            except TypeError as error:
-                ultimo_error = error
+            except Exception as error:
+                errores.append(error)
                 # Se libera lo que pudo haberse reclamado mal (en el
                 # orden equivocado se coge la linea 0 por accidente).
                 for linea_gpio in (0, self._trigger, self._echo):
@@ -229,8 +238,14 @@ class SensorUltrasonico:
                         lgpio.gpio_free(manejo, linea_gpio)
                     except Exception:
                         pass
-        assert ultimo_error is not None
-        raise ultimo_error
+
+        # Si el primer intento fallo con TypeError, el orden estaba
+        # equivocado y el error bueno es el del segundo; si fallo de
+        # otra forma, el primero era el orden correcto y su error
+        # explica que le pasa al pin.
+        if errores and not isinstance(errores[0], TypeError):
+            raise errores[0]
+        raise errores[-1]
 
     def _chips_candidatos(self, chip_preferido: int | None):
         """Numeros de chip a probar: el preferido y todos los existentes."""
