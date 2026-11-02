@@ -66,6 +66,7 @@ proyectoesmi/
 │       └── caida.py         DetectorCaida (acelerómetro)
 ├── pruebas/test_flujo.py    prueba completa sin hardware
 ├── pruebas/prueba_ultrasonido.py  verificación del HC-SR04 en la Pi
+├── pruebas/caracterizar_mpu6050.py  offset y ruido del MPU6050
 ├── mi_deteccion/            modelos YOLO (best.pt, yolo11n_ncnn_model…)
 ├── piper_voices/            voces Piper (es_MX-claude-high…)
 ├── vosk/                    modelo Vosk en español
@@ -392,6 +393,19 @@ conectados: VCC→5V, GND→GND y ECHO con **divisor de voltaje** (el ECHO
 del HC-SR04 habla a 5V y el GPIO de la Raspberry Pi solo admite 3.3V).
 El sensor inoperante **nunca detiene la guía**: solo se queda sin
 pitidos.
+
+Para caracterizar el MPU6050 —**offset y desviación estándar del
+ruido en reposo**, los dos datos del giroscopio y el acelerómetro—
+corre con la aplicación **cerrada** (los dos no deben leer el I2C a
+la vez) y el equipo quieto y plano sobre la mesa:
+
+```bash
+python pruebas/caracterizar_mpu6050.py      # 10 s; o p.ej. ...py 30
+```
+
+Imprime la media (offset) y la sigma de cada eje, la tasa real de
+muestreo y la comparación de ese ruido con los umbrales de
+`configuracion.py` (`delta_paso_g`, dead-band de giros).
 
 ---
 

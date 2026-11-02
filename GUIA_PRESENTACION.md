@@ -75,8 +75,9 @@ guia/
     camara.py               Captura de frames
     ultrasonido.py          HC-SR04 (gpiozero) en hilo propio + alerta
 pruebas/
-  test_flujo.py             14 pruebas automatizadas sin hardware
+  test_flujo.py             15 pruebas automatizadas sin hardware
   prueba_ultrasonido.py     Verificación directa del HC-SR04 en la Pi
+  caracterizar_mpu6050.py   Offset y ruido del MPU6050 en reposo
 mi_deteccion/               Modelos YOLO (yolo11n COCO activo)
 piper_voices/  vosk/        Modelos de voz (TTS y reconocimiento)
 ```
