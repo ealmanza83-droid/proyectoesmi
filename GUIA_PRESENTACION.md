@@ -186,9 +186,12 @@ sea el montaje. El signo (derecha/izquierda) lo da la regla de la mano
 derecha.
 
 **Deriva**: el giroscopio tiene sesgo y deriva con la temperatura; por
-eso el `MedidorGiro` aprende el sesgo cuando la persona está en reposo
-(constante de tiempo de 5 s) y el `Rumbo` se **re-ancla en cada señal
-vista** (la señal es una referencia física conocida).
+eso el `MedidorGiro` lo aprende **en marcha**, mirando los extremos de
+una ventana de 1 s: si la señal está plana toma la velocidad tal cual,
+y si oscila (la marcha) toma el punto medio `(máx+mín)/2`, que es
+independiente de la fase del paso. Solo aprende con el rumbo cerrado
+(velocidad sostenida < 5 °/s), y el `Rumbo` se **re-ancla en cada
+señal vista** (la señal es una referencia física conocida).
 
 ### 5.2 Rumbo: orientación relativa, no absoluta
 
@@ -202,10 +205,12 @@ exige la **encarada** antes de arrancar.
 ### 5.3 Pasos: picos de aceleración
 
 Al caminar, el acelerómetro muestra picos con cada pisada. El
-`ContadorPasos` detecta picos sobre la línea base dinámica (que se
-adapta con constante de tiempo de 2 s), con separación mínima de 0.35 s
-para no contar dos veces el mismo pisón. La línea base adaptativa es lo
-que evita los **pasos fantasma** con el sensor sin calibrar.
+`ContadorPasos` detecta picos sobre una **media local** (constante de
+tiempo de 0.7 s) con delta de 0.09 g y separación mínima de 0.18 s
+para no contar dos veces el mismo pisón. La media se actualiza en todo
+momento (también en los picos), así que nunca se arrastra hacia arriba
+con cada paso: eso es lo que evita los **pasos fantasma** y a la vez
+los pasos perdidos que tenía la línea base antigua.
 
 ### 5.4 Línea recta: solo cuentan los pasos rectos
 
@@ -213,7 +218,9 @@ Los pasos del mapa se midieron en línea recta. Un paso dado mientras la
 persona va curvando **no la acerca al sitio medido** (la curva alarga el
 recorrido), así que no se acredita: el rumbo compara contra el rumbo del
 primer paso (`_rumbo_al_caminar`). Si la desviación supera 25°, los
-pasos se congelan hasta enderezar.
+pasos se congelan hasta enderezar. El rumbo solo se mueve con **giro
+sostenido** (EMA de 0.5 s, gate de 5 °/s), así que el balanceo al
+caminar no lo deforma.
 
 ### 5.5 Corrección guiada del desvío (lo más reciente)
 
@@ -221,14 +228,17 @@ Cuando el sistema detecta que vas curvando, **no manda un número fijo
 de grados** ("gira 30°") porque ese número se queda viejo mientras la
 voz habla y tú sigues caminando. En su lugar guía el giro **en vivo**:
 
-1. *"Alto un momento. Te estás desviando de la línea recta, unos 30
+1. El aviso solo sale si el desvío pasa de 25° **y se mantiene un
+   segundo** (`confirmacion_desvio_s`): un paso torcido o un balanceo
+   puntual no lo disparan.
+2. *"Alto un momento. Te estás desviando de la línea recta, unos 30
    grados. Gira despacio a la izquierda hasta que te diga que ya
    enderezaste."*
-2. Avances al 50% y 75% del giro de corrección: *"Llevas la mitad del
+3. Avances al 50% y 75% del giro de corrección: *"Llevas la mitad del
    giro para enderezar"*, *"Ya casi enderezas"*.
-3. Al volver a la recta: *"Ya enderezaste. Los pasos vuelven a
-   contar."*
-4. Respaldo: si a los 15 s de terminar de sonar el aviso sigues fuera
+4. Al volver por debajo del 60% del umbral (histéresis): *"Ya
+   enderezaste. Los pasos vuelven a contar."*
+5. Respaldo: si a los 15 s de terminar de sonar el aviso sigues fuera
    de la recta (o giraste al revés), se recuerda con los grados
    actualizados.
 
@@ -400,7 +410,8 @@ de esa zona (3 detecciones seguidas). La cara del pasillo solo dice
 sobre la vertical (montaje libre) y el rumbo se re-ancla en cada señal.
 
 **¿Qué pasa con la deriva del giroscopio?** Se aprende el sesgo en
-reposo y se re-ancla el rumbo en cada señal; la llegada además se
+marcha (ventana de extremos de 1 s, con gate de rumbo cerrado) y se
+re-ancla el rumbo en cada señal; la llegada además se
 verifica con la cámara (no depende solo de la integración).
 
 **¿Por qué tantos hilos?** Para que la cámara (lenta, ~100-300 ms por
@@ -427,6 +438,10 @@ Todo umbral vive en `guia/configuracion.py`:
 | Ajuste | Parámetro |
 |---|---|
 | Cuánto giro cuenta como desvío | `desvio_maximo_grados = 25` |
+| Confirmación que debe durar el desvío antes de avisar | `confirmacion_desvio_s = 1.0` |
+| Histéresis de liberación del aviso | `liberacion_desvio_factor = 0.6` |
+| Delta de aceleración que vale como paso | `delta_paso_g = 0.09` |
+| Suavizado previo de los pasos | `tau_media_paso_s = 0.7` |
 | Enfriamiento del aviso de desvío | `enfriamiento_desvio_s = 12` |
 | Recordatorio durante la corrección | `RECORDATORIO_CORRECCION_S = 15` (en `aplicacion.py`) |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s = 60` |

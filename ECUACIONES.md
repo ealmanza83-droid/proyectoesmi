@@ -76,32 +76,55 @@ rota) se asume montaje plano y se usa `−gz`.
 
 ---
 
-## 4. Filtrado del sesgo del giroscopio (calibración en marcha) — `movimiento.py` líneas 134-137
+## 4. Filtrado del sesgo del giroscopio (calibración en marcha) — `movimiento.py` (`MedidorGiro._aprender_sesgo`)
 
 **Filtro paso bajo exponencial (media móvil exponencial)**:
 
 ```
 α = dt / τ          con τ = constante_sesgo_s = 5.0 s
-sesgo[k+1] = sesgo[k] + α · (ω[k] − sesgo[k])
+sesgo[k+1] = sesgo[k] + α · (objetivo[k] − sesgo[k])
 ```
 
-Solo se actualiza cuando `|ω − sesgo| ≤ 5 °/s` (rango de reposo,
-`velocidad_reposo_dps`). Es la forma discreta de una **ecuación diferencial de
-primer orden** `db/dt = (ω − b)/τ`: aprende el offset aunque la temperatura lo
-desplace, sin depender de una calibración fija.
+La novedad es **de dónde sale `objetivo`**: una **ventana deslizante de
+extremos** (`deque` de `(tiempo, velocidad)`, `ventana_sesgo_s = 1.0 s`) da
+`v_min` y `v_max` de la ventana, y con ellos se clasifica el estado actual
+(`_clase_sesgo`):
+
+| Estado | Condición | `objetivo` aprendido |
+|---|---|---|
+| `girando` | `|velocidad_sostenida| ≥ 5 °/s` (gate) | **no aprende** |
+| `plano` | `v_max − v_min ≤ 5 °/s` (`velocidad_reposo_dps`) | `velocidad` actual (marcha plana: `v ≈ sesgo`) |
+| `oscilando` | `v_max − v_min ≥ 10 °/s` **y** `v_min < v < v_max` estricto | `punto_medio = (v_max + v_min)/2` |
+| arranque | ventana aún incompleta (`primera_muestra`) | **no aprende** |
+
+*Por qué ventana y no envolvente ataque/release:* el punto medio de los
+extremos es **independiente de la fase** de la oscilación de la marcha — la
+marcha sí es un movimiento casi sinusoidal de ±10 °/s, y cualquier detector
+fase-acoplado aprendía el "centro" equivocado. Además, aprender solo con
+`min < v < max` excluye los instantes en que la velocidad está en un extremo
+(el valor en el extremo, que es `sesgo ± amplitud`, sesgaría el promedio).
+
+*Valvula de seguridad* (`recalibracion_sesgo_s = 20.0 s`): si el estado lleva
+20 s `plano and girando` a la vez (sesgo ya desviado > 5 °/s, que abre el
+gate sin que la señal real supere la zona muerta), aprende igualmente. Un giro
+real de 90° a la mínima velocidad tarda < 18 s, así que no se "recalibra"
+en medio de un giro intencionado.
+
+Es la forma discreta de una **ecuación diferencial de primer orden**
+`db/dt = (ω − b)/τ`: aprende el offset aunque la temperatura lo desplace, sin
+depender de una calibración fija.
 
 ---
 
-## 5. Integración del ángulo (giro acumulado) — `movimiento.py` líneas 139-151
+## 5. Integración del ángulo (giro acumulado) — `movimiento.py` (`MedidorGiro.paso`)
 
 **Integración de Euler (rectángulos) de la velocidad angular**, con **zona
 muerta (dead-band)**:
 
 ```
-si |ω − sesgo| > umbral (5 °/s):
-    θ_derecha   += |ω − sesgo| · dt      (línea 143)
-    θ_izquierda += |ω − sesgo| · dt      (línea 145)
-    rumbo       += dirección · dt        (línea 151)
+si |velocidad − sesgo| > umbral (5 °/s):
+    θ_derecha   += |velocidad − sesgo| · dt
+    θ_izquierda += |velocidad − sesgo| · dt
 ```
 
 Equivalente a `θ = ∫ ω dt ≈ Σ ωₖ·Δt`.
@@ -116,49 +139,68 @@ completado el giro.
 ## 6. Rumbo relativo — `guia/navegacion/rumbo.py`
 
 ```
-rumbo[k] = rumbo[k−1] + ω·dt     (línea 31, acumulación)
-rumbo = 0 al confirmar una señal  (línea 33, "anclaje")
+rumbo[k] = rumbo[k−1] + ω·dt     (acumulación, solo con giro sostenido)
+rumbo = 0 al confirmar una señal  (re-anclaje)
 ```
 
 Como el MPU6050 **no tiene magnetómetro**, no hay norte: la referencia de 0°
 la da la señal orientadora enfrente. La deriva del giroscopio se corrige
 re-anclando en cada señal.
 
-**Vigilancia de línea recta** — `aplicacion.py` líneas 610, 624-640:
+**Gate de giro sostenido** (`MedidorGiro.en_muestra`): la velocidad
+instantánea pasa primero por un EMA (`tau_sostenida_giro_s = 0.5 s`):
+
+```
+sostenida[k] = sostenida[k−1] + (dt/0,5)·(velocidad[k] − sostenida[k−1])
+```
+
+y el rumbo **solo avanza** cuando `|sostenida| ≥ 5 °/s`. Así el balanceo al
+caminar (±20 °/s alternando a 2 Hz, promedio 0 tras el EMA) no deforma el
+rumbo: solo integra un giro mantenido.
+
+**Vigilancia de línea recta** — `aplicacion.py` (`_vigilar_desvio`):
 
 ```
 desvío = |rumbo_actual − rumbo_al_empezar_a_caminar|
-si desvío ≥ 25° (desvio_maximo_grados) → aviso con corrección = round(|desvío|) en sentido opuesto
+si desvío ≥ 25° (desvio_maximo_grados) durante ≥ 1,0 s (confirmacion_desvio_s) → aviso
+al volver por debajo de 0,6·25° (liberacion_desvio_factor) → "enderezaste"
 ```
 
-Y los **pasos no se acreditan** mientras `desvío ≥ 25°` (líneas 610-614).
+La **confirmación temporal** evita avisos falsos por un paso torcido o un
+balanceo puntual; la **histéresis de liberación** evita el efecto
+aviso/contraviso en el umbral. Y los **pasos no se acreditan** mientras
+`desvío ≥ 25°`.
 
 ---
 
-## 7. Contador de pasos — `movimiento.py` (`ContadorPasos`, líneas 187-218)
+## 7. Contador de pasos — `movimiento.py` (`ContadorPasos`)
 
-**Umbrales dinámicos sobre la línea base** (líneas 197-199):
-
-```
-umbral_alto = reposo + Δ        con Δ = delta_paso_g = 0.12 g
-umbral_bajo = reposo + 0.5·Δ
-```
-
-**Histéresis (trigger de Schmitt) en modo borde** (líneas 201-211): un paso
-cuenta solo cuando `|a|` **cruza** el umbral alto de abajo hacia arriba, y se
-rearma al bajar del umbral bajo — así una aceleración sostenida no genera
-"pasos fantasma". Añade un **tiempo refractario** de 0,35 s
-(`intervalo_paso_s`).
-
-**Línea base adaptativa** (líneas 217-218), otro filtro paso bajo:
+**Media local de la señal** (filtro paso bajo primero):
 
 ```
-α = min(dt / τ, 1)   con τ = tau_reposo_paso_s = 2.0 s
-reposo += (|a| − reposo) · α
+α = min(dt / τ, 1)   con τ = tau_media_paso_s = 0,7 s
+media += (|a| − media) · α
 ```
 
-Se actualiza solo fuera de picos, para seguir la deriva lenta sin subir con
-cada paso.
+Sobre la **media** (no sobre la lectura cruda) se evalúan los umbrales:
+
+```
+Δ = delta_paso_g = 0,09 g
+umbral_alto = media + Δ
+umbral_bajo = media + 0,5·Δ
+```
+
+**Histéresis (trigger de Schmitt) en modo borde**: un paso cuenta solo cuando
+la media **cruza** el umbral alto de abajo hacia arriba, y se rearma al bajar
+del umbral bajo — así una aceleración sostenida no genera "pasos fantasma".
+Añade un **tiempo refractario** de 0,18 s (`intervalo_paso_s`), por debajo del
+mínimo fisiológico entre pasos.
+
+*Por qué media local y no línea base antigua:* la media se actualiza **en todo
+momento** (también en los picos), así que nunca se "arrastra" hacia arriba
+con cada paso; el pico del paso debe superar `media + 0,09 g` sí o sí. Antes
+la línea base subía con cada paso y los valles quedaban por debajo del
+umbral → pasos perdidos.
 
 ---
 
@@ -264,14 +306,15 @@ si ángulo ≥ objetivo          → "Giro completo"   (90°, 180° o 90° del t
 |---|---|---|
 | Escalado del sensor | `raw/16384` (g), `raw/131` (°/s) | `hardware/mpu6050.py` |
 | Magnitud de aceleración | `√(ax²+ay²+az²)` | `hardware/mpu6050.py:35` |
-| Giro sobre la vertical | `a⃗·ω⃗/|a⃗|` (producto punto) | `navegacion/movimiento.py:110-119` |
-| Filtrado de sesgo | `b += α(ω−b)`, `α = dt/τ` | `movimiento.py:136-137` |
-| Integración de ángulo | `θ += ω·dt` con dead-band 5°/s | `movimiento.py:143-151` |
-| Pasos | umbrales `reposo+Δ` / `reposo+0,5Δ` (histéresis) + línea base `α = dt/2` | `movimiento.py:197-218` |
+| Giro sobre la vertical | `a⃗·ω⃗/|a⃗|` (producto punto) | `navegacion/movimiento.py` |
+| Filtrado de sesgo | `b += α(objetivo−b)`; objetivo = plano→`v`, oscilando→`(max+min)/2` | `movimiento.py` (`_aprender_sesgo`) |
+| Gate de rumbo | EMA `τ=0,5 s`, integra solo con `\|sostenida\| ≥ 5°/s` | `movimiento.py` (`en_muestra`) |
+| Integración de ángulo | `θ += ω·dt` con dead-band 5°/s | `movimiento.py` (`paso`) |
+| Pasos | media local `τ=0,7 s` + umbrales `media+0,09` / `media+0,045` (histéresis) | `movimiento.py` (`ContadorPasos`) |
 | Caída | `\|\|a\|−1g\| ≥ 2,5g` o salto `≥ 1,5g` | `navegacion/caida.py:78-84` |
 | Distancia ultrasónica | `d = t[µs]/58` (`d = v·t/2`, v=343 m/s) | `hardware/ultrasonido.py:348` |
 | Ritmo de pitidos | `0,10 + (d/200)·1,10` s (lineal) | `ultrasonido.py:53-54` |
 | Audio | `s[i] = A·sin(2π f i/fs)` | `audio/alarma.py:62` |
 | Confirmación de señal | racha ≥ 3, tolera 2 fallos, conf ≥ 0,60 | `vision/detector.py` |
-| Desvío en línea recta | `\|θ−θ₀\| ≥ 25°` → corregir `round(\|desvío\|)` | `aplicacion.py:610-641` |
+| Desvío en línea recta | `\|θ−θ₀\| ≥ 25°` durante 1 s → corregir; libera a 0,6·25° | `aplicacion.py` (`_vigilar_desvio`) |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |

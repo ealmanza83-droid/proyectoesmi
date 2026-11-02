@@ -59,7 +59,7 @@ from .audio.alarma import ReproductorBeep
 from .audio.locutor import Locutor
 from .audio.microfono import Microfono, ModoMicrofono
 from .configuracion import Configuracion
-from .dominio.catalogo import LADO_INTERIOR, LADO_PASILLO
+from .dominio.catalogo import LADO_INTERIOR, LADO_PASILLO, senal_de_clase
 from .dominio.comandos import (
     TipoComando,
     contiene_despertador,
@@ -179,6 +179,9 @@ class Aplicacion:
         self._lado_encarada: str = GIRO_SENAL_NORMAL
         self._rumbo_al_caminar = 0.0
         self._ultima_alerta_desvio: float | None = None
+        # Momento en que el desvio cruzo el umbral: el aviso solo sale
+        # si se sostiene ``confirmacion_desvio_s`` (ver _vigilar_desvio).
+        self._inicio_desvio: float | None = None
         # Correccion guiada del rumbo: el giro de vuelta a la recta se
         # sigue en vivo (no con un numero fijo) hasta decir "para".
         self._corrigiendo = False
@@ -211,6 +214,11 @@ class Aplicacion:
         # se ve con la camara (puerta del lado del pasillo, senal de
         # otra zona): una senal confirmada se repite en varios frames.
         self._ultima_advertencia: dict[str, float] = {}
+        # Sincronizacion camara + ultrasonido: si el eco ya estaba en
+        # rango no se vuelve a explicar, y un anuncio de la camara
+        # reciente cuenta como la misma explicacion.
+        self._cerca_antes = False
+        self._ultimo_anuncio_obstaculo = 0.0
         # Avisos de avance del giro en curso (0.5 y 0.75 del objetivo)
         self._avances_anunciados: set[float] = set()
         self._ultimo_angulo_giro = 0.0
@@ -284,7 +292,7 @@ class Aplicacion:
 
             self._procesar_voz()
             self._vigilar_caida()
-            self._anunciar_obstaculos(resultado)
+            self._anunciar_obstaculos(resultado, distancia_cm)
 
             # Si la alarma de caida se apago sola (se acabo el tiempo),
             # el micro no puede quedarse para siempre escuchando solo
@@ -801,26 +809,49 @@ class Aplicacion:
     # ------------------------------------------------------------------
     # Obstaculos y seguridad
     # ------------------------------------------------------------------
-    def _anunciar_obstaculos(self, resultado: ResultadoVision) -> None:
-        """Nombra los objetos que tiene la persona delante.
+    def _anunciar_obstaculos(
+        self, resultado: ResultadoVision, distancia_cm: float | None
+    ) -> None:
+        """Nombra los obstaculos con la camara y el ultrasonido a uno.
 
-        Lo que esta EN MEDIO del camino se anuncia primero y en una
-        sola frase: es lo que puede cruzarse mientras la persona
-        camina.  Lo de los lados se nombra con su lado, para que sepa
-        que hay y donde.  El detector ya aplico el enfriamiento por
-        objeto; aqui solo se redacta el aviso.
+        Los dos sensores dicen lo mismo de forma distinta (la camara
+        nombra el objeto, el ultrasonido pitia) y antes hablaban por
+        separado, lo que confundia a la persona: no sabia si los
+        pitidos eran lo mismo que acaba de oir.  Ahora:
+
+        * lo que esta EN MEDIO del camino y cerca del eco se anuncia
+          en UNA sola frase con el nombre Y la distancia: los pitidos
+          quedan explicados;
+        * solo camara (lejos o sin eco): se nombra como antes;
+        * solo ultrasonido (algo que la camara no nombra): al entrar
+          en rango se explica una sola vez que los pitidos significan
+          "hay algo enfrente".
         """
         en_medio = [
             obstaculo.nombre
             for obstaculo in resultado.obstaculos
             if obstaculo.lado == EN_MEDIO_DEL_CAMINO
         ]
+        cerca = (
+            distancia_cm is not None
+            and distancia_cm <= self.config.distancia_alerta_cm
+        )
+
         if en_medio:
             articulo = "un obstáculo" if len(en_medio) == 1 else "obstáculos"
-            self._hablar(
-                f"Alto, en medio del camino hay {articulo}: "
-                f"{_unir_nombres(en_medio)}."
-            )
+            nombres = _unir_nombres(en_medio)
+            if cerca:
+                # La camara y el eco hablan del mismo obstaculo: una
+                # sola frase con nombre y distancia.
+                self._hablar(
+                    f"Alto, en medio del camino hay {articulo}: "
+                    f"{nombres}, {self._distancia_en_palabras(distancia_cm)}."
+                )
+            else:
+                self._hablar(
+                    f"Alto, en medio del camino hay {articulo}: {nombres}."
+                )
+            self._ultimo_anuncio_obstaculo = time.monotonic()
 
         for obstaculo in resultado.obstaculos:
             if obstaculo.lado != EN_MEDIO_DEL_CAMINO:
@@ -828,6 +859,29 @@ class Aplicacion:
                     f"Alto, hay un obstáculo a tu {obstaculo.lado}: "
                     f"{obstaculo.nombre}."
                 )
+
+        # El ultrasonido pitia sin que la camara nombre nada: explica
+        # los pitidos una sola vez al entrar en el rango de alerta.
+        # Si la camara acaba de anunciar algo es el mismo obstaculo y
+        # la frase no se repite.
+        if cerca and not self._cerca_antes:
+            if (
+                time.monotonic() - self._ultimo_anuncio_obstaculo
+                >= self.config.enfriamiento_objeto_s
+            ):
+                self._advertecer(
+                    "eco",
+                    "Hay algo enfrente. Los pitidos indican qué tan "
+                    "cerca está.",
+                )
+        self._cerca_antes = cerca
+
+    @staticmethod
+    def _distancia_en_palabras(distancia_cm: float) -> str:
+        """'a unos 45 centimetros' por debajo de 1 m, 'a unos 1.5 metros'."""
+        if distancia_cm < 100.0:
+            return f"a unos {int(round(distancia_cm))} centímetros"
+        return f"a unos {distancia_cm / 100.0:.1f} metros"
 
     def _vigilar_caida(self) -> None:
         """Si el acelerometro detecto una caida, alarma constante + voz.
@@ -1046,6 +1100,7 @@ class Aplicacion:
         elif instruccion.es_pasos:
             dados = self._creditar_pasos()
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
+            self._guiar_con_senal(resultado)
             self._vigilar_desvio()
             if dados >= instruccion.cantidad:
                 self._hablar("Pasos completados. Puedes parar.")
@@ -1091,12 +1146,76 @@ class Aplicacion:
                 print(f"PASO SIN CREDITO: desviado {desvio:.0f} grados")
         return self._pasos_acreditados
 
+    def _guiar_con_senal(self, resultado: ResultadoVision) -> None:
+        """Guia visual del tramo: caminar hacia la senal si esta enfrente.
+
+        El MPU6050 esta en la cintura y solo da rumbo RELATIVO (ademas
+        de derivar): la camara es el unico sensor que no se desvia.
+        Cuando YOLO confirma la senal de la SIGUIENTE zona del camino
+        casi en el centro del frame, la persona la tiene delante y
+        basta con caminar hacia ella; el aviso da una referencia
+        absoluta mientras dure el tramo y sirve tambien de apoyo cuando
+        el sistema le esta pidiendo que enderece.
+
+        Solo se guia con la senal centrada: una imagen a un lado es
+        una puerta que se pasa de largo, no un punto al que caminar
+        (ir hacia ella seria acabar contra la pared).  Las de otras
+        zonas tampoco sirven (ya se anuncian aparte en _seguir_senal).
+        """
+        senal = resultado.senal
+        if senal is None or not self._camino:
+            return
+
+        indice_siguiente = self._indice_zona + 1
+        if (
+            indice_siguiente >= len(self._camino)
+            or self._camino[indice_siguiente] != senal.zona
+        ):
+            return
+
+        caja = next(
+            (
+                deteccion.caja
+                for deteccion in resultado.detecciones
+                if deteccion.es_senal and senal_de_clase(deteccion.nombre) == senal
+            ),
+            None,
+        )
+        if caja is None:
+            return
+
+        x1, _, x2, _ = caja
+        centro = (x1 + x2) / 2 / self.config.ancho
+        if not (
+            self.config.guia_senal_centro_min
+            <= centro
+            <= self.config.guia_senal_centro_max
+        ):
+            return
+
+        self._advertecer(
+            f"guia:{senal.zona}",
+            f"La señal de {senal.zona} está frente a ti: camina hacia ella.",
+        )
+
     def _vigilar_desvio(self) -> None:
         """Guia la correccion del rumbo hasta volver a la linea recta.
 
         El rumbo integra el giroscopio desde la ultima senal anclada:
         si mientras camina acumula mas giro que ``desvio_maximo_grados``
         va curvando, y los pasos no llegarian al sitio medido.
+
+        Con el sensor en la cintura hacen falta tres protecciones para
+        que el aviso no salga por un balanceo o un retorcimiento del
+        torso:
+
+        * el rumbo solo acumula el giro SOSTENIDO (ver MedidorGiro):
+          el vaiven de la cadera no entra;
+        * el desvio tiene que mantenerse ``confirmacion_desvio_s``
+          desde que cruzo el umbral antes de hablar;
+        * al liberar se usa ``liberacion_desvio_factor``: sin
+          histérisis, en el limite del umbral el sistema parpadearia
+          entre "te estas desviando" y "ya enderezaste".
 
         La correccion se sigue EN VIVO: no se manda un numero fijo de
         grados (que se queda viejo mientras la persona oye la voz y
@@ -1106,8 +1225,14 @@ class Aplicacion:
         caminando en la direccion contraria.
         """
         desvio = self.rumbo.grados - self._rumbo_al_caminar
+        umbral = self.config.desvio_maximo_grados
+        liberacion = umbral * self.config.liberacion_desvio_factor
+        ahora = time.monotonic()
 
-        if abs(desvio) < self.config.desvio_maximo_grados:
+        if abs(desvio) < liberacion:
+            # Dentro de la linea recta: si estaba corrigiendo, ya
+            # enderezo (aqui se aplica la histérisis de liberacion).
+            self._inicio_desvio = None
             if self._corrigiendo:
                 self._corrigiendo = False
                 self._avances_correccion.clear()
@@ -1115,13 +1240,28 @@ class Aplicacion:
                 self._hablar("Ya enderezaste. Los pasos vuelven a contar.")
             return
 
-        ahora = time.monotonic()
+        if abs(desvio) < umbral:
+            # Zona de histérisis: todavia no se libera (falta bajar
+            # hasta ``liberacion``).  Tampoco se avisa, y la espera de
+            # confirmacion se reinicia: el desvio tiene que sostenerse
+            # por encima del umbral para que el aviso salga.
+            self._inicio_desvio = None
+            return
+
         # Desvio positivo = giro a la derecha: para volver a la recta
         # hay que girar al lado contrario.
         sentido = "izquierda" if desvio > 0 else "derecha"
         grados = round(abs(desvio))
 
         if not self._corrigiendo:
+            if self._inicio_desvio is None:
+                self._inicio_desvio = ahora
+                print(f"DESVIO: {desvio:+.1f} grados (confirmando...)")
+                return
+            if ahora - self._inicio_desvio < self.config.confirmacion_desvio_s:
+                # Un giro repentino del torso (o un balanceo fuerte)
+                # no es un cambio de ruta: todavia no se avisa.
+                return
             if (
                 self._ultima_alerta_desvio is not None
                 and ahora - self._ultima_alerta_desvio

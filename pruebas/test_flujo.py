@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import math
 import queue
 import sys
 import threading
@@ -110,6 +111,7 @@ from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
+from guia.navegacion.rumbo import Rumbo  # noqa: E402
 from guia.vision.detector import (  # noqa: E402
     EN_MEDIO_DEL_CAMINO,
     ConfirmadorSenal,
@@ -154,8 +156,11 @@ class MPUFalso:
 
 
 class SensorFalso:
-    distancia_cm = 150.0
-    distancia_alerta_cm = 200.0
+    def __init__(self, distancia_cm: float | None = 150.0) -> None:
+        # Por defecto en rango de alerta (200 cm): los avisos de
+        # obstaculo se prueban con el eco presente.
+        self.distancia_cm = distancia_cm
+        self.distancia_alerta_cm = 200.0
 
 
 class AlarmaFalsa:
@@ -242,7 +247,7 @@ def paso(
     aplicacion.muestreador.muestrear(mpu.leer(), dt)
     aplicacion._procesar_voz()
     aplicacion._vigilar_caida()
-    aplicacion._anunciar_obstaculos(resultado)
+    aplicacion._anunciar_obstaculos(resultado, aplicacion.sensor.distancia_cm)
     aplicacion._manejadores[aplicacion.estado](aplicacion, resultado)
 
 
@@ -697,7 +702,11 @@ def test_encarada_y_desvio() -> None:
     mpu = MPUFalso()
 
     aplicacion = Aplicacion(
-        config=Configuracion(),
+        # La confirmacion del desvio usa el reloj REAL (no el falso de
+        # movimiento), asi que aqui se desactiva para probar la
+        # mecanica del aviso; la confirmacion en si tiene su propia
+        # prueba (test_desvio_requiere_confirmacion).
+        config=dataclasses.replace(Configuracion(), confirmacion_desvio_s=0.0),
         camara=CamaraFalsa(),
         mpu=mpu,
         sensor=SensorFalso(),
@@ -799,9 +808,12 @@ def test_encarada_y_desvio() -> None:
     # Endereza (gira al lado contrario hasta la recta) y entonces si
     # vuelven a contar.  Ademas ahora el sistema avisa cuando la
     # correccion ya esta hecha (antes los pasos volvian en silencio).
+    # La liberacion usa histérisis (liberacion_desvio_factor): hay
+    # que bajar mas abajo del umbral para que diga "ya enderezaste",
+    # por eso hacen falta unas cuantas muestras mas que el umbral.
     locutor.frases.clear()
     mpu.gz = 60.0
-    for _ in range(14):
+    for _ in range(16):
         paso(aplicacion, detector, mpu)
     comprobar(
         any("enderezaste" in frase for frase in locutor.frases),
@@ -1208,13 +1220,23 @@ def test_obstaculos_en_medio() -> None:
         ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
         ObstaculoVisto("maceta", "izquierda"),
     )
-    aplicacion._anunciar_obstaculos(detector.analizar(None))
+    aplicacion._anunciar_obstaculos(
+        detector.analizar(None), aplicacion.sensor.distancia_cm
+    )
     comprobar(
         any(
             "en medio del camino" in frase and "silla" in frase
             for frase in locutor.frases
         ),
         "nombra el objeto que esta en medio del camino",
+    )
+    comprobar(
+        any("a unos 1.5 metros" in frase for frase in locutor.frases),
+        "con el eco cerca, la frase lleva la distancia del ultrasonido",
+    )
+    comprobar(
+        not any("maceta, a unos" in frase for frase in locutor.frases),
+        "a los lados no se pega la distancia del eco (es de enfrente)",
     )
     comprobar(
         any(
@@ -1230,7 +1252,9 @@ def test_obstaculos_en_medio() -> None:
         ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
         ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
     )
-    aplicacion._anunciar_obstaculos(detector.analizar(None))
+    aplicacion._anunciar_obstaculos(
+        detector.analizar(None), aplicacion.sensor.distancia_cm
+    )
     comprobar(
         any(
             "en medio del camino" in frase and "silla y mesa" in frase
@@ -1241,6 +1265,83 @@ def test_obstaculos_en_medio() -> None:
     comprobar(
         len(locutor.frases) == 1,
         "los del medio no se anuncian uno por uno",
+    )
+
+
+def test_obstaculos_sincronizados() -> None:
+    """Camara y ultrasonido hablan del mismo obstaculo, no por separado."""
+    print("\n[16] Obstaculos: camara y ultrasonido sincronizados")
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+
+    # 16.1 Camara ve el objeto y el eco esta lejos: se nombra SIN
+    # distancia (el eco todavia no pitia; seria mentir).
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(distancia_cm=350.0),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+    detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    comprobar(
+        any(
+            "en medio del camino hay un obstáculo: silla" in frase
+            and "metros" not in frase
+            for frase in locutor.frases
+        ),
+        "con el eco lejos no inventa distancia",
+    )
+
+    # 16.2 Entra en el rango del eco con la camara viendo el objeto:
+    # UNA sola frase con nombre y distancia (los pitidos quedan
+    # explicados) y NO se repite la frase generica de los pitidos.
+    locutor.frases.clear()
+    aplicacion._cerca_antes = False
+    aplicacion._ultimo_anuncio_obstaculo = 0.0
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 120.0)
+    comprobar(
+        any("silla, a unos 1.2 metros" in frase for frase in locutor.frases),
+        "cerca: nombre y distancia en la misma frase",
+    )
+    comprobar(
+        not any("pitidos" in frase for frase in locutor.frases),
+        "no explica los pitidos si la camara ya nombró el obstaculo",
+    )
+
+    # 16.3 Solo ultrasonido (algo que la camara no nombra): al entrar
+    # en rango se explica UNA vez que los pitidos significan peligro.
+    locutor.frases.clear()
+    detector.obstaculos = ()
+    aplicacion._cerca_antes = False
+    aplicacion._ultimo_anuncio_obstaculo = 0.0
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 80.0)
+    comprobar(
+        any("Hay algo enfrente" in frase for frase in locutor.frases),
+        "sin objeto a la vista explica lo que significan los pitidos",
+    )
+    locutor.frases.clear()
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 75.0)
+    comprobar(
+        len(locutor.frases) == 0,
+        "siguiendo en rango no repite la explicacion cada vuelta",
+    )
+
+    # 16.4 Se aleja del obstaculo: se rearmar para el proximo acercamiento.
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    aplicacion._ultima_advertencia.clear()  # olvida el enfriamiento de 16.3
+    locutor.frases.clear()
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 60.0)
+    comprobar(
+        any("Hay algo enfrente" in frase for frase in locutor.frases),
+        "al volver a entrar en rango vuelve a explicar los pitidos",
     )
 
 
@@ -1386,6 +1487,215 @@ def test_encarada_intermedia_de_tramo() -> None:
     comprobar("Has llegado a Sala." in locutor.frases, "anuncio de llegada")
 
 
+def test_pasos_con_media_cambiada() -> None:
+    """La media local sigue un cambio de postura sin dejar de contar.
+
+    Con la linea base vieja (un reposo congelado) la marcha inflaba la
+    referencia y los pasos reales se hundian bajo el umbral: "a veces
+    no cuenta".  Aqui toda la magnitud sube 0.10 g de golpe (la
+    persona se agacha o carga algo) y el contador tiene que seguir.
+    """
+    print("\n[17] Pasos: la media local sigue la postura que cambia")
+    config = Configuracion()
+    pasos = movimiento.ContadorPasos(config)
+    mpu = MPUFalso()
+
+    # Marcha con la cintura a la altura normal: valles 1.00, picos 1.25.
+    for i in range(200):
+        mpu.az = 1.25 if i % 4 < 2 else 1.00
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(pasos.pasos >= 5, "con la postura inicial cuenta los pasos")
+
+    # Toda la magnitud sube 0.10 g (valles 1.10, picos 1.35): la media
+    # local la persigue en fraccion de segundo y la oscilacion de 0.25 g
+    # sigue cruzando el umbral de delta_paso_g.
+    previos = pasos.pasos
+    for i in range(200):
+        mpu.az = 1.35 if i % 4 < 2 else 1.10
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        pasos.pasos - previos >= 5,
+        "subida la magnitud 0.10 g de golpe sigue contando",
+    )
+
+
+def test_rumbo_ignora_balanceo() -> None:
+    """El vaiven del torso al caminar NO mueve el rumbo; un giro si."""
+    print("\n[18] Rumbo: el balanceo al caminar no desvia la ruta")
+    config = Configuracion()
+    rumbo = Rumbo()
+    giro = movimiento.MedidorGiro(config, rumbo=rumbo)
+    mpu = MPUFalso()
+    dt = 0.01  # 100 muestras por segundo, como el muestreador real
+
+    # Balanceo tipico de la cintura: +20 a -20 dps a 2 Hz.  Con el
+    # sensor plano la velocidad de giro a la derecha es -gz, por eso el
+    # gz del ensayo lleva el signo opuesto.
+    for i in range(int(8.0 / dt)):
+        mpu.gz = -20.0 * math.sin(2.0 * math.pi * 2.0 * i * dt)
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(
+        abs(rumbo.grados) < 5.0,
+        "8 s de balanceo a 2 Hz: el rumbo casi no se mueve",
+    )
+
+    # Un giro de verdad, en cambio, se integra enseguida (el filtro
+    # sostenido se llena en decimas de segundo y despues pasa todo).
+    mpu.gz = -100.0
+    for _ in range(100):
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(rumbo.grados >= 60.0, "un giro sostenido de 1 s si se mide")
+
+
+def test_sesgo_corregido_en_marcha() -> None:
+    """El sesgo aprendido con la envolvente frena la deriva del rumbo.
+
+    Un sesgo real de 6 dps (mala calibracion inicial, calentamiento)
+    esta POR ENCIMA del umbral de giro: si no se corrige, el rumbo
+    deriva como si la persona girara a la derecha para siempre y salen
+    avisos de desvio falsos.  La regla vieja ("aprende de cualquier
+    muestra en reposo") se re-aprendia a si misma con el sesgo
+    equivocado y no salia de ahi; el punto medio de la envolvente si.
+    """
+    print("\n[19] Sesgo: aprendido en marcha, el rumbo deja de derivar")
+    config = Configuracion()
+    rumbo = Rumbo()
+    giro = movimiento.MedidorGiro(config, rumbo=rumbo)
+    mpu = MPUFalso()
+    dt = 0.01
+    sesgo_real_dps = 6.0
+
+    def marchar(segundos: float) -> None:
+        """Marcha recta con balanceo de 2 Hz encima del sesgo real."""
+        for i in range(int(segundos / dt)):
+            velocidad = sesgo_real_dps + 20.0 * math.sin(
+                2.0 * math.pi * 2.0 * i * dt
+            )
+            mpu.gz = -velocidad
+            giro.en_muestra(mpu.leer(), dt)
+
+    # 20 s de marcha: el sesgo aprendido se acerca al real y la deriva
+    # del rumbo queda acotada (no crece sin limite como sin corregir).
+    marchar(20.0)
+    comprobar(
+        abs(giro._sesgo - sesgo_real_dps) <= 1.5,
+        f"el sesgo aprendido ({giro._sesgo:.1f} dps) sigue al real (6 dps)",
+    )
+    derivada = rumbo.grados
+    comprobar(
+        abs(derivada) < 60.0,
+        "mientras se recalibraba la deriva del rumbo queda limitada",
+    )
+
+    # Corregido el sesgo, seguir caminando recto ya no mueve el rumbo:
+    # lo que importa es que la deriviva SE DETENGA, no el valor acumulado
+    # del transitorio (ese se borra en la siguiente senal anclada).
+    marchar(5.0)
+    comprobar(
+        abs(rumbo.grados - derivada) < 3.0,
+        "con el sesgo corregido, 5 s mas de marcha casi no deriva",
+    )
+
+
+def test_desvio_requiere_confirmacion() -> None:
+    """El aviso de desvio espera la confirmacion y libera con histéresis.
+
+    La confirmacion usa el reloj REAL de la aplicacion (guia.aplicacion),
+    asi que este ensayo duerme un poco de verdad: asi queda comprobado
+    el tiempo de espera tal cual funciona en la Raspberry Pi.
+    """
+    print("\n[20] Desvio: confirmacion temporal y histéresis de liberacion")
+    movimiento.time = RelojFalso()  # reloj acelerado para el muestreo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),  # confirmacion_desvio_s = 1.0 (defecto)
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # Tramo a pie en curso hacia el bano.
+    aplicacion.ubicacion = "Sala"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.destino = "Baño"
+    aplicacion._iniciar_navegacion([Instruccion(Accion.CAMINAR, 50)])
+    detector.senal = None
+
+    # Unos pasos rectos fijan la referencia de la linea recta (el
+    # acelerometro oscila: tienen que llegar pasos crudos para que la
+    # referencia se bloquee con el primer paso).
+    mpu.gz = 0.0
+    for i in range(4):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+
+    # Se va curvando a la derecha: el umbral se cruza a las pocas
+    # muestras, pero el aviso NO sale hasta que el desvio se sostenga
+    # ``confirmacion_desvio_s`` segundos de reloj real.
+    mpu.gz = -60.0
+    for i in range(7):
+        mpu.az = 1.6 if i % 2 else 1.0
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._inicio_desvio is not None,
+        "el desvio cruza el umbral y empieza la espera de confirmacion",
+    )
+    comprobar(
+        not any("desviando" in frase for frase in locutor.frases),
+        "sin cumplirse la confirmacion todavia no avisa",
+    )
+
+    # Sigue desviado: al pasar el segundo, ahi si sale el aviso.
+    time.sleep(aplicacion.config.confirmacion_desvio_s + 0.1)
+    mpu.az = 1.6
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        any("desviando" in frase for frase in locutor.frases),
+        "confirmado el desvio, avisa con los grados y como corregir",
+    )
+    comprobar(
+        aplicacion._corrigiendo,
+        "a partir de ahi queda en modo correccion",
+    )
+
+    # Endereza girando al contrario.  En la zona de histéresis (entre
+    # liberacion_desvio_factor * umbral y el umbral) NO anuncia nada:
+    # sin eso parpadearia entre "te desviando" y "ya enderezaste".
+    locutor.frases.clear()
+    mpu.gz = 60.0
+    for _ in range(4):
+        mpu.az = 1.6
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        not any("enderezaste" in frase for frase in locutor.frases),
+        "dentro de la zona de histéresis no anuncia que enderezo",
+    )
+
+    # Baja del umbral de liberacion: ahi si avisa que ya enderezo y
+    # que los pasos vuelven a contar.
+    for _ in range(4):
+        mpu.az = 1.6
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        any("enderezaste" in frase for frase in locutor.frases),
+        "bajando del umbral de liberacion si anuncia que enderezo",
+    )
+    comprobar(
+        any("vuelven a contar" in frase for frase in locutor.frases),
+        "recuerda que los pasos vuelven a contar",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -1410,6 +1720,11 @@ def main() -> int:
         test_encarada_por_sentido()
         test_obstaculos_en_medio()
         test_encarada_intermedia_de_tramo()
+        test_obstaculos_sincronizados()
+        test_pasos_con_media_cambiada()
+        test_rumbo_ignora_balanceo()
+        test_sesgo_corregido_en_marcha()
+        test_desvio_requiere_confirmacion()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

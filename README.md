@@ -167,8 +167,12 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Frames perdidos tolerados antes de reiniciar la confirmación | `perdidas_senal_toleradas` | `2` |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
 | Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
-| Velocidad mínima para contar giro | `velocidad_minima_giro_dps` | `5.0` |
-| Delta de aceleración que vale como paso | `delta_paso_g` | `0.12` g sobre el reposo |
+| Velocidad mínima para contar giro (zona muerta y gate de rumbo) | `velocidad_minima_giro_dps` | `5.0` |
+| Suavizado del giro sostenido que alimenta el rumbo | `tau_sostenida_giro_s` | `0.5` s |
+| Confirmación que debe durar un desvío antes de avisar | `confirmacion_desvio_s` | `1.0` s |
+| Fracción del umbral a la que se libera el aviso de desvío | `liberacion_desvio_factor` | `0.6` |
+| Delta de aceleración que vale como paso | `delta_paso_g` | `0.09` g sobre la media local |
+| Suavizado previo de la señal de pasos | `tau_media_paso_s` | `0.7` s |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
 | Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` |
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |

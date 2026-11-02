@@ -7,7 +7,8 @@ integrar esa velocidad a una frecuencia fija.  Por eso
 segundo) y le pasa cada lectura a los oyentes:
 
 * :class:`MedidorGiro` integra la velocidad angular en grados.
-* :class:`ContadorPasos` detecta los picos de aceleracion al caminar.
+* :class:`ContadorPasos` detecta la oscilacion de la aceleracion al
+  caminar (contra una media local, no contra un reposo congelado).
 
 Asi un giro lento, una pausa del bucle principal o la carga de la
 camara ya no hacen perder la cuenta de grados.
@@ -18,6 +19,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+from collections import deque
 
 from ..configuracion import Configuracion
 from ..hardware.mpu6050 import LecturaMPU, MPU6050
@@ -104,6 +106,17 @@ class MedidorGiro:
         self._angulo_izquierda = 0.0
         self._sesgo = config.offset_giroscopio
         self._velocidad_derecha = 0.0
+        # Media (pasa-largas) de la direccion de giro: decide si hay
+        # un giro SOSTENIDO que llevar al rumbo (ver en_muestra).
+        self._sostenida = 0.0
+        # Ventana deslizante de la velocidad angular (tiempo, valor):
+        # de ahi salen el maximo y el minimo de la oscilacion, cuyo
+        # punto medio estima el sesgo (ver en_muestra).
+        self._ventana_giro: deque[tuple[float, float]] = deque()
+        self._tiempo_ventana = 0.0
+        # Segundos que la senal lleva plana con el giro sostenido abierto
+        # (valvula de recalibracion del sesgo, ver en_muestra).
+        self._plano_girando_s = 0.0
 
     def _velocidad_de_giro(self, lectura: LecturaMPU) -> float:
         """Velocidad de giro sobre la vertical, positiva hacia la derecha."""
@@ -123,31 +136,136 @@ class MedidorGiro:
 
         En reposo el giroscopio deberia marcar cero: lo que lee es su
         propio sesgo, que se aprende despacio para no depender de un
-        offset fijo que cambia con la temperatura.  Solo se integra
-        cuando la persona gira de verdad (por encima de la velocidad
-        minima), asi el temblor de la mano no cuenta como giro.
+        offset fijo que cambia con la temperatura.  El aprendizaje tiene
+        dos fuentes seguras y una prohibida:
+
+        * PROHIBIDO mientras ``_sostenida`` marque un giro de verdad:
+          durante un giro la rotacion de la persona NO es sesgo.
+        * Con la senal PLANA (la ventana de extremos casi cerrada), la
+          propia lectura.
+        * Con la OSCILACION del paso, el punto medio entre el maximo y
+          el minimo de la ventana: el centro del vaiven no se deja
+          arrastrar por el cruce por cero como hacia la regla vieja de
+          "muestra en reposo" (ese cruce re-aprendia el sesgo
+          equivocado -> deriva -> falsos desvíos al girar a la
+          izquierda).
+
+        Solo se integra cuando la persona gira de verdad (por encima de
+        la velocidad minima), asi el temblor de la mano no cuenta como
+        giro.
         """
         dt = min(dt, DT_MAXIMO_S)
         velocidad = self._velocidad_de_giro(lectura)
         self._velocidad_derecha = velocidad
 
-        if abs(velocidad - self._sesgo) <= self._config.velocidad_reposo_dps:
-            if dt > 0:
-                alfa = dt / self._config.constante_sesgo_s
-                self._sesgo += (velocidad - self._sesgo) * alfa
+        # --- Ventana deslizante: maximo y minimo de la oscilacion -------
+        # Guarda ``ventana_sesgo_s`` de muestras y toma sus extremos.
+        #
+        # Elegir EXTREMOS de una ventana (y no una envolvente ataque/
+        # release) es lo que hace el estimador independiente de la FASE:
+        # los extremos son valores constantes mientras dure la marcha,
+        # de modo que da igual en que punto del ciclo de balanceo entre
+        # la muestra (o este el filtro sostenido cerrado).  Con una
+        # envolvente clasica el punto medio oscilaba con el paso y, al
+        # aprender solo en las muestras en que el filtro sostenido
+        # estaba por debajo del umbral, se muestreaba siempre ese mismo
+        # punto del ciclo: el sesgo salia corrido (aprendia la mitad del
+        # vaiven como si fuera sesgo y el rumbo seguia derivando).
+        #
+        # La ventana tiene que cubrir al menos UN ciclo de balanceo del
+        # paso (1 a 3 Hz) para que max y min sean los extremos reales,
+        # y ser mas corta que el cierre del filtro sostenido tras un
+        # giro (90 dps tardan ~1.9 s en bajar del umbral), para que
+        # los extremos del giro anterior no contaminen la marcha.
+        self._tiempo_ventana += dt
+        self._ventana_giro.append((self._tiempo_ventana, velocidad))
+        while (
+            self._ventana_giro
+            and self._tiempo_ventana - self._ventana_giro[0][0]
+            > self._config.ventana_sesgo_s
+        ):
+            self._ventana_giro.popleft()
+
+        # La primera muestra solo sirve para ARRANCAR la ventana: si el
+        # modulo arranca en mitad de un giro, esa muestra la dejaria
+        # "plana" a plena velocidad y aprenderia la rotacion como si
+        # fuera sesgo.  Se inicializa y no se aprende nada.
+        primera_muestra = len(self._ventana_giro) == 1
+        maximo = max(valor for _, valor in self._ventana_giro)
+        minimo = min(valor for _, valor in self._ventana_giro)
+        amplitud_dps = maximo - minimo
+
+        # Clasificacion de la situacion actual del giroscopio:
+        #
+        # * ``girando``: el filtro sostenido ve un giro de verdad.  Mientras
+        #   esto dure NO se recalibra nada: aprender durante un giro
+        #   confundiria la rotacion de la persona con el sesgo del sensor
+        #   y el giro entero se daria por no hecho.
+        # * ``plano``: la ventana casi no se abre: la senal esta quieta
+        #   (reposo) o gira a velocidad constante (los extremos se juntan).
+        # * ``oscilando``: la ventana esta bien abierta Y la senal esta
+        #   DENTRO de ella: es la oscilacion del paso, no un salto.
+        #   Estricta (el extremo actual es la propia senal): un giro que
+        #   arranca tiene la senal pegada al maximo y no cuenta.
+        reposo = self._config.velocidad_reposo_dps
+        umbral = self._config.velocidad_minima_giro_dps
+        girando = abs(self._sostenida) >= umbral
+        plano = amplitud_dps <= reposo
+        dentro_ventana = minimo < velocidad < maximo
+        oscilando = amplitud_dps >= 2.0 * reposo and dentro_ventana
+
+        # Valvula de seguridad contra el bloqueo del sesgo: si la senal
+        # esta plana con el giro sostenido abierto DURANTE UN RATO, o es
+        # un giro lentisimo que se alarga (se recupera solo al terminar)
+        # o, sobre todo, un sesgo ya tan desviado que el propio error
+        # mantiene el filtro sostenido abierto (entonces el sistema no
+        # podria recalibrarse jamas y derivaria para siempre).  Un giro
+        # normal pedido por la ruta (90 grados) termina mucho antes.
+        if plano and girando:
+            self._plano_girando_s += dt
+        else:
+            self._plano_girando_s = 0.0
+        valvula = (
+            plano
+            and girando
+            and self._plano_girando_s >= self._config.recalibracion_sesgo_s
+        )
+
+        # Aprendizaje del sesgo: con la senal plana se toma la lectura
+        # actual (es el sesgo puro); con la oscilacion del paso se toma
+        # el PUNTO MEDIO de los extremos de la ventana (el centro del
+        # vaiven de los ultimos segundos).  Aprender de "cualquier
+        # muestra en reposo" era el error viejo: con el MPU6050 en la
+        # cintura la persona nunca esta quieta del todo, el sesgo se
+        # aprendia del lado equivocado de la oscilacion y se re-aprendia
+        # a si mismo (deriva -> falsos desvíos al girar a la izquierda).
+        if (plano or oscilando) and (not girando or valvula) and not primera_muestra:
+            objetivo = (
+                0.5 * (maximo + minimo) if oscilando else velocidad
+            )
+            alfa_sesgo = min(dt / self._config.constante_sesgo_s, 1.0) if dt > 0 else 1.0
+            self._sesgo += (objetivo - self._sesgo) * alfa_sesgo
 
         direccion = (velocidad - self._sesgo) * self._config.signo_derecha
-        umbral = self._config.velocidad_minima_giro_dps
 
         if direccion >= umbral:
             self._angulo_derecha += abs(direccion) * dt
         elif direccion <= -umbral:
             self._angulo_izquierda += abs(direccion) * dt
 
-        # El rumbo (orientacion continua) recibe solo los giros reales:
-        # por debajo del umbral es temblor, y temblor no desvia la
-        # ruta.  La referencia se ancla en cada senal orientadora.
-        if self._rumbo is not None and abs(direccion) >= umbral:
+        # El rumbo (orientacion continua) recibe solo el giro
+        # SOSTENIDO: con el sensor en la cintura, el balanceo al
+        # caminar cambia de signo a cada paso y su media (con
+        # tau_sostenida_giro_s) queda por debajo del umbral, mientras
+        # que un giro de verdad mantiene la direccion el tiempo
+        # suficiente para pasar el filtro.  Asi el torso que se
+        # retuerce al caminar no desvia la ruta.  La decision la toma
+        # la media, pero se integra la direccion instantaneous (no la
+        # media), para no perder los primeros grados de cada giro.
+        if dt > 0:
+            alfa = min(dt / self._config.tau_sostenida_giro_s, 1.0)
+            self._sostenida += (direccion - self._sostenida) * alfa
+        if self._rumbo is not None and abs(self._sostenida) >= umbral:
             self._rumbo.girar(direccion * dt)
 
     @property
@@ -160,65 +278,82 @@ class MedidorGiro:
         return self._angulo_derecha if derecha else self._angulo_izquierda
 
     def reiniciar(self) -> None:
-        """Pone ambos acumulados en cero."""
+        """Pone ambos acumulados en cero y olvida el giro anterior."""
         self._angulo_derecha = 0.0
         self._angulo_izquierda = 0.0
+        self._sostenida = 0.0
+        # La valvula de recalibracion cronometra un giro sostenido: cada
+        # instruccion empieza con su propio cronometro.
+        self._plano_girando_s = 0.0
 
 
 class ContadorPasos:
-    """Detecta pasos por picos de aceleracion.
+    """Detecta pasos por la oscilacion de la aceleracion al caminar.
 
-    El sensor sin calibrar no marca exactamente 1 g en reposo (puede
-    marcar 1.05, 1.15...), asi que el umbral no es un valor absoluto:
-    se aprende una *linea base* de reposo y un paso es un pico claro
-    por encima de ella.  Ademas solo cuenta cuando la magnitud *cruza*
-    el umbral de abajo hacia arriba (modo borde, no nivel): si la
-    aceleracion se queda alta sostenida, no vuelve a contar pasos
-    fantasma cada ``intervalo_paso_s`` segundos.
+    El sensor va montado en la cintura: al caminar la magnitud de la
+    aceleracion OSCILA alrededor de una media que cambia con la
+    postura (apoyar un pie, girar el torso, cargar algo).  Por eso el
+    umbral no se fija contra un reposo congelado sino contra una
+    **media local** (pasa-largas con ``tau_media_paso_s``): sigue la
+    postura en segundos, pero no la oscilacion del paso (2 a 6 Hz),
+    que es justo lo que hay que detectar.  Con la linea base vieja la
+    marcha la iba inflando hasta dejar los pasos reales debajo del
+    umbral ("a veces no cuenta").
+
+    Un paso es un cruce de ``delta_paso_g`` por encima de esa media,
+    con histéresis (hay que volver a bajar para rearmar) y un tiempo
+    refractario (``intervalo_paso_s``) contra el doble conteo.  Una
+    magnitud ALTA SOSTENIDA no genera cruces: sin oscilacion no hay
+    pasos, asi que tampoco hay pasos fantasma.
     """
 
     def __init__(self, config: Configuracion):
         self._config = config
         self._pasos = 0
         self._ultimo_paso = 0.0
-        self._reposo: float | None = None
+        self._media: float | None = None
         self._en_pico = False
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
-        """Cuenta un paso si la muestra trae un pico de aceleracion."""
+        """Cuenta un paso si la muestra trae una oscilacion de paso."""
         magnitud = lectura.magnitud_aceleracion
-        ahora = time.monotonic()
 
-        # La primera muestra fija el reposo inicial (evita el conteo
+        # La primera muestra fija la media inicial (evita el conteo
         # fantasma del arranque mientras se manipula el equipo).
-        if self._reposo is None:
-            self._reposo = magnitud
+        if self._media is None:
+            self._media = magnitud
+
+        # Senal de paso: cuanto se separa la magnitud de su media
+        # local.  Se mide ANTES de actualizar la media, para que el
+        # pico actual no se coma su propio umbral.
+        oscilacion = magnitud - self._media
+
+        if dt > 0:
+            alfa = min(dt / self._config.tau_media_paso_s, 1.0)
+            self._media += (magnitud - self._media) * alfa
 
         delta = self._config.delta_paso_g
-        umbral_alto = self._reposo + delta
-        umbral_bajo = self._reposo + delta * 0.5
+        ahora = time.monotonic()
 
         if self._en_pico:
-            # Para volver a contar, la magnitud tiene que bajar hysteresis.
-            if magnitud <= umbral_bajo:
+            # Para volver a contar, la oscilacion tiene que bajar
+            # (histéresis a la mitad del umbral).
+            if oscilacion <= delta * 0.5:
                 self._en_pico = False
         elif (
-            magnitud >= umbral_alto
+            oscilacion >= delta
             and ahora - self._ultimo_paso >= self._config.intervalo_paso_s
         ):
             self._pasos += 1
             self._ultimo_paso = ahora
             self._en_pico = True
-            # El pico se imprime junto al paso para poder calibrar el
-            # umbral (delta_paso_g) en la casa: si el pico de un paso
-            # real queda por debajo del umbral, el paso no se cuenta.
-            print(f"PASO: {self._pasos} (pico {magnitud:.2f} g, umbral {umbral_alto:.2f} g)")
-
-        # Linea base que sigue la deriva lenta del sensor; solo se
-        # actualiza fuera de los picos para no subir con cada paso.
-        if not self._en_pico and dt > 0:
-            alfa = min(dt / self._config.tau_reposo_paso_s, 1.0)
-            self._reposo += (magnitud - self._reposo) * alfa
+            # Se imprime la oscilacion junto al paso para poder
+            # calibrar el umbral (delta_paso_g) en la casa: si los
+            # pasos reales quedan por debajo del umbral, no se cuentan.
+            print(
+                f"PASO: {self._pasos} (pico {oscilacion:+.2f} g, "
+                f"umbral {delta:.2f} g)"
+            )
 
     @property
     def pasos(self) -> int:
@@ -230,7 +365,7 @@ class ContadorPasos:
         return self._pasos
 
     def reiniciar(self) -> None:
-        """Pone el contador en cero (la linea base se conserva)."""
+        """Pone el contador en cero (la media local se conserva)."""
         self._pasos = 0
         self._ultimo_paso = 0.0
         self._en_pico = False

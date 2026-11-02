@@ -13,6 +13,11 @@ sistema puede responder a "quiero ir al bano" aunque la persona ya se
 haya girado: conoce su orientacion *relativa* y puede pedirle que
 encare la senal antes de dar instrucciones.
 
+El rumbo es el unico usuario sensible al balanceo de la cintura
+(montaje en la cintura: al caminar el torso gira a cada paso), por eso
+MedidorGiro solo le pasa el giro SOSTENIDO (ver tau_sostenida_giro_s):
+el vaiven periodico y la deriva lenta del giroscopio no llegan a el.
+
 La deriva del giroscopio hace que el rumbo pierda precision con los
 minutos: por eso se vuelve a anclar en cada senal encontrada.
 """
