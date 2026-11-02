@@ -400,11 +400,16 @@ corre con la aplicación **cerrada** (los dos no deben leer el I2C a
 la vez) y el equipo quieto y plano sobre la mesa:
 
 ```bash
-python pruebas/caracterizar_mpu6050.py      # 10 s; o p.ej. ...py 30
+python pruebas/caracterizar_mpu6050.py 10 --corridas 5   # recomendado
+python pruebas/caracterizar_mpu6050.py                   # una sola corrida
 ```
 
-Imprime la media (offset) y la sigma de cada eje, la tasa real de
-muestreo y la comparación de ese ruido con los umbrales de
+Con **3 o más corridas** el script descarta automáticamente las que
+salgan con sigma anómalo (> 3 veces la mediana de ese eje, p.ej. la
+primera corrida mientras la mesa aún se asentaba) y al final imprime
+el **resumen consolidado**: media, dispersión (mín..máx) y sigma por
+eje, con los datos listos para copiar al reporte. Siempre imprime la
+tasa real de muestreo y la comparación del ruido con los umbrales de
 `configuracion.py` (`delta_paso_g`, dead-band de giros).
 
 ---
