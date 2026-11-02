@@ -71,7 +71,7 @@ guia/
     gramaticas.py           Listas de palabras que Vosk intenta transcribir
     alarma.py               Beeps de proximidad y alarma de caída
   hardware/                 Adaptadores al equipo real
-    mpu6050.py              Lectura cruda del sensor (escala del datasheet)
+    mpu6050.py              Lectura del sensor (escala datasheet + DLPF 44/42 Hz)
     camara.py               Captura de frames
     ultrasonido.py          HC-SR04 (gpiozero) en hilo propio + alerta
 pruebas/

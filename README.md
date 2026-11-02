@@ -412,6 +412,16 @@ eje, con los datos listos para copiar al reporte. Siempre imprime la
 tasa real de muestreo y la comparación del ruido con los umbrales de
 `configuracion.py` (`delta_paso_g`, dead-band de giros).
 
+El driver enciende el sensor con su **filtro digital (DLPF)**
+activo: 44 Hz de ancho de banda en el acelerómetro y 42 Hz en el
+giroscopio (la consola arranca con `MPU6050 OK (DLPF 44/42 Hz)`).
+Con el valor por defecto (260/256 Hz) el sensor entregaba todo el
+ruido; con el filtro la sigma en reposo baja aproximadamente a la
+mitad sin tocar las señales de la persona (pasos de 2 a 6 Hz,
+giros por debajo de 30 Hz). Los valores **sin filtro** quedan en la
+caracterización anterior: tras el `git pull` vuelve a correr el
+script y compara la sigma antes/después.
+
 ---
 
 ## Decisiones de diseño

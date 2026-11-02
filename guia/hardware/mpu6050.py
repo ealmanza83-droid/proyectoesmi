@@ -16,6 +16,14 @@ from ..configuracion import Configuracion
 
 ESCALA_ACELEROMETRO = 16384.0  # +/- 2 g
 ESCALA_GIROSCOPIO = 131.0      # +/- 250 grados/segundo
+# DLPF_CFG = 3: filtro digital que deja el acelerometro a 44 Hz y el
+# giroscopio a 42 Hz de ancho de banda.  Con el valor por defecto
+# (260 / 256 Hz) pasaba TODO el ruido y las vibraciones de la cintura;
+# con el filtro la sigma en reposo baja aproximadamente a la mitad
+# (comprobable con pruebas/caracterizar_mpu6050.py) mientras que las
+# senales de la persona (pasos de 2 a 6 Hz, giros por debajo de 30 Hz)
+# pasan con un retardo de ~5 ms, despreciable.
+FILTRO_DLPF = 3
 
 
 @dataclass(frozen=True)
@@ -45,7 +53,11 @@ class MPU6050:
         self._bus.write_byte_data(
             config.direccion_mpu, config.registro_despertar, 0
         )
-        print("MPU6050 OK")
+        # Filtro digital activado tras despertar (ver FILTRO_DLPF).
+        self._bus.write_byte_data(
+            config.direccion_mpu, config.registro_filtro, FILTRO_DLPF
+        )
+        print("MPU6050 OK (DLPF 44/42 Hz)")
 
     def leer(self) -> LecturaMPU:
         """Devuelve una lectura completa del sensor."""

@@ -57,6 +57,7 @@ class Configuracion:
     direccion_mpu: int = 0x68
     registro_despertar: int = 0x6B
     registro_datos: int = 0x3B
+    registro_filtro: int = 0x1A
     intervalo_muestreo_mpu_s: float = 0.01  # 100 muestras por segundo
     offset_giroscopio: float = 0.445992     # sesgo inicial (calibracion)
     velocidad_minima_giro_dps: float = 5.0  # por debajo no es un giro (temblor)
