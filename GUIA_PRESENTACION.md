@@ -119,7 +119,7 @@ código se convierte en banderas globales imposibles de explicar.
 | `MEDIA_VUELTA` | Media vuelta de 180° (1.er intento fallido) | Lleva los 180° |
 | `CINCO_PASOS` | Camina 5 pasos y reintenta girar (2.º intento) | Dio los 5 pasos |
 | `ESPERANDO_DESTINO` | Escucha *"Raspi, ve a la sala"* | Pide un destino |
-| `ENCARAR_SENAL` | Pide poner la señal de la zona enfrente | Ve esa señal por su cara interior |
+| `ENCARAR_SENAL` | Pide poner la señal de la zona enfrente (se omite con la encarada automática: señal confirmada hace < 30 s y giro < 20°) | Ve esa señal por su cara interior |
 | `NAVEGANDO` | Ejecuta la ruta: giros integrados + pasos acreditados | Se agota el plan |
 | `CONFIRMANDO_LLEGADA` | Pide girar despacio hasta ver la señal del destino | Ve la señal del destino |
 | `DETENIDO` | Salida limpia | — |
@@ -140,7 +140,12 @@ código se convierte en banderas globales imposibles de explicar.
    (rumbo = 0°) → *"La señal está frente a ti."* El lado en el que
    gira sale del sentido de la ruta: a la derecha en el sentido
    normal y a la izquierda al volver, porque las imágenes cambian de
-   lado.
+   lado. **Excepción (encarada automática)**: si la señal de la zona
+   se acaba de confirmar en el paso 2 y no has girado más de 20°
+   desde entonces, no se pide nada: la ruta arranca directo
+   (`ENCARADA AUTOMATICA` en consola). En casa no podría encontrarse
+   otra señal en el mismo sitio, así que pedirla otra vez dejaría a
+   la persona girando sin salida.
 5. Navegación: *"Gira a la izquierda 90 grados"* → *"Vas por la
    mitad"* → *"Giro completo. Puedes parar."* → *"Camina 13 pasos"*
    (hasta el Cuarto) → cuenta solo pasos rectos → *"Pasos

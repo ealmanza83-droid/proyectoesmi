@@ -116,7 +116,7 @@ depender de una calibración fija.
 
 ---
 
-## 5. Integración del ángulo (giro acumulado) — `movimiento.py` (`MedidorGiro.paso`)
+## 5. Integración del ángulo (giro acumulado) — `movimiento.py` (`MedidorGiro.avanzar`)
 
 **Integración de Euler (rectángulos) de la velocidad angular**, con **zona
 muerta (dead-band)**:
@@ -133,6 +133,24 @@ La **zona muerta** (`velocidad_minima_giro_dps = 5 °/s`) filtra el temblor de
 la mano: por debajo no es un giro. Luego en `aplicacion.py` se compara
 `ángulo ≥ objetivo` (90°, 180° o los 90° de cada tramo) para dar por
 completado el giro.
+
+**Ángulo neto del giro pedido** (`MedidorGiro.avanzar`) — el giro hecho al
+lado **contrario se resta**, no se ignora:
+
+```
+θ_neto = θ_derecha   − θ_izquierda      (si se pide girar a la derecha)
+θ_neto = θ_izquierda − θ_derecha        (si se pide girar a la izquierda)
+completado si θ_neto ≥ objetivo
+```
+
+*Por qué:* la instrucción es "gira 90° a la izquierda" y lo que importa es
+la **rotación real pendiente** respecto de la orientación en la que se
+anunció. Si antes de girar a la izquierda se giraron 30° a la derecha, hacen
+falta 120° de izquierda para acabar mirando donde toca. Con la regla vieja
+(mirar solo el acumulado del sentido pedido) esos 30° se ignoraban: el giro
+se daba por completo con la persona **30° desviada** y el resto de la ruta
+arrancaba mal orientado. Un `θ_neto` negativo significa literalmente "estás
+girando al lado contrario" (la etiqueta de diagnóstico lo muestra).
 
 ---
 

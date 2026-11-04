@@ -171,6 +171,8 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Suavizado del giro sostenido que alimenta el rumbo | `tau_sostenida_giro_s` | `0.5` s |
 | Confirmación que debe durar un desvío antes de avisar | `confirmacion_desvio_s` | `1.0` s |
 | Fracción del umbral a la que se libera el aviso de desvío | `liberacion_desvio_factor` | `0.6` |
+| Validez de la señal recién confirmada para arrancar sin encarar | `encarada_validez_s` | `30` s |
+| Giro máximo desde el anclaje para dar la encarada por hecha | `encarada_max_giro_grados` | `20` |
 | Delta de aceleración que vale como paso | `delta_paso_g` | `0.09` g sobre la media local |
 | Suavizado previo de la señal de pasos | `tau_media_paso_s` | `0.7` s |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
@@ -261,6 +263,13 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
   o el giro de una ruta): *"Ya giraste 90 grados. Puedes parar."* /
   *"Giro completo. Puedes parar."* — después pasa a la siguiente
   indicación (buscar señal, caminar, etc.).
+* **Si te giras al lado equivocado**: esos grados **se descuentan** del
+  giro pedido (el contador pasa a negativo y la etiqueta de la cámara
+  lo marca con *"al lado contrario"*), así la instrucción no se da por
+  completo hasta que la rotación **neta** llegue a los 90°/180° pedidos
+  y, al parar, acabas mirando donde toca. Antes girar al lado contrario
+  no se tenía en cuenta y el giro se completaba con la persona
+  desviada.
 * **Al completar los pasos** de un tramo: *"Pasos completados. Puedes
   parar."* y después la llegada o el siguiente paso de la ruta.
 
@@ -281,6 +290,15 @@ Por eso, al pedir un destino el sistema **no arranca a ciegas**:
 * Si la señal de la zona está a la vista → el rumbo se ancla y la
   ruta arranca de inmediato ("Entendido. Vamos a Baño." → "Gira a la
   izquierda 90 grados.").
+* Si la señal **se acaba de confirmar** (la búsqueda la vio, o se
+  mantuvo a la vista esperando el destino) y no has girado más de
+  `encarada_max_giro_grados` (20°) en menos de `encarada_validez_s`
+  (30 s) → también arranca directo, **sin volver a pedir encarar**:
+  la encarada automática (`ENCARADA AUTOMATICA` en consola) da por
+  hecho que sigues enfrente de tu señal. En casa las señales de las
+  demás zonas están a pasos de distancia, así que pedirla otra vez
+  dejaría a la persona girando sin salida. Si pasan más de 30 s o
+  giras más de 20°, sí se pide encarar como siempre.
 * Si **no** está a la vista → el nuevo estado *Encarar señal* pide
   girar despacio hasta encontrarla ("Para saber hacia dónde miras,
   primero encárate con la señal de esta zona..."); solo entonces se

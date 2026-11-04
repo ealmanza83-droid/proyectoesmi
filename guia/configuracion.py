@@ -159,6 +159,20 @@ class Configuracion:
     # antes de volver a avisar ("gira despacio hasta encontrarla"),
     # sin anunciar jamas una llegada falsa.
     tiempo_llegada_s: float = 15.0
+    # Encarada automatica: si la persona acaba de confirmar la senal
+    # de SU zona (la busqueda la vio, o se mantuvo a la vista
+    # esperando el destino) y no ha girado desde entonces, ya la
+    # tiene enfrente: la ruta arranca sin pedir encarar otra vez.
+    # En casa, pedirla de nuevo deja a la persona girando sin
+    # salida: las senales de las demas zonas estan a pasos de
+    # distancia y no pueden aparecer en el mismo sitio.
+    # * ``encarada_validez_s``: cuanto tiempo vale esa confirmacion
+    #   (la persona pide el destino sin moverse; si tarda mas,
+    #   vuelve a pedir la encarada como siempre).
+    # * ``encarada_max_giro_grados``: giro maximo desde el anclaje
+    #   para darla por encarada; por encima, se pidio encarar.
+    encarada_validez_s: float = 30.0
+    encarada_max_giro_grados: float = 20.0
 
     # ------------------------------------------------------------------
     # HC-SR04 (alerta de proximidad)

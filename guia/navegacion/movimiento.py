@@ -274,8 +274,19 @@ class MedidorGiro:
         return self._velocidad_derecha
 
     def avanzar(self, derecha: bool) -> float:
-        """Grados acumulados en el sentido pedido desde ``reiniciar()``."""
-        return self._angulo_derecha if derecha else self._angulo_izquierda
+        """Grados NETOS en el sentido pedido desde ``reiniciar()``.
+
+        El giro hecho al lado CONTRARIO se resta: si la instruccion es
+        "gira 90 a la izquierda" y antes se giraron 30 a la derecha,
+        hacen falta 120 a la izquierda para acabar mirando donde toca.
+        Con la regla vieja (mirar solo el acumulado del sentido pedido)
+        esos 30 se ignoraban y el giro se daba por completo con la
+        persona 30 grados desviada.  Asi el valor que se compara con el
+        objetivo es siempre la rotacion REAL pendiente, que negativa
+        significa "vas al lado contrario".
+        """
+        neto = self._angulo_derecha - self._angulo_izquierda
+        return neto if derecha else -neto
 
     def reiniciar(self) -> None:
         """Pone ambos acumulados en cero y olvida el giro anterior."""

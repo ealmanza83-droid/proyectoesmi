@@ -544,8 +544,8 @@ def test_giro_integra_velocidad_angular() -> None:
         "90 dps durante 1.1 s superan los 90 grados",
     )
     comprobar(
-        giro.avanzar(derecha=False) == 0.0,
-        "el giro a la derecha no suma en el contador izquierdo",
+        giro.avanzar(derecha=False) <= -90.0,
+        "el giro a la derecha se DESCUENTA del sentido contrario",
     )
     comprobar(
         giro.velocidad_derecha > 0.0,
@@ -579,6 +579,64 @@ def test_giro_integra_velocidad_angular() -> None:
     comprobar(
         giro.avanzar(derecha=True) >= 90.0,
         "con el sensor de canto tambien mide el giro (proyeccion)",
+    )
+
+
+def test_giro_al_lado_equivocado_se_descuenta() -> None:
+    """Girar al lado contrario RETRASA el giro pedido (no se pierde).
+
+    Si la instruccion es "gira 90 grados a la izquierda" y la persona
+    gira primero 45 a la derecha, al empezar a girar a la izquierda el
+    acumulado arranca NEGATIVO y el giro no se da por completo hasta
+    que la rotacion neta llegue a 90.  Al completarse, la persona acaba
+    exactamente 90 grados a la izquierda de donde arranco.
+
+    Con la regla vieja (contar solo el acumulado del sentido pedido) el
+    giro equivocado no se descontaba y el giro se daba por completo con
+    la persona ~45 grados desviada.
+    """
+    print("\n[5b] Giro: girar al lado equivocado se descuenta")
+    config = Configuracion()
+    giro = movimiento.MedidorGiro(config)
+    mpu = MPUFalso()
+    dt = config.intervalo_muestreo_mpu_s  # 0.01 s (100 Hz)
+
+    # Se pide IZQUIERDA, pero la persona gira a la derecha (0.5 s a
+    # 100 dps = unos 45 grados de giro mal dado).
+    mpu.gz = -100.0
+    for _ in range(50):
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(
+        giro.avanzar(derecha=False) <= -40.0,
+        "45 grados a la derecha dejan el giro de izquierda en negativo",
+    )
+    comprobar(
+        giro.avanzar(derecha=False) < 90.0,
+        "girar al lado equivocado no acerca al objetivo de 90",
+    )
+
+    # Ahora si gira a la izquierda: los grados del giro equivocado
+    # restan, asi que 75 grados de izquierda NO completan los 90.
+    mpu.gz = 100.0
+    for _ in range(80):
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(
+        giro.avanzar(derecha=False) < 90.0,
+        "75 a la izquierda todavia no completan (faltan los mal dados)",
+    )
+
+    # Sigue a la izquierda hasta que la ROTACION NETA llegue a 90.
+    for _ in range(150):
+        if giro.avanzar(derecha=False) >= 90.0:
+            break
+        giro.en_muestra(mpu.leer(), dt)
+    comprobar(
+        giro.avanzar(derecha=False) >= 90.0,
+        "el giro se da por completo con 90 grados netos a la izquierda",
+    )
+    comprobar(
+        giro.avanzar(derecha=True) <= -90.0,
+        "al completar acaba 90 grados a la izquierda del arranque",
     )
 
 
@@ -1487,6 +1545,82 @@ def test_encarada_intermedia_de_tramo() -> None:
     comprobar("Has llegado a Sala." in locutor.frases, "anuncio de llegada")
 
 
+def test_encarada_automatica() -> None:
+    """La senal recien confirmada no se vuelve a pedir.
+
+    En casa la busqueda acaba de decir "Estas en Inicio": si al pedir
+    el destino se vuelve a pedir encarar, la persona gira buscando una
+    senal que no esta en el sitio (las de las demas zonas estan a pasos
+    de distancia) y el sistema se queda pidiendo girar sin salida.
+    """
+    print("\n[21] Encarada automatica tras confirmar la zona")
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # La busqueda confirma la senal interior de Inicio.
+    aplicacion.estado = Estado.BUSCAR_SENAL
+    detector.senal = Senal("Inicio", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO,
+        "la busqueda confirma la zona",
+    )
+
+    # Pide el destino sin moverse (baja la senal para hablar): la
+    # ruta arranca sin volver a pedir encarar.
+    detector.senal = None
+    microfono.cambiar_modo(ModoMicrofono.DESTINO)
+    microfono.eventos.put(EventoVoz(ModoMicrofono.DESTINO, "quiero ir al cuarto"))
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "arranca la ruta sin pedir encarar",
+    )
+    comprobar(
+        not any("encárate" in frase for frase in locutor.frases),
+        "no vuelve a pedir la senal de la zona",
+    )
+    comprobar(aplicacion.rumbo.grados == 0.0, "el rumbo queda anclado en la senal")
+
+    # Si entretanto giro bastante, la senal ya no esta enfrente: si
+    # que hay que encarar antes de arrancar.
+    aplicacion.ubicacion = "Inicio"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.estado = Estado.ESPERANDO_DESTINO
+    microfono.cambiar_modo(ModoMicrofono.DESTINO)
+    locutor.frases.clear()
+    mpu.gz = -100.0  # giro a la derecha mientras esperaba la respuesta
+    for _ in range(4):  # ~40 grados: pasa la tolerancia de 20
+        paso(aplicacion, detector, mpu)
+    microfono.eventos.put(EventoVoz(ModoMicrofono.DESTINO, "quiero ir al cuarto"))
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "giro bastante: si pide encarar",
+    )
+    comprobar(
+        any("encárate" in frase for frase in locutor.frases),
+        "explica que hay que poner la senal enfrente",
+    )
+
+
 def test_pasos_con_media_cambiada() -> None:
     """La media local sigue un cambio de postura sin dejar de contar.
 
@@ -1710,6 +1844,7 @@ def main() -> int:
         test_flujo_completo()
         test_destino_sin_ubicacion()
         test_giro_integra_velocidad_angular()
+        test_giro_al_lado_equivocado_se_descuenta()
         test_deteccion_de_caida()
         test_proximidad_se_acelera()
         test_confirmacion_de_senal_tolerante()
@@ -1720,6 +1855,7 @@ def main() -> int:
         test_encarada_por_sentido()
         test_obstaculos_en_medio()
         test_encarada_intermedia_de_tramo()
+        test_encarada_automatica()
         test_obstaculos_sincronizados()
         test_pasos_con_media_cambiada()
         test_rumbo_ignora_balanceo()

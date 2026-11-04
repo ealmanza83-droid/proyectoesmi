@@ -174,6 +174,12 @@ class Aplicacion:
         self._instruccion_actual: Instruccion | None = None
         self._ruta_pendiente: list[Instruccion] | None = None
         self._instruccion_encarar_dada = False
+        # Zona e instante de la ultima senal interior confirmada con
+        # la camara (busqueda, espera del destino o encarada).  Si
+        # hace poco y el rumbo no ha girado desde entonces, la senal
+        # sigue enfrente y la ruta arranca sin pedir encarar
+        # (ver _iniciar_encarada).
+        self._senal_enfrente: tuple[str, float] | None = None
         # Lado en el que girar para encarar la senal: depende del
         # sentido de la ruta (ver PlanificadorRutas.lado_encarada).
         self._lado_encarada: str = GIRO_SENAL_NORMAL
@@ -508,6 +514,24 @@ class Aplicacion:
                 self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
                 self._iniciar_encarada(plan)
 
+    def _senal_enfrente_reciente(self) -> bool:
+        """¿La senal interior de la zona actual sigue estando enfrente?
+
+        Cierto si se confirmo hace poco (la busqueda o la espera del
+        destino, ver ``encarada_validez_s``) y el rumbo no ha girado
+        mas alla de ``encarada_max_giro_grados`` desde ese anclaje:
+        entonces la orientacion de referencia sigue vigente y no hace
+        falta pedir encarar.
+        """
+        if self._senal_enfrente is None:
+            return False
+        zona, instante = self._senal_enfrente
+        return (
+            zona == self.ubicacion
+            and time.monotonic() - instante <= self.config.encarada_validez_s
+            and abs(self.rumbo.grados) <= self.config.encarada_max_giro_grados
+        )
+
     def _iniciar_encarada(self, plan: list[Instruccion]) -> None:
         """Prepara la ruta: antes hay que encarar la senal de la zona.
 
@@ -515,7 +539,24 @@ class Aplicacion:
         interior de la puerta" (asi se midieron los pasos).  Si la
         camara no la ve ahora, se pide girar despacio hasta
         encontrarla antes de arrancar.
+
+        Excepcion: si la senal de la zona se acaba de confirmar y la
+        persona no ha girado desde entonces, ya la tiene enfrente y
+        la ruta arranca directo (ver ``_senal_enfrente_reciente``):
+        pedirla otra vez la dejaria girando sin salida, porque las
+        senales de las demas zonas estan a pasos de distancia.
         """
+        if self._senal_enfrente_reciente():
+            print(
+                "ENCARADA AUTOMATICA: la senal de",
+                self.ubicacion,
+                "sigue enfrente",
+            )
+            # Se da por encarada y se ancla: la tolerancia de giro
+            # acota el error con el que se afirma "la tienes enfrente".
+            self.rumbo.anclar()
+            self._iniciar_navegacion(plan)
+            return
         self._ruta_pendiente = plan
         self._instruccion_encarar_dada = False
         # De que lado girar para encarar la senal: las imagenes estan
@@ -587,6 +628,7 @@ class Aplicacion:
             else:
                 self.lado_puerta = senal.lado
                 self.rumbo.anclar()
+                self._senal_enfrente = (senal.zona, time.monotonic())
                 print("RUMBO ANCLADO: señal de", senal.zona, "enfrente")
                 plan = self._ruta_pendiente
                 self._ruta_pendiente = None
@@ -904,9 +946,11 @@ class Aplicacion:
     def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> bool:
         """Etiqueta de diagnostico, aviso de consola y voz del giro.
 
-        La consola muestra los grados acumulados y la velocidad de giro
-        actual (positiva = derecha).  Si al girar a la derecha la
-        velocidad sale negativa, el ``signo_derecha`` esta invertido.
+        La consola muestra los grados netos que faltan del giro pedido y
+        la velocidad de giro actual (positiva = derecha).  Si al girar
+        a la derecha la velocidad sale negativa, el ``signo_derecha``
+        esta invertido; si los grados salen NEGATIVOS, la persona se
+        esta girando al lado contrario y esos grados se descuentan.
 
         Se avisa por voz al 50% y al 75% del objetivo con frases
         *cortas* (sin numeros): la voz tarda su tiempo y mientras se
@@ -914,7 +958,10 @@ class Aplicacion:
         medir tras cualquier aviso.  Devuelve ``True`` si acaba de
         hablar.
         """
-        self._etiqueta = f"Giro {sentido}: {angulo:.1f}/{objetivo} grados"
+        self._etiqueta = (
+            f"Giro {sentido}: {angulo:.1f}/{objetivo} grados"
+            f"{' (al lado contrario)' if angulo < 0.0 else ''}"
+        )
         ahora = time.monotonic()
         if ahora - self._ultimo_aviso_giro >= AVISO_GIRO_S:
             self._ultimo_aviso_giro = ahora
@@ -924,8 +971,9 @@ class Aplicacion:
                 f" | vel {velocidad:+.1f} dps"
             )
 
-        # El acumulado solo baja cuando se reinicia el giro: ese es el
-        # momento de olvidar los avisos del giro anterior.
+        # El acumulado baja al reiniciar el giro (o al irse al lado
+        # contrario, que resta): en ese momento se olvidan los avisos
+        # del giro anterior y se pueden volver a dar.
         if angulo < self._ultimo_angulo_giro:
             self._avances_anunciados.clear()
         self._ultimo_angulo_giro = angulo
@@ -975,6 +1023,9 @@ class Aplicacion:
                 # zona (los tramos de ruta se midieron desde ahi).
                 self.ubicacion = senal.zona
                 self.lado_puerta = senal.lado
+                # Acaba de confirmar donde esta: si pide el destino
+                # sin moverse, la encarada queda resuelta.
+                self._senal_enfrente = (senal.zona, time.monotonic())
                 print("SEÑAL ENCONTRADA:", self.ubicacion)
                 self._hablar(f"Estás en {self.ubicacion}.")
                 self.estado = Estado.ESPERANDO_DESTINO
@@ -1042,6 +1093,18 @@ class Aplicacion:
 
     def _en_esperando_destino(self, resultado: ResultadoVision) -> None:
         self._etiqueta = "Esperando destino"
+        senal = resultado.senal
+        if (
+            senal is not None
+            and senal.lado == LADO_INTERIOR
+            and senal.zona == self.ubicacion
+        ):
+            # La senal de la zona sigue enfrente mientras la persona
+            # piensa el destino: el rumbo se reancla (se mira la
+            # senal) y queda registrada como "todavia frente" para
+            # la encarada posterior (ver _iniciar_encarada).
+            self.rumbo.anclar()
+            self._senal_enfrente = (senal.zona, time.monotonic())
 
     def _en_navegando(self, resultado: ResultadoVision) -> None:
         if self._en_pausa:
