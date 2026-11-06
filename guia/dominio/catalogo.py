@@ -64,6 +64,7 @@ OBJETOS_PERMITIDOS: dict[str, str] = {
     "chair": "silla",
     "dining table": "mesa",
     "potted plant": "maceta",
+    "person": "persona",
 }
 
 # Clases que la camara tiene permiso para dibujar/anunciar.
