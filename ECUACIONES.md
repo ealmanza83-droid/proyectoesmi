@@ -214,6 +214,13 @@ del umbral bajo — así una aceleración sostenida no genera "pasos fantasma".
 Añade un **tiempo refractario** de 0,18 s (`intervalo_paso_s`), por debajo del
 mínimo fisiológico entre pasos.
 
+**Tope de cadencia**: un cruce con más de `intervalo_paso_max_s` = 1 s desde el
+anterior se **descarta** (`Δt > τ_máx ⇒ no cuenta`). No hay ritmo de marcha
+detrás (la persona se paró y movió el pie), y esos pasos de más adelantaban el
+fin del tramo. El cruce descartado **reinicia** el ritmo (`t_último ← t_ahora`),
+así que tras una pausa se pierde como mucho **un** paso, no la tanda entera; el
+primer paso de un tramo nuevo (`reiniciar`) siempre cuenta.
+
 *Por qué media local y no línea base antigua:* la media se actualiza **en todo
 momento** (también en los picos), así que nunca se "arrastra" hacia arriba
 con cada paso; el pico del paso debe superar `media + 0,09 g` sí o sí. Antes
@@ -288,8 +295,13 @@ No hay ecuación clásica, pero sí **umbral estadístico y lógica de conteo**:
   una **racha de ≥ 3 detecciones seguidas** de la misma clase, tolerando
   **≤ 2 frames perdidos** sin romper la racha. Es un detector de estado
   discreto que reduce falsos positivos (forma: `racha ≥ requeridas`).
-- **Enfriamiento de obstáculos** (línea 162): no se repite un anuncio si
-  `t_ahora − t_último < 4 s`.
+- **Anuncio único por encuentro de obstáculos**
+  (`Aplicacion._anunciar_obstaculos`): el detector reporta lo que se ve en el
+  frame (sin enfriamiento propio) y la aplicación anuncia **una sola vez** cada
+  objeto mientras siga a la vista. El aviso se re-arma cuando el frame queda
+  limpio durante `enfriamiento_objeto_s` = 4 s (`t_ahora − t_limpio ≥ 4 s`), de
+  modo que un parpadeo de la cámara no lo repite y un objeto nuevo sí se
+  anuncia enseguida.
 
 ---
 

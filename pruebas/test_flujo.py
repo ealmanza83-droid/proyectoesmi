@@ -106,7 +106,14 @@ from guia.configuracion import Configuracion  # noqa: E402
 from guia.dominio.comandos import TipoComando, extraer_destino, quitar_despertador, reconocer  # noqa: E402
 from guia.dominio.catalogo import LADO_INTERIOR, LADO_PASILLO, Senal  # noqa: E402
 from guia.dominio.estados import Estado  # noqa: E402
-from guia.dominio.rutas import Accion, Instruccion, PlanificadorRutas, TRAMOS_DEMO  # noqa: E402
+from guia.dominio.rutas import (  # noqa: E402
+    Accion,
+    GIRO_SENAL_INVERSO,
+    GIRO_SENAL_NORMAL,
+    Instruccion,
+    PlanificadorRutas,
+    TRAMOS_DEMO,
+)
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
@@ -133,6 +140,10 @@ class RelojFalso:
     def monotonic(self) -> float:
         self.ahora += 0.1
         return self.ahora
+
+    def avanzar(self, segundos: float) -> None:
+        """Salta el reloj (para enfriamientos de varios segundos)."""
+        self.ahora += segundos
 
 
 class CamaraFalsa:
@@ -1146,11 +1157,13 @@ def test_encarada_por_sentido() -> None:
     planificador = PlanificadorRutas()
 
     # TODAS las combinaciones posibles de la casa (4 zonas en linea =
-    # 12 pares de ruta).  Las imagenes estan del lado derecho del
-    # pasillo al recorrerla de Inicio al Bano: todo viaje que avanza
-    # hacia el Bano encara a la DERECHA y todo viaje que regresa
-    # hacia el Inicio (mas lejano -> mas cercano) encara a la
-    # IZQUIERDA.
+    # 12 pares de ruta).  Las imagenes estan fijas de un lado del
+    # pasillo (``GIRO_SENAL_NORMAL``): todo viaje que AVANZA hacia el
+    # Bano encara a ese lado y todo viaje que REGRESA hacia el Inicio
+    # (mas lejano -> mas cercano) encara al opuesto.  El lado en si es
+    # dato de la casa, no la logica que se comprueba: se lee de la
+    # constante para que la prueba siga valida si se mueven las
+    # senales.
     orden = ["Inicio", "Cuarto", "Sala", "Baño"]
     malos: list[str] = []
     for origen in orden:
@@ -1158,9 +1171,9 @@ def test_encarada_por_sentido() -> None:
             if origen == destino:
                 continue
             esperado = (
-                "derecha"
+                GIRO_SENAL_NORMAL
                 if orden.index(destino) > orden.index(origen)
-                else "izquierda"
+                else GIRO_SENAL_INVERSO
             )
             real = planificador.lado_encarada(origen, destino)
             if real != esperado:
@@ -1171,7 +1184,7 @@ def test_encarada_por_sentido() -> None:
         + (f" -> {malos}" if malos else ""),
     )
     comprobar(
-        planificador.lado_encarada("Sala", "Sala") == "derecha",
+        planificador.lado_encarada("Sala", "Sala") == GIRO_SENAL_NORMAL,
         "sin tramo que recorrer se queda en el giro normal",
     )
 
@@ -1206,8 +1219,11 @@ def test_encarada_por_sentido() -> None:
         "pide encarar antes de arrancar",
     )
     comprobar(
-        any("Gira despacio a la derecha" in frase for frase in locutor.frases),
-        "de Inicio a Cuarto pide girar a la derecha",
+        any(
+            f"Gira despacio a la {GIRO_SENAL_NORMAL}" in frase
+            for frase in locutor.frases
+        ),
+        f"de Inicio a Cuarto pide girar a la {GIRO_SENAL_NORMAL}",
     )
 
     # Sentido inverso: Bano -> Sala.
@@ -1222,11 +1238,17 @@ def test_encarada_por_sentido() -> None:
         "en el viaje de vuelta tambien encara antes de arrancar",
     )
     comprobar(
-        any("Gira despacio a la izquierda" in frase for frase in locutor.frases),
-        "del Bano a la Sala pide girar a la izquierda",
+        any(
+            f"Gira despacio a la {GIRO_SENAL_INVERSO}" in frase
+            for frase in locutor.frases
+        ),
+        f"del Bano a la Sala pide girar a la {GIRO_SENAL_INVERSO}",
     )
     comprobar(
-        not any("Gira despacio a la derecha" in frase for frase in locutor.frases),
+        not any(
+            f"Gira despacio a la {GIRO_SENAL_NORMAL}" in frase
+            for frase in locutor.frases
+        ),
         "ya no da la indicacion del sentido normal",
     )
 
@@ -1302,6 +1324,30 @@ def test_obstaculos_en_medio() -> None:
             for frase in locutor.frases
         ),
         "nombra el lateral con su lado",
+    )
+
+    # Los lados informan SIN frenar: una sola frase aunque haya
+    # objetos de los dos lados y sin el "Alto" del medio (no se
+    # cruzan en la ruta, no hay por que cortar el paso).
+    locutor.frases.clear()
+    detector.obstaculos = (
+        ObstaculoVisto("silla", "izquierda"),
+        ObstaculoVisto("mesa", "derecha"),
+    )
+    aplicacion._anunciar_obstaculos(
+        detector.analizar(None), aplicacion.sensor.distancia_cm
+    )
+    comprobar(
+        len(locutor.frases) == 1,
+        "los de los dos lados van en una sola frase",
+    )
+    comprobar(
+        not any("Alto" in frase for frase in locutor.frases),
+        "los lados no dicen Alto: reconocen pero no frenan",
+    )
+    comprobar(
+        not any("en medio del camino" in frase for frase in locutor.frases),
+        "sin objeto centrado no dice que hay algo en medio",
     )
 
     # Varias en el centro: una sola frase con todos los nombres.
@@ -1476,13 +1522,16 @@ def test_encarada_intermedia_de_tramo() -> None:
         "no hay plan nuevo: la ruta en curso sigue intacta",
     )
 
-    # Sin verla aun, pide girar a la derecha (las senales estan del
-    # lado derecho en el sentido de la ruta) y NO el giro de 90.
+    # Sin verla aun, pide girar al lado donde estan las senales en el
+    # sentido de la ruta (``GIRO_SENAL_NORMAL``) y NO el giro de 90.
     locutor.frases.clear()
     paso(aplicacion, detector, mpu)
     comprobar(
-        any("Gira despacio a la derecha" in frase for frase in locutor.frases),
-        "pide girar a la derecha para ver la senal del Cuarto",
+        any(
+            f"Gira despacio a la {GIRO_SENAL_NORMAL}" in frase
+            for frase in locutor.frases
+        ),
+        f"pide girar a la {GIRO_SENAL_NORMAL} para ver la senal del Cuarto",
     )
     comprobar(
         not any("90 grados" in frase for frase in locutor.frases),
@@ -1830,6 +1879,169 @@ def test_desvio_requiere_confirmacion() -> None:
     )
 
 
+def test_obstaculos_un_aviso_por_encuentro() -> None:
+    """Un obstaculo se anuncia UNA vez por encuentro, no cada rato.
+
+    Antes el anuncio se repetia cada ``enfriamiento_objeto_s`` mientras
+    el objeto siguiera a la vista, y como ``_hablar`` bloquea el
+    bucle, la voz repetida tapaba las indicaciones de la ruta.
+    """
+    print("\n[22] Obstaculos: un aviso por encuentro")
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    config = Configuracion()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(distancia_cm=350.0),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # El reloj de la aplicacion se toma prestado para pasar el
+    # enfriamiento sin esperar en la prueba.
+    reloj = RelojFalso()
+    modulo = importlib.import_module("guia.aplicacion")
+    reloj_real = modulo.time
+    modulo.time = reloj
+    try:
+        # 22.1 Sigue a la vista muchas veces el enfriamiento: NO se
+        # repite (eso era lo que tapaba las indicaciones).
+        detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
+        for _ in range(3):
+            aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+            reloj.avanzar(config.enfriamiento_objeto_s + 1.0)
+        comprobar(
+            sum("en medio del camino" in frase for frase in locutor.frases) == 1,
+            "con el objeto siempre a la vista anuncia una sola vez",
+        )
+
+        # 22.2 Se fue el tiempo suficiente y volvio: ahi si se
+        # vuelve a anunciar.
+        detector.obstaculos = ()
+        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+        reloj.avanzar(config.enfriamiento_objeto_s + 1.0)
+        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+        locutor.frases.clear()
+        detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
+        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+        comprobar(
+            any("en medio del camino" in frase for frase in locutor.frases),
+            "cuando desaparece y vuelve se anuncia de nuevo",
+        )
+
+        # 22.3 Aparece un objeto NUEVO al lado del ya nombrado: se
+        # anuncia enseguida, sin esperar a que se vaya el otro.
+        detector.obstaculos = (
+            ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+            ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
+        )
+        locutor.frases.clear()
+        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+        comprobar(
+            any("mesa" in frase for frase in locutor.frases),
+            "un obstaculo nuevo se anuncia sin esperar el enfriamiento",
+        )
+        comprobar(
+            len(locutor.frases) == 1,
+            "el nuevo entra en la misma frase, sin repetir la anterior",
+        )
+
+        # 22.4 Un frame limpio CORTO (un parpadeo de la camara) no
+        # re-arma: hay que estar sin verlo el enfriamiento entero.
+        detector.obstaculos = ()
+        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+        detector.obstaculos = (
+            ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+            ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
+        )
+        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+        comprobar(
+            len(locutor.frases) == 1,
+            "un parpadeo de la camara no repite el anuncio",
+        )
+    finally:
+        modulo.time = reloj_real
+
+
+def test_pasos_sin_ritmo_se_descartan() -> None:
+    """Un paso suelto no adelanta el fin del tramo.
+
+    La persona se para a escuchar un aviso, mueve el pie y ese cruce
+    sumaba: el tramo terminaba antes de tiempo (llegada anunciada con
+    pasos todavia faltando).  Ahora un cruce con mas de
+    ``intervalo_paso_max_s`` desde el anterior se descarta, y el ritmo
+    se reinicia para no perder tambien el primer paso real de
+    despues de la pausa.
+    """
+    print("\n[23] Pasos: el paso sin ritmo de marcha se descarta")
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    config = Configuracion()
+    pasos = movimiento.ContadorPasos(config)
+    mpu = MPUFalso()
+
+    def marchar(muestras: int) -> None:
+        # Pico y reposo cada 4 muestras: con el reloj falso (0.1 s
+        # por muestra) eso es una cadencia de 0.4 s, de marcha normal.
+        for i in range(muestras):
+            mpu.az = 1.6 if i % 4 < 2 else 1.0
+            pasos.en_muestra(mpu.leer(), dt=0.01)
+
+    # En reposo se asienta la media local (el primer pico la tendria
+    # en 1.6 g y no habria oscilacion que detectar).
+    mpu.az = 1.0
+    for _ in range(150):
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+
+    # Marcha normal: los pasos cuentan.
+    marchar(40)
+    contados = pasos.pasos
+    comprobar(
+        contados >= 5,
+        f"al caminar con ritmo cuenta los pasos ({contados})",
+    )
+
+    # Se para (a escuchar un aviso, a esquivar algo): 15 s sin marcha.
+    mpu.az = 1.0
+    for _ in range(150):
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(pasos.pasos == contados, "en la parada no inventa pasos")
+
+    # Un solo movimiento del pie despues de la parada: NO cuenta.
+    mpu.az = 1.6
+    pasos.en_muestra(mpu.leer(), dt=0.01)
+    mpu.az = 1.0
+    pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        pasos.pasos == contados,
+        "un paso suelto sin ritmo de marcha se descarta",
+    )
+
+    # Y al volver a caminar el primer paso real SI cuenta: el ritmo
+    # se reinicio con el descarte, no se pierde una tanda entera.
+    marchar(8)
+    comprobar(
+        pasos.pasos >= contados + 1,
+        "tras la pausa el primer paso de la marcha si cuenta",
+    )
+
+    # El primer paso de un tramo nuevo siempre cuenta, aunque desde
+    # el ultimo paso del tramo anterior haya pasado mucho.
+    pasos.reiniciar()
+    mpu.az = 1.6
+    pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        pasos.pasos == 1,
+        "el primer paso de un tramo nuevo siempre cuenta",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -1861,6 +2073,8 @@ def main() -> int:
         test_rumbo_ignora_balanceo()
         test_sesgo_corregido_en_marcha()
         test_desvio_requiere_confirmacion()
+        test_obstaculos_un_aviso_por_encuentro()
+        test_pasos_sin_ritmo_se_descartan()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

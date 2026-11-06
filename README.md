@@ -176,6 +176,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Delta de aceleración que vale como paso | `delta_paso_g` | `0.09` g sobre la media local |
 | Suavizado previo de la señal de pasos | `tau_media_paso_s` | `0.7` s |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
+| Intervalo máximo entre picos (sin ritmo de marcha) | `intervalo_paso_max_s` | `1.0` s (el cruce se descarta; en `0` se desactiva) |
 | Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` |
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
@@ -359,11 +360,19 @@ más menos 25°), los pasos vuelven a contar y el tramo sigue.
   cámara **nombra** lo que tiene delante. Lo que cae **en medio del
   camino** se anuncia primero y en una sola frase — *"Alto, en medio
   del camino hay un obstáculo: silla"* / *"…hay obstáculos: silla y
-  mesa"* — y lo de los lados se nombra con su lado: *"Alto, hay un
-  obstáculo a tu izquierda: maceta"*. Qué es "en medio" lo decide la
-  franja central del frame (`obstaculo_centro_min/max`, de 0.30 a
-  0.70 del ancho) y el anuncio respeta el enfriamiento de 4 s por
-  objeto.
+  mesa"* — y lo de los lados se nombra **sin "Alto"** y agrupado en
+  una sola frase: *"Hay un obstáculo a tu izquierda: maceta"*.
+  Reconocen lo que hay a un lado **pero no frenan** el paso. Qué es
+  "en medio" lo decide la franja central del frame
+  (`obstaculo_centro_min/max`, de 0.30 a 0.70 del ancho).
+
+  El anuncio es **una sola vez por encuentro**: mientras el objeto
+  siga a la vista no se repite (antes se repetía cada 4 s y la frase,
+  que bloquea el bucle, tapaba las indicaciones de la ruta). Se
+  re-arma cuando el frame queda limpio `enfriamiento_objeto_s` (4 s),
+  de modo que un parpadeo de la cámara no lo dispara otra vez y un
+  objeto **nuevo** sí se anuncia enseguida. El detector ya no aplica
+  enfriamiento: reporta lo que se ve en el frame.
 
 ### Diagnóstico por consola
 
@@ -376,6 +385,21 @@ La velocidad de giro es **positiva hacia la derecha** y se proyecta
 sobre la vertical (funciona con el módulo plano, de canto o invertido).
 Si al girar a la derecha la velocidad sale negativa, cambia
 `signo_derecha` de `1` a `-1` en `guia/configuracion.py`.
+
+Los pasos dejan su propia traza, útil para calibrar el umbral y para
+ver si un tramo se cierra antes de tiempo::
+
+    PASO: 12 (pico +0.33 g, umbral 0.09 g, cada 0.20 s)
+    PASO DESCARTADO: 1.8 s sin marcha (maximo 1.0 s)
+    TRAMO: 45 pasos acreditados de 50 crudos
+
+El `cada … s` es el intervalo desde el paso anterior: si sale muy
+pegado al anterior hay doble conteo, y si un cruce llega con más de
+`intervalo_paso_max_s` (1 s) se **descarta** —no había ritmo de
+marcha detrás: la persona estaba parada y movió el pie— y en la
+consola aparece `PASO DESCARTADO`. Al cerrar un tramo, `TRAMO` deja
+los pasos **acreditados** (los que pide la ruta) junto a los
+**crudos** que senso el contador.
 
 La medición del HC-SR04 se hace con **gpiozero** (`DistanceSensor` con
 `LGPIOFactory`), exactamente igual que el script verificado en esta
@@ -461,6 +485,7 @@ script y compara la sigma antes/después.
 * **Sin bloqueos innecesarios**: la voz se atiende desde la cola de
   eventos en cada vuelta del bucle; la cámara sigue trabajando.
 * **Una sola inferencia YOLO por frame**, con confirmación de 3 detecciones
-  seguidas y enfriamiento de obstáculos (4 s) para no repetir anuncios.
+  seguidas; los obstáculos se anuncian **una vez por encuentro** (se
+  re-arma tras `enfriamiento_objeto_s` de frame limpio).
 * **Recursos gestionados**: `try/finally` y context managers garantizan
   cerrar cámara, I2C y GPIO aunque falle algo.

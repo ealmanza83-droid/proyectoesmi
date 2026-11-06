@@ -316,6 +316,11 @@ class ContadorPasos:
     refractario (``intervalo_paso_s``) contra el doble conteo.  Una
     magnitud ALTA SOSTENIDA no genera cruces: sin oscilacion no hay
     pasos, asi que tampoco hay pasos fantasma.
+
+    Ademas, un cruce con mas de ``intervalo_paso_max_s`` desde el
+    anterior se descarta: no hay ritmo de marcha detras (la persona
+    estaba parada y movio el pie), y esos pasos de mas hacian que el
+    tramo terminara antes de tiempo.
     """
 
     def __init__(self, config: Configuracion):
@@ -324,6 +329,9 @@ class ContadorPasos:
         self._ultimo_paso = 0.0
         self._media: float | None = None
         self._en_pico = False
+        # El primer paso despues de ``reiniciar`` siempre cuenta: no
+        # hay cadencia previa con la que compararlo todavia.
+        self._arranque = True
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
         """Cuenta un paso si la muestra trae una oscilacion de paso."""
@@ -355,16 +363,35 @@ class ContadorPasos:
             oscilacion >= delta
             and ahora - self._ultimo_paso >= self._config.intervalo_paso_s
         ):
-            self._pasos += 1
-            self._ultimo_paso = ahora
-            self._en_pico = True
-            # Se imprime la oscilacion junto al paso para poder
-            # calibrar el umbral (delta_paso_g) en la casa: si los
-            # pasos reales quedan por debajo del umbral, no se cuentan.
-            print(
-                f"PASO: {self._pasos} (pico {oscilacion:+.2f} g, "
-                f"umbral {delta:.2f} g)"
-            )
+            intervalo = ahora - self._ultimo_paso
+            maximo = self._config.intervalo_paso_max_s
+            if not self._arranque and maximo > 0.0 and intervalo > maximo:
+                # Paso suelto: sin ritmo de marcha detras (la persona
+                # estaba parada y movio el pie, o el sensor registro
+                # un movimiento suelto).  No suma al tramo, pero el
+                # ritmo se reinicia para no descartar tambien el
+                # primer paso real despues de la pausa.
+                self._ultimo_paso = ahora
+                self._en_pico = True
+                print(
+                    f"PASO DESCARTADO: {intervalo:.1f} s sin marcha "
+                    f"(maximo {maximo:.1f} s)"
+                )
+            else:
+                ritmo = "" if self._arranque else f", cada {intervalo:.2f} s"
+                self._pasos += 1
+                self._arranque = False
+                self._ultimo_paso = ahora
+                self._en_pico = True
+                # Se imprime la oscilacion junto al paso para poder
+                # calibrar el umbral (delta_paso_g) en la casa: si los
+                # pasos reales quedan por debajo del umbral, no se
+                # cuentan.  El intervalo deja ver en consola si un paso
+                # salio pegado al anterior (doble conteo).
+                print(
+                    f"PASO: {self._pasos} (pico {oscilacion:+.2f} g, "
+                    f"umbral {delta:.2f} g{ritmo})"
+                )
 
     @property
     def pasos(self) -> int:
@@ -380,3 +407,4 @@ class ContadorPasos:
         self._pasos = 0
         self._ultimo_paso = 0.0
         self._en_pico = False
+        self._arranque = True

@@ -225,6 +225,16 @@ class Aplicacion:
         # reciente cuenta como la misma explicacion.
         self._cerca_antes = False
         self._ultimo_anuncio_obstaculo = 0.0
+        # Un obstaculo se anuncia UNA vez por encuentro (antes se
+        # repetia cada pocos segundos mientras siguiera a la vista y
+        # la voz, que bloquea el bucle, tapaba las indicaciones de la
+        # ruta).  Estas claves guardan lo que ya se dijo y desde
+        # cuando no queda nada a la vista: el aviso se re-arma solo
+        # cuando el frame estuvo limpio ``enfriamiento_objeto_s``.
+        self._medio_anunciado: tuple[str, ...] = ()
+        self._medio_libre_desde: float | None = None
+        self._lado_anunciado: tuple[str, ...] = ()
+        self._lado_libre_desde: float | None = None
         # Avisos de avance del giro en curso (0.5 y 0.75 del objetivo)
         self._avances_anunciados: set[float] = set()
         self._ultimo_angulo_giro = 0.0
@@ -854,32 +864,80 @@ class Aplicacion:
     def _anunciar_obstaculos(
         self, resultado: ResultadoVision, distancia_cm: float | None
     ) -> None:
-        """Nombra los obstaculos con la camara y el ultrasonido a uno.
+        """Nombra los obstaculos UNA vez por encuentro, sin frenar de mas.
 
         Los dos sensores dicen lo mismo de forma distinta (la camara
         nombra el objeto, el ultrasonido pitia) y antes hablaban por
         separado, lo que confundia a la persona: no sabia si los
-        pitidos eran lo mismo que acaba de oir.  Ahora:
+        pitidos eran lo mismo que acaba de oir.  Ademas el anuncio se
+        repetia cada ``enfriamiento_objeto_s`` mientras el objeto
+        siguiera a la vista, y como ``_hablar`` bloquea el bucle hasta
+        que termina de sonar, la voz repetida tapaba las indicaciones
+        de la ruta.  Ahora:
 
-        * lo que esta EN MEDIO del camino y cerca del eco se anuncia
-          en UNA sola frase con el nombre Y la distancia: los pitidos
-          quedan explicados;
-        * solo camara (lejos o sin eco): se nombra como antes;
+        * lo que esta EN MEDIO del camino se anuncia al APARECER (o
+          al entrar el eco en rango), en UNA sola frase con el nombre
+          Y la distancia si la hay: los pitidos quedan explicados;
+        * los de los lados se agrupan en una frase SIN "Alto": estan
+          a un lado del camino, informan pero no cortan el paso;
+        * mientras siga a la vista NO se repite: el aviso se re-arma
+          solo cuando el frame queda limpio ``enfriamiento_objeto_s``
+          (asi un parpadeo de YOLO no lo repite y un objeto nuevo si
+          se anuncia);
         * solo ultrasonido (algo que la camara no nombra): al entrar
           en rango se explica una sola vez que los pitidos significan
           "hay algo enfrente".
         """
-        en_medio = [
-            obstaculo.nombre
-            for obstaculo in resultado.obstaculos
-            if obstaculo.lado == EN_MEDIO_DEL_CAMINO
-        ]
+        ahora = time.monotonic()
+
+        # Lo que se ve AHORA en el frame, sin repetir nombres y con
+        # los lados agrupados (una sola frase por anuncio).
+        en_medio: list[str] = []
+        lados: dict[str, list[str]] = {}
+        for obstaculo in resultado.obstaculos:
+            if obstaculo.lado == EN_MEDIO_DEL_CAMINO:
+                if obstaculo.nombre not in en_medio:
+                    en_medio.append(obstaculo.nombre)
+            else:
+                nombres = lados.setdefault(obstaculo.lado, [])
+                if obstaculo.nombre not in nombres:
+                    nombres.append(obstaculo.nombre)
+        lados_vistos = tuple(
+            f"{lado}:{nombre}"
+            for lado, nombres in lados.items()
+            for nombre in nombres
+        )
+
         cerca = (
             distancia_cm is not None
             and distancia_cm <= self.config.distancia_alerta_cm
         )
+        entrada_eco = cerca and not self._cerca_antes
 
+        # Re-arma: si el frame queda sin nada del lado correspondiente
+        # durante el enfriamiento, el proximo encuentro vuelve a
+        # anunciar.
         if en_medio:
+            self._medio_libre_desde = None
+        elif self._medio_libre_desde is None:
+            self._medio_libre_desde = ahora
+        elif ahora - self._medio_libre_desde >= self.config.enfriamiento_objeto_s:
+            self._medio_anunciado = ()
+            self._medio_libre_desde = None
+
+        if lados_vistos:
+            self._lado_libre_desde = None
+        elif self._lado_libre_desde is None:
+            self._lado_libre_desde = ahora
+        elif ahora - self._lado_libre_desde >= self.config.enfriamiento_objeto_s:
+            self._lado_anunciado = ()
+            self._lado_libre_desde = None
+
+        # En medio: se anuncia si aparece algo nuevo, o si el eco
+        # entra en rango con el objeto ya nombrado (entonces la frase
+        # se da con la distancia y los pitidos quedan explicados).
+        nuevos = [n for n in en_medio if n not in self._medio_anunciado]
+        if nuevos or (entrada_eco and en_medio):
             articulo = "un obstáculo" if len(en_medio) == 1 else "obstáculos"
             nombres = _unir_nombres(en_medio)
             if cerca:
@@ -893,14 +951,22 @@ class Aplicacion:
                 self._hablar(
                     f"Alto, en medio del camino hay {articulo}: {nombres}."
                 )
-            self._ultimo_anuncio_obstaculo = time.monotonic()
+            self._medio_anunciado = tuple(en_medio)
+            self._ultimo_anuncio_obstaculo = ahora
 
-        for obstaculo in resultado.obstaculos:
-            if obstaculo.lado != EN_MEDIO_DEL_CAMINO:
-                self._hablar(
-                    f"Alto, hay un obstáculo a tu {obstaculo.lado}: "
-                    f"{obstaculo.nombre}."
-                )
+        # Los lados: informan sin "Alto" (no se cruzan en la ruta) y
+        # en una sola frase, para no cortar la navegacion.
+        if any(clave not in self._lado_anunciado for clave in lados_vistos):
+            partes = [
+                f"a tu {lado}: {_unir_nombres(nombres)}"
+                for lado, nombres in lados.items()
+            ]
+            if len(partes) == 1:
+                frase = f"Hay un obstáculo {partes[0]}."
+            else:
+                frase = "Hay obstáculos " + ", ".join(partes) + "."
+            self._hablar(frase)
+            self._lado_anunciado = lados_vistos
 
         # El ultrasonido pitia sin que la camara nombre nada: explica
         # los pitidos una sola vez al entrar en el rango de alerta.
@@ -908,7 +974,7 @@ class Aplicacion:
         # la frase no se repite.
         if cerca and not self._cerca_antes:
             if (
-                time.monotonic() - self._ultimo_anuncio_obstaculo
+                ahora - self._ultimo_anuncio_obstaculo
                 >= self.config.enfriamiento_objeto_s
             ):
                 self._advertecer(
@@ -1166,6 +1232,14 @@ class Aplicacion:
             self._guiar_con_senal(resultado)
             self._vigilar_desvio()
             if dados >= instruccion.cantidad:
+                # Deja en consola lo que senso el contador: si el tramo
+                # termina antes de tiempo, la diferencia entre crudos
+                # y acreditados (y los intervalos de la linea PASO)
+                # muestran si entraron pasos de mas.
+                print(
+                    f"TRAMO: {dados} pasos acreditados de "
+                    f"{self.pasos.avanzar()} crudos"
+                )
                 self._hablar("Pasos completados. Puedes parar.")
                 self._tramos_completados += 1
                 self._falta_encarar = True

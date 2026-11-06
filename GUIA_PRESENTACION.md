@@ -261,9 +261,18 @@ detecciones por el catálogo (`dominio/catalogo.py`):
   considera **en medio del camino** y se avisa en una sola frase
   (*"Alto, en medio del camino hay un obstáculo: silla"*, o
   *"…hay obstáculos: silla y mesa"* si hay varias); los de los lados
-  se nombra con su lado (*"Alto, hay un obstáculo a tu izquierda:
-  maceta"*). La posición la calcula `posicion_en_frame` en
-  `vision/detector.py`.
+  se nombra **sin "Alto"** y agrupados en una sola frase
+  (*"Hay un obstáculo a tu izquierda: maceta"*): reconocen lo que hay
+  a un lado, pero **no frenan** el paso. La posición la calcula
+  `posicion_en_frame` en `vision/detector.py`.
+
+  **Un anuncio por encuentro**: mientras el objeto siga a la vista no
+  se repite (antes se repetía cada `enfriamiento_objeto_s` y la frase,
+  que bloquea el bucle, tapaba las indicaciones de la ruta). El aviso
+  se re-arma solo cuando el frame queda limpio ese tiempo; un objeto
+  **nuevo** sí se anuncia enseguida, y un parpadeo de la cámara no lo
+  dispara otra vez. El detector ya no aplica enfriamiento: reporta lo
+  que se ve en el frame y de repetir se encarga `Aplicacion`.
 
 La cámara parpadea (una señal se ve 2 de cada 5 frames), así que una
 señal solo se acepta tras **3 detecciones seguidas** (tolerando 2
@@ -353,7 +362,7 @@ reconoce igual cuando la persona dice "Raspi".
 
 ---
 
-## 7. Las 12 pruebas automatizadas
+## 7. Las pruebas automatizadas
 
 `python pruebas/test_flujo.py` — corren sin hardware (con stubs del
 sensor), y verifican el comportamiento completo. Ejemplos:
@@ -371,6 +380,22 @@ sensor), y verifican el comportamiento completo. Ejemplos:
 11. Las dos caras de la puerta (interior vs pasillo).
 12. Re-localización, llegada verificada y órdenes de voz de
     recuperación.
+13. El giro de encarada según el sentido de la ruta (12
+    combinaciones).
+14. Obstáculos: en medio del camino y a los lados —los lados se
+    nombra **sin "Alto"** y en una sola frase—.
+15. Encarada intermedia al terminar un tramo.
+16. Cámara y ultrasonido hablando del mismo obstáculo.
+17. Pasos con la media local cambiando (postura).
+18. El balanceo al caminar no desvía el rumbo.
+19. Sesgo del giroscopio aprendido en marcha.
+20. Confirmación temporal del desvío e histéresis de liberación.
+21. Encarada automática al confirmar la zona.
+22. **Un solo aviso por encuentro** de obstáculo: no repite mientras
+    siga a la vista, se re-arma con el frame limpio y un objeto
+    nuevo sí se anuncia enseguida.
+23. **El paso sin ritmo de marcha se descarta** (no adelanta el fin
+    del tramo) y el primer paso de un tramo nuevo siempre cuenta.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
@@ -458,5 +483,8 @@ La casa (mapa) se define en `guia/dominio/rutas.py` (`TRAMOS_DEMO`):
 cada tramo solo se mide en un sentido; el inverso se calcula con los
 mismos pasos y los giros espejados. Ese mismo sentido decide el giro
 de encarada (`PlanificadorRutas.lado_encarada`): las imágenes están
-del lado derecho en el sentido normal, así que se encara a la
-derecha, y al volver la indicación se invierte (izquierda).
+del lado **izquierdo** en el sentido normal (`GIRO_SENAL_NORMAL =
+"izquierda"`), así que se encara a la izquierda, y al volver la
+indicación se invierte (derecha, `GIRO_SENAL_INVERSO`). El lado no
+está hardcodeado: sale de esas dos constantes, así que si algún día
+se mueven las fotos de lado basta con cambiarlas ahí.

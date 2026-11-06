@@ -65,11 +65,6 @@ class Instruccion:
 #   Cuarto -> Sala     10.5 - 6.1 = 4.4 m   4.4 / 0.46 = 10 pasos
 #   Sala   -> Baño     30.2 - 10.5 = 19.7 m 19.7 / 0.46 = 43 pasos
 #
-# Verificacion con el resto de las medidas (la casa es una sola
-# linea recta Inicio -> Cuarto -> Sala -> Baño):
-#   6.1 + 4.4 = 10.5 (Inicio-Sala), 10.5 + 19.7 = 30.2 (Inicio-Baño)
-#   y 4.4 + 19.7 = 24.1 (Baño-Cuarto).
-#
 # Basta con poner cada tramo en UN solo sentido (A -> B): el camino de
 # vuelta (B -> A) se calcula solo, con los mismos pasos y los giros en
 # sentido contrario.  Asi "Sala -> Baño" implica tambien "Baño ->
@@ -83,10 +78,16 @@ class Instruccion:
 # esta del lado del pasillo, los giros del plan saldrian dados al
 # reves.
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=13, giros=("izquierda",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=14, giros=("izquierda",)),
     ("Cuarto", "Sala"): TramoRuta(pasos=10, giros=("izquierda",)),
-    ("Sala", "Baño"): TramoRuta(pasos=43, giros=("izquierda",)),
+    ("Sala", "Baño"): TramoRuta(pasos=45, giros=("izquierda",)),
 }
+#TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
+#    ("Inicio", "Cuarto"): TramoRuta(pasos=7, giros=("izquierda",)),
+#    ("Cuarto", "Sala"): TramoRuta(pasos=7, giros=("izquierda",)),
+#    ("Sala", "Baño"): TramoRuta(pasos=5, giros=("izquierda",)),
+#}
+
 
 _ACCIONES_POR_GIRO: dict[str, Accion] = {
     "derecha": Accion.GIRAR_DERECHA,
@@ -102,14 +103,13 @@ _GIRO_ESPEJO: dict[str, str] = {
 
 # Giro con el que hay que encarar la senal de la puerta (ver
 # PlanificadorRutas.lado_encarada).  Las imagenes van impresas del
-# lado DERECHO del pasillo: recorriendo la casa de Inicio al Bano (el
-# sentido en que se midieron los tramos) la persona gira a la
-# DERECHA para poner la imagen enfrente, y en el sentido inverso (por
-# ejemplo ir del Bano a la Sala, donde la imagen le quedaria a su
-# izquierda) la indicacion se invierte y hay que girar a la
-# IZQUIERDA.
-GIRO_SENAL_NORMAL = "derecha"
-GIRO_SENAL_INVERSO = "izquierda"
+# lado DERECHO del pasillo: recorriendo la casa en el sentido en que
+# se midieron los tramos la persona gira a la IZQUIERDA para poner la
+# imagen enfrente, y en el sentido inverso (por ejemplo ir del Bano a
+# la Sala, donde la imagen le quedaria a su izquierda) la indicacion
+# se invierte y hay que girar a la DERECHA.
+GIRO_SENAL_NORMAL = "izquierda"
+GIRO_SENAL_INVERSO = "derecha"
 
 
 class PlanificadorRutas:
@@ -180,9 +180,9 @@ class PlanificadorRutas:
         El mapa se midio recorriendo la casa en un solo sentido, con
         las imagenes del lado derecho del pasillo.  Si la ruta sigue
         ese sentido (por ejemplo Inicio -> Cuarto) la imagen esta a la
-        derecha y la encarada es a la DERECHA; si la ruta va al reves
-        (por ejemplo Bano -> Sala) la imagen le queda al otro lado y
-        el giro se invierte (IZQUIERDA).
+        derecha y la encarada es a la IZQUIERDA; si la ruta va al
+        reves (por ejemplo Bano -> Sala) la imagen le queda al otro
+        lado y el giro se invierte (DERECHA).
 
         Mira solo el sentido del camino entre las dos zonas, asi que
         sirve igual para el tramo de salida y para confirmar la

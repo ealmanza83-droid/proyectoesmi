@@ -112,6 +112,16 @@ class Configuracion:
     # descartaba casi la mitad de los pasos reales y los tramos largos
     # (p. ej. 43 pasos) nunca se completaban.
     intervalo_paso_s: float = 0.18
+    # Un paso con mas de este espacio desde el anterior NO es marcha:
+    # la persona estaba parada (se detuvo a escuchar un aviso o a
+    # esquivar algo) y movio el pie, o el sensor registro un
+    # movimiento suelto.  Esos pasos de mas adelantaban el final del
+    # tramo (llegada anunciada con pasos todavia faltando).  El paso
+    # descartado reinicia el ritmo, asi que tras una pausa se pierde
+    # como mucho UN paso y no todos los que siguen.  En 0 se
+    # desactiva.  Se comprueba contra la linea PASO de la consola
+    # (imprime "PASO DESCARTADO" cuando corta uno).
+    intervalo_paso_max_s: float = 1.0
 
     # ------------------------------------------------------------------
     # Deteccion de caidas (acelerometro)

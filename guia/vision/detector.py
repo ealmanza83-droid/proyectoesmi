@@ -6,7 +6,6 @@ volver a recorrer los resultados en varias funciones.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 import cv2
@@ -59,7 +58,14 @@ class ResultadoVision:
     senal: Senal | None = None
     """Senal confirmada (3 detecciones seguidas): zona y lado de puerta."""
     obstaculos: tuple[ObstaculoVisto, ...] = ()
-    """Obstaculos que conviene anunciar ahora (respeta el enfriamiento)."""
+    """Obstaculos que se ven EN ESTE frame, con su lado.
+
+    Sin enfriamiento: aqui solo se dice que hay.  Cuanto tarda en
+    repetirse el anuncio lo decide la aplicacion (un aviso por
+    encuentro), porque con el enfriamiento aqui el objeto
+    "desaparecia" y "volvia" cada pocos segundos y el anuncio se
+    repetia igual.
+    """
 
 
 def posicion_en_frame(
@@ -137,7 +143,6 @@ class DetectorVisual:
         self._senales = SENALES_ORIENTADORAS
         self._objetos = OBJETOS_PERMITIDOS
         self._confirmador = ConfirmadorSenal(config)
-        self._ultimo_aviso: dict[str, float] = {}
         self._modelo = YOLO(str(config.ruta_modelo), task="detect")
         print("YOLO OK")
         self._precalentar()
@@ -166,7 +171,6 @@ class DetectorVisual:
         resultados = self._modelo(
             frame, conf=self._config.confianza_minima, verbose=False
         )
-        ahora = time.monotonic()
 
         detecciones: list[Deteccion] = []
         obstaculos: list[ObstaculoVisto] = []
@@ -198,22 +202,22 @@ class DetectorVisual:
                 senal_vista = nombre
             elif es_obstaculo:
                 objeto = self._objetos[nombre]
-                # Enfriamiento: no repetir "alto, hay una silla" cada frame.
-                if ahora - self._ultimo_aviso.get(objeto, 0.0) >= self._config.enfriamiento_objeto_s:
-                    self._ultimo_aviso[objeto] = ahora
-                    # Con la posicion: lo de en medio del camino se
-                    # anuncia aparte y con mas enfasis.
-                    obstaculos.append(
-                        ObstaculoVisto(
-                            nombre=objeto,
-                            lado=posicion_en_frame(
-                                (x1, y1, x2, y2),
-                                ancho=self._config.ancho,
-                                minimo=self._config.obstaculo_centro_min,
-                                maximo=self._config.obstaculo_centro_max,
-                            ),
-                        )
+                # Sin enfriamiento: se anuncia lo que se VE ahora y
+                # quien decide cuándo repetir es la aplicacion (ver
+                # Aplicacion._anunciar_obstaculos).  Con el
+                # enfriamiento aqui, el objeto parecia irse y volver
+                # cada pocos segundos y la voz no paraba de repetirlo.
+                obstaculos.append(
+                    ObstaculoVisto(
+                        nombre=objeto,
+                        lado=posicion_en_frame(
+                            (x1, y1, x2, y2),
+                            ancho=self._config.ancho,
+                            minimo=self._config.obstaculo_centro_min,
+                            maximo=self._config.obstaculo_centro_max,
+                        ),
                     )
+                )
 
         return ResultadoVision(
             detecciones=tuple(detecciones),
