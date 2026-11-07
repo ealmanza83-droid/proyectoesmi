@@ -359,6 +359,16 @@ Detalle fino: ver la señal de la zona de cierre **dos veces** (la
 puerta enfrente mientras se camina) no se lee como desviación — antes
 provocaba un *"Te saliste de la ruta"* falso.
 
+### Estimador de posición del tramo
+
+El estado del filtro es la distancia recorrida y su varianza. Predice
+con los pasos rectos y la zancada actual, y corrige con distancia visual
+a la señal interior esperada y con el HC-SR04 estable si el tramo lo
+habilita. La aplicación expone `posicion_m` e `incertidumbre_m`; puede
+usar el límite superior de confianza para empezar antes el aviso de
+búsqueda. El filtro **no sustituye la señal**: sin la señal correcta la
+llegada no se confirma.
+
 ### 5.9 Zancada adaptativa: el paso real
 
 Cada tramo del mapa lleva **dos** medidas: los `pasos` que se contaron
@@ -504,6 +514,10 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     conocida al final; lecturas HC-SR04 nuevas y estables estiman
     `d_inicio - d_actual`, pero la señal de cámara sigue siendo la única
     confirmación de llegada.
+33. **Estimador de posición**: pruebas sintéticas verifican predicción
+    por zancada, corrección visual, propagación/reducción de
+    incertidumbre y que esa incertidumbre inicia la búsqueda, pero no
+    cierra un tramo sin señal interior.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).

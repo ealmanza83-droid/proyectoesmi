@@ -124,6 +124,7 @@ from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
 from guia.navegacion.odometro import OdometroUltrasonico  # noqa: E402
+from guia.navegacion.posicion import EstimadorPosicionTramo  # noqa: E402
 from guia.navegacion.rumbo import Rumbo  # noqa: E402
 from guia.vision.detector import (  # noqa: E402
     Deteccion,
@@ -2952,6 +2953,78 @@ def test_odometro_ultrasonico_estable() -> None:
     )
 
 
+def test_estimador_posicion_tramo() -> None:
+    """El filtro combina pasos y mediciones y propaga incertidumbre."""
+    print("\n[33] Estimador 1D de posición e incertidumbre")
+    config = Configuracion()
+    estimador = EstimadorPosicionTramo(config)
+    estimador.reiniciar(5.0)
+    inicial = estimador.incertidumbre_m
+    estimador.predecir(4, 0.5)
+    comprobar(
+        estimador.posicion_m == 2.0
+        and estimador.incertidumbre_m > inicial,
+        "predice metros por paso y aumenta la incertidumbre",
+    )
+    varianza_antes = estimador.varianza_m2
+    comprobar(
+        estimador.corregir(3.0, config.varianza_medicion_senal_m2)
+        and estimador.posicion_m > 2.0
+        and estimador.varianza_m2 < varianza_antes,
+        "la medición visual corrige posición y reduce incertidumbre",
+    )
+    estimador.corregir(100.0, config.varianza_medicion_ultrasonido_m2)
+    comprobar(
+        estimador.posicion_m == 5.0,
+        "limita la posición estimada al largo del tramo",
+    )
+    comprobar(
+        not estimador.corregir(2.0, 0.0),
+        "rechaza mediciones con varianza inválida",
+    )
+    locutor = LocutorFalso()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    aplicacion._distancia_tramo = 5.0
+    aplicacion._zona_cierre_tramo = "Cuarto"
+    aplicacion.estimador_posicion.reiniciar(5.0)
+    aplicacion.estimador_posicion.predecir(6, 0.5)
+    aplicacion._valorar_llegada_del_tramo(ResultadoVision(), dados=0, objetivo=10)
+    comprobar(
+        any("Reduce el paso" in frase for frase in locutor.frases)
+        and aplicacion._tramos_completados == 0,
+        "la incertidumbre puede iniciar búsqueda, pero no cerrar el tramo",
+    )
+
+    senal_cierre = Senal("Cuarto", LADO_INTERIOR)
+    resultado = ResultadoVision(
+        senal=senal_cierre,
+        detecciones=(
+            Deteccion("sheep", 0.9, (10, 10, 40, 50), True, False, 1.0),
+        ),
+    )
+    aplicacion._actualizar_posicion_tramo(
+        resultado,
+        Instruccion(Accion.CAMINAR, 10, distancia_m=5.0),
+        dados=0,
+    )
+    aplicacion._valorar_llegada_del_tramo(resultado, dados=0, objetivo=10)
+    comprobar(
+        aplicacion._tramos_completados == 1
+        and not any("Has llegado" in frase for frase in locutor.frases),
+        "la medición visual corrige posición y la señal cierra sin falsear llegada",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2994,6 +3067,7 @@ def main() -> int:
         test_evaluacion_offline_pasos()
         test_distancia_visual_y_mediana()
         test_odometro_ultrasonico_estable()
+        test_estimador_posicion_tramo()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

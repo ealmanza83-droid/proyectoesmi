@@ -80,6 +80,7 @@ from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
 from .navegacion.caida import DetectorCaida
 from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
 from .navegacion.odometro import OdometroUltrasonico
+from .navegacion.posicion import EstimadorPosicionTramo
 from .navegacion.rumbo import Rumbo
 from .version import obtener_version
 from .vision.detector import (
@@ -172,6 +173,9 @@ class Aplicacion:
         self.giro = MedidorGiro(config, rumbo=self.rumbo)
         self.pasos = ContadorPasos(config)
         self._odometro_ultrasonico = OdometroUltrasonico(config)
+        self.estimador_posicion = EstimadorPosicionTramo(config)
+        self._pasos_estimador_previos = 0
+        self._ultima_medicion_ultra_aplicada: float | None = None
         # Zancada de la persona: se mide en cada tramo que cierra la
         # camara y de ella salen los pasos del plan siguiente (ver
         # dominio/zancada.py).  Arranca con la semilla del mapa.
@@ -1347,6 +1351,7 @@ class Aplicacion:
             dados = self._creditar_pasos()
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
             self._actualizar_odometro_ultrasonico(instruccion)
+            self._actualizar_posicion_tramo(resultado, instruccion, dados)
             self._guiar_con_senal(resultado)
             self._vigilar_desvio()
             self._valorar_llegada_del_tramo(
@@ -1376,11 +1381,23 @@ class Aplicacion:
           colgada, y la llegada sigue sin anunciarce hasta VER la
           senal del destino.
         """
-        fraccion_avance = dados / objetivo if objetivo > 0 else 0.0
-        if self._avance_ultrasonico_m is not None and self._distancia_tramo > 0:
-            fraccion_avance = max(
-                fraccion_avance,
-                self._avance_ultrasonico_m / self._distancia_tramo,
+        fraccion_pasos = dados / objetivo if objetivo > 0 else 0.0
+        fraccion_posicion = (
+            self.estimador_posicion.posicion_m / self._distancia_tramo
+            if self._distancia_tramo > 0
+            else 0.0
+        )
+        fraccion_avance = max(fraccion_pasos, fraccion_posicion)
+        fraccion_busqueda = fraccion_avance
+        if self._distancia_tramo > 0:
+            limite_superior = (
+                self.estimador_posicion.posicion_m
+                + self.config.sigmas_inicio_busqueda
+                * self.estimador_posicion.incertidumbre_m
+            )
+            fraccion_busqueda = max(
+                fraccion_busqueda,
+                limite_superior / self._distancia_tramo,
             )
         inicio = self.config.ventana_llegada_inicio
         fin = self.config.ventana_llegada_fin
@@ -1401,7 +1418,7 @@ class Aplicacion:
             self._cerrar_tramo(dados)
             return
 
-        if fraccion_avance >= inicio and not self._aviso_ventana_dado:
+        if fraccion_busqueda >= inicio and not self._aviso_ventana_dado:
             self._aviso_ventana_dado = True
             self._hablar("Reduce el paso, ya casi llegas.")
 
@@ -1473,6 +1490,9 @@ class Aplicacion:
             if self._instruccion_actual is not None
             else 0.0
         )
+        self.estimador_posicion.reiniciar(self._distancia_tramo)
+        self._pasos_estimador_previos = 0
+        self._ultima_medicion_ultra_aplicada = None
         self._odometro_ultrasonico.reiniciar()
         self._distancia_frontal_inicio_cm = None
         self._avance_ultrasonico_m = None
@@ -1516,6 +1536,48 @@ class Aplicacion:
         if self._distancia_tramo > 0:
             distancia_objetivo = min(distancia_objetivo, self._distancia_tramo)
         self._avance_ultrasonico_m = min(avance, distancia_objetivo)
+
+    def _actualizar_posicion_tramo(
+        self, resultado: ResultadoVision, instruccion: Instruccion, dados: int
+    ) -> None:
+        """Predice por pasos y corrige con mediciones verificables."""
+        nuevos = max(0, dados - self._pasos_estimador_previos)
+        self._pasos_estimador_previos = dados
+        self.estimador_posicion.predecir(nuevos, self.zancada.metros)
+
+        senal = resultado.senal
+        if (
+            senal is not None
+            and senal.lado == LADO_INTERIOR
+            and senal.zona == self._zona_cierre_tramo
+            and self._distancia_tramo > 0
+        ):
+            deteccion = next(
+                (
+                    deteccion
+                    for deteccion in resultado.detecciones
+                    if deteccion.es_senal
+                    and senal_de_clase(deteccion.nombre) == senal
+                    and deteccion.distancia_m is not None
+                ),
+                None,
+            )
+            if deteccion is not None:
+                medicion = self._distancia_tramo - deteccion.distancia_m
+                self.estimador_posicion.corregir(
+                    medicion, self.config.varianza_medicion_senal_m2
+                )
+
+        if (
+            self._avance_ultrasonico_m is not None
+            and self._avance_ultrasonico_m
+            != self._ultima_medicion_ultra_aplicada
+        ):
+            self.estimador_posicion.corregir(
+                self._avance_ultrasonico_m,
+                self.config.varianza_medicion_ultrasonido_m2,
+            )
+            self._ultima_medicion_ultra_aplicada = self._avance_ultrasonico_m
 
     def _creditar_pasos(self) -> int:
         """Pasos que cuentan hacia el tramo: solo los dados rectos.

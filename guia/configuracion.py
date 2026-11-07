@@ -318,6 +318,12 @@ class Configuracion:
     # rechaza saltos bruscos antes de usarlas para corregir posición.
     muestras_ultrasonido_odometro: int = 5
     salto_maximo_ultrasonido_cm: float = 60.0
+    sigma_inicial_posicion_m: float = 0.5
+    varianza_proceso_paso_m2: float = 0.0025
+    varianza_medicion_senal_m2: float = 0.16
+    varianza_medicion_ultrasonido_m2: float = 0.09
+    varianza_medicion_puerta_m2: float = 0.64
+    sigmas_inicio_busqueda: float = 1.0
 
     def preparar(self) -> None:
         """Crea las carpetas que el sistema necesita para funcionar."""

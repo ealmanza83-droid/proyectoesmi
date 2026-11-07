@@ -516,6 +516,32 @@ de llegada.
 
 ---
 
+## 19. Estimador de posición por tramo (Kalman 1D)
+
+El estado `x` es la distancia recorrida y `P` su varianza. Cada nuevo
+paso acreditado predice avance usando la zancada aprendida; después se
+corrige con medidas independientes disponibles (señal interior de
+cierre y/o odómetro frontal estable):
+
+```
+x⁻ = x + Δpasos · zancada
+P⁻ = P + Δpasos · varianza_proceso_paso_m2
+K  = P⁻ / (P⁻ + R)
+x  = x⁻ + K · (z − x⁻)
+P  = (1 − K) · P⁻
+incertidumbre = √P
+```
+
+La posición se limita a `[0, distancia_tramo]` cuando el mapa conoce el
+largo. Una lectura de señal da `z = distancia_tramo − distancia_a_señal`;
+el HC-SR04 aporta `z = avance_ultrasonico`. `R` usa la varianza
+configurada para esa fuente. El aviso de búsqueda puede empezar cuando
+`x + sigmas_inicio_busqueda·√P` alcanza la ventana; el cierre del tramo
+usa el avance estimado y **requiere además la señal interior esperada**.
+Ni los pasos ni el filtro anuncian la llegada al destino.
+
+---
+
 ## Resumen en tabla
 
 | Parte del sistema | Ecuación | Archivo |
@@ -537,4 +563,5 @@ de llegada.
 | Zancada adaptativa | `z_k = α·(D/N) + (1−α)·z_{k−1}` con recorte 0,30…0,90; pasos `= round(D/z)` | `dominio/zancada.py` |
 | Distancia visual | `d=f·H/h`; focal `f=d·h/H`; mediana por clase | `vision/detector.py` |
 | Odómetro opcional | `avance=clip((d_inicio−d_actual)/100, 0, d_inicio−d_fin)` tras mediana estable | `navegacion/odometro.py` |
+| Posición por tramo | Predicción por pasos + corrección Kalman `K=P/(P+R)`; `σ=√P` | `navegacion/posicion.py` |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |

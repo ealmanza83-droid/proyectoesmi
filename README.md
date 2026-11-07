@@ -248,6 +248,10 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Ventana de mediana para distancia visual | `distancia_mediana_frames` | `5` frames |
 | Muestras estables del odómetro ultrasónico | `muestras_ultrasonido_odometro` | `5` |
 | Salto máximo entre lecturas estables | `salto_maximo_ultrasonido_cm` | `60` cm |
+| Incertidumbre inicial de posición | `sigma_inicial_posicion_m` | `0.5` m |
+| Ruido de predicción por paso | `varianza_proceso_paso_m2` | `0.0025` m² |
+| Peso de mediciones visuales/ultrasónicas | `varianza_medicion_senal_m2` / `varianza_medicion_ultrasonido_m2` | `0.16` / `0.09` m² |
+| Margen de incertidumbre para iniciar búsqueda | `sigmas_inicio_busqueda` | `1.0` σ |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
@@ -297,6 +301,12 @@ conoce, el tramo puede activar opcionalmente el odómetro con
 `distancia_frontal_fin_cm`. El avance ultrasónico es la diferencia entre
 la primera distancia estable y la actual; se corrige con la ventana de
 llegada, pero **nunca confirma por sí solo** que se llegó.
+
+El estimador por tramo predice posición con los pasos acreditados y la
+zancada vigente, y corrige con la distancia a la señal esperada y, cuando
+se configuró, con el HC-SR04 frontal. Expone posición e incertidumbre.
+La incertidumbre puede iniciar antes el aviso de búsqueda, pero la ventana
+solo se cierra al confirmar con cámara la señal interior esperada.
 
 **Zancada adaptativa** (`guia/dominio/zancada.py`): mientras no haya
 ninguna medida, el plan usa `pasos` (el conteo del mapa). En cuanto la
