@@ -77,11 +77,18 @@ class Instruccion:
 # confirma esa cara (Aplicacion._en_encarar_senal): si la persona
 # esta del lado del pasillo, los giros del plan saldrian dados al
 # reves.
+#TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
+#    ("Inicio", "Cuarto"): TramoRuta(pasos=14, giros=("izquierda",)),
+#    ("Cuarto", "Sala"): TramoRuta(pasos=10, giros=("izquierda",)),
+#    ("Sala", "Baño"): TramoRuta(pasos=45, giros=("izquierda",)),
+#}
+
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=14, giros=("izquierda",)),
-    ("Cuarto", "Sala"): TramoRuta(pasos=10, giros=("izquierda",)),
-    ("Sala", "Baño"): TramoRuta(pasos=45, giros=("izquierda",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=11, giros=("izquierda",)),
+    ("Cuarto", "Sala"): TramoRuta(pasos=8, giros=("izquierda",)),
+    ("Sala", "Baño"): TramoRuta(pasos=31, giros=("izquierda",)),
 }
+
 #TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
 #    ("Inicio", "Cuarto"): TramoRuta(pasos=7, giros=("izquierda",)),
 #    ("Cuarto", "Sala"): TramoRuta(pasos=7, giros=("izquierda",)),
