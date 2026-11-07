@@ -1,7 +1,7 @@
-"""Deteccion visual con YOLO: senales orientadoras, puertas y obstaculos.
+"""Deteccion visual con YOLO: senales orientadoras y obstaculos.
 
-Un modelo principal detecta senales y obstaculos; un modelo auxiliar
-opcional detecta puertas con una frecuencia configurable.
+Una sola inferencia por frame devuelve todo lo util, en vez de
+volver a recorrer los resultados en varias funciones.
 """
 
 from __future__ import annotations
@@ -244,7 +244,7 @@ class ConfirmadorSenal:
 
 
 class DetectorVisual:
-    """Analiza frames y confirma senales y puertas."""
+    """Analiza frames y confirma senales sin falsos positivos."""
 
     def __init__(self, config: Configuracion):
         self._config = config
@@ -257,40 +257,17 @@ class DetectorVisual:
         )
         self._confirmador = ConfirmadorSenal(config)
         self._modelo = YOLO(str(config.ruta_modelo), task="detect")
-        self._modelo_puertas = (
-            YOLO(str(config.ruta_modelo_puertas), task="detect")
-            if config.ruta_modelo_puertas is not None
-            else None
-        )
-        self._frames_analizados = 0
         print("YOLO OK")
         nombres = self._modelo.names
         clases_modelo = set(nombres.values() if isinstance(nombres, dict) else nombres)
         clases_puerta_ausentes = set(self._puertas) - clases_modelo
-        if clases_puerta_ausentes and self._modelo_puertas is None:
+        if clases_puerta_ausentes:
             print(
                 "AVISO YOLO: el modelo no incluye la clase "
                 f"{', '.join(sorted(clases_puerta_ausentes))}; "
-                "configura ruta_modelo_puertas con un modelo local "
-                "entrenado para detectarlas."
+                "no se podrán detectar puertas. Configura ruta_modelo "
+                "con un modelo entrenado que incluya esa clase."
             )
-        if self._modelo_puertas is not None:
-            nombres_puertas = self._modelo_puertas.names
-            clases_puertas = (
-                nombres_puertas.values()
-                if isinstance(nombres_puertas, dict)
-                else nombres_puertas
-            )
-            if not any(
-                str(nombre).casefold() == config.clase_puerta_modelo.casefold()
-                for nombre in clases_puertas
-            ):
-                raise ValueError(
-                    "El modelo de puertas no contiene la clase configurada "
-                    f"{config.clase_puerta_modelo!r}; clases disponibles: "
-                    f"{', '.join(map(str, clases_puertas))}"
-                )
-            print(f"YOLO puertas OK: {config.ruta_modelo_puertas}")
         self._precalentar()
 
     def _precalentar(self) -> None:
@@ -305,12 +282,6 @@ class DetectorVisual:
                 (self._config.alto, self._config.ancho, 3), dtype=np.uint8
             )
             self._modelo(frame_negro, conf=self._config.confianza_minima, verbose=False)
-            if self._modelo_puertas is not None:
-                self._modelo_puertas(
-                    frame_negro,
-                    conf=self._config.confianza_puerta,
-                    verbose=False,
-                )
             print("YOLO CALIENTE")
         except Exception as error:
             print("AVISO YOLO (precalentamiento):", error)
@@ -319,17 +290,10 @@ class DetectorVisual:
     # Analisis
     # ------------------------------------------------------------------
     def analizar(self, frame) -> ResultadoVision:
-        """Ejecuta los detectores configurados y resume el frame."""
+        """Ejecuta YOLO una vez y resume lo interesante del frame."""
         resultados = self._modelo(
             frame, conf=self._config.confianza_minima, verbose=False
         )
-        inferir_puertas = (
-            self._modelo_puertas is not None
-            and self._frames_analizados
-            % max(1, self._config.intervalo_inferencia_puertas_frames)
-            == 0
-        )
-        self._frames_analizados += 1
 
         observaciones: list[
             tuple[str, float, tuple[int, int, int, int]]
@@ -338,11 +302,6 @@ class DetectorVisual:
         for caja in resultados[0].boxes:
             clase_id = int(caja.cls[0])
             nombre = self._modelo.names[clase_id]
-            if (
-                self._modelo_puertas is not None
-                and nombre in self._puertas
-            ):
-                continue
             if nombre not in CLASES_PERMITIDAS:
                 continue
             x1, y1, x2, y2 = map(int, caja.xyxy[0])
@@ -350,31 +309,6 @@ class DetectorVisual:
             limites = (x1, y1, x2, y2)
             observaciones.append((nombre, confianza, limites))
 
-        if inferir_puertas:
-            resultados_puertas = self._modelo_puertas(
-                frame,
-                conf=self._config.confianza_puerta,
-                verbose=False,
-            )
-            nombres_puertas = self._modelo_puertas.names
-            for caja in resultados_puertas[0].boxes:
-                clase_id = int(caja.cls[0])
-                nombre_modelo = nombres_puertas[clase_id]
-                if (
-                    str(nombre_modelo).casefold()
-                    != self._config.clase_puerta_modelo.casefold()
-                ):
-                    continue
-                x1, y1, x2, y2 = map(int, caja.xyxy[0])
-                observaciones.append(
-                    (
-                        next(iter(self._puertas)),
-                        float(caja.conf[0]),
-                        (x1, y1, x2, y2),
-                    )
-                )
-
-        for nombre, _, (x1, y1, x2, y2) in observaciones:
             if nombre in self._senales:
                 medida = distancia_por_altura(
                     self._config.focal_px,
