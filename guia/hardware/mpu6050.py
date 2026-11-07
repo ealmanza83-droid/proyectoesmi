@@ -10,8 +10,6 @@ import math
 import struct
 from dataclasses import dataclass
 
-from smbus2 import SMBus
-
 from ..configuracion import Configuracion
 
 ESCALA_ACELEROMETRO = 16384.0  # +/- 2 g
@@ -47,6 +45,8 @@ class MPU6050:
     """Interfaz de alto nivel del sensor inercial."""
 
     def __init__(self, config: Configuracion):
+        from smbus2 import SMBus
+
         self._config = config
         self._bus = SMBus(config.bus_i2c)
         # 0 en PWR_MGMT_1 saca al sensor del modo suspension.

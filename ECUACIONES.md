@@ -457,6 +457,25 @@ plan siguiente.
 
 ---
 
+## 16. Evaluación offline del contador de pasos
+
+`pruebas/registrar_caminata.py` registra el tiempo monotónico, las seis
+componentes del MPU6050 y la última distancia disponible del HC-SR04. En
+`pruebas/evaluar_pasos.py`, cada fila se reconstruye como `LecturaMPU` y
+se reproduce con el mismo `ContadorPasos`; `dt` procede de los tiempos
+del archivo (para la primera fila se usa `intervalo_muestreo_mpu_s`):
+
+```
+pasos_detectados = ContadorPasos(reproducir(CSV))
+error_% = |pasos_detectados − pasos_reales| / pasos_reales · 100
+```
+
+El valor de ultrasonido se conserva para inspección, pero no interviene
+en la detección de pasos. Una muestra con tiempo no creciente o columnas
+incompletas invalida el archivo en vez de producir una evaluación parcial.
+
+---
+
 ## Resumen en tabla
 
 | Parte del sistema | Ecuación | Archivo |

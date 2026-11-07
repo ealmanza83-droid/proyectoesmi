@@ -78,6 +78,8 @@ pruebas/
   test_flujo.py             15 pruebas automatizadas sin hardware
   prueba_ultrasonido.py     Verificación directa del HC-SR04 en la Pi
   caracterizar_mpu6050.py   Offset y ruido del MPU6050 en reposo
+  registrar_caminata.py     CSV de sensores con la aplicación cerrada
+  evaluar_pasos.py          Reproducción offline y error del contador
 mi_deteccion/               Modelos YOLO (yolo11n COCO activo)
 piper_voices/  vosk/        Modelos de voz (TTS y reconocimiento)
 ```
@@ -484,9 +486,26 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     configuración; el temblor de 20 Hz (fuera de banda) no cuenta; y
     tres cruces seguidos fuera de cadencia olvidan el ritmo para
     arrancar otro nuevo.
+30. **Evaluación offline**: un CSV registrado con la aplicación cerrada
+    se reproduce con el mismo `ContadorPasos`; la prueba verifica que
+    cuenta y calcula el error porcentual frente al conteo manual.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
+
+### Registro de una caminata real
+
+En la Raspberry Pi, cierra `main.py` y ejecuta
+`python pruebas/registrar_caminata.py --salida pruebas/caminata.csv`.
+Camina contando los pasos manualmente y pulsa `Ctrl+C` al terminar. El
+archivo conserva `t, ax, ay, az, gx, gy, gz` y la distancia del
+ultrasonido (vacía cuando no hay eco). Reproduce el registro en la Pi o
+en un PC con
+`python pruebas/evaluar_pasos.py pruebas/caminata.csv --pasos-reales 42`.
+El porcentaje es el error absoluto del conteo; úsalo para ajustar banda,
+piso y factor del umbral en `guia/configuracion.py`. Los registros son
+locales y pueden revelar patrones de movimiento: no los subas al repo
+sin revisar su contenido.
 
 ---
 

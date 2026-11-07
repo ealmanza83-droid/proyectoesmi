@@ -19,9 +19,11 @@ import importlib
 import math
 import queue
 import sys
+import tempfile
 import threading
 import time
 import types
+import csv
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -116,6 +118,7 @@ from guia.dominio.rutas import (  # noqa: E402
     TramoRuta,
 )
 from guia.dominio.zancada import Zancada  # noqa: E402
+from pruebas.evaluar_pasos import evaluar_csv  # noqa: E402
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
@@ -2804,6 +2807,36 @@ def test_detector_de_pasos() -> None:
     )
 
 
+def test_evaluacion_offline_pasos() -> None:
+    """El evaluador reproduce las muestras del MPU registradas en CSV."""
+    print("\n[30] Registro CSV y evaluación de pasos offline")
+    config = Configuracion()
+    with tempfile.TemporaryDirectory() as carpeta:
+        ruta = Path(carpeta) / "caminata.csv"
+        with ruta.open("w", newline="", encoding="utf-8") as archivo:
+            escritor = csv.writer(archivo)
+            escritor.writerow(
+                ("t", "ax", "ay", "az", "gx", "gy", "gz", "distancia_ultrasonido")
+            )
+            for i in range(600):
+                az = 1.6 if i % 100 < 50 else 1.0
+                escritor.writerow(
+                    (i * 0.01, 0.0, 0.0, az, 0.0, 0.0, 0.0, "")
+                )
+
+        resultado = evaluar_csv(ruta, pasos_reales=6, config=config)
+    comprobar(
+        resultado.pasos_detectados > 0,
+        "el evaluador detecta pasos reproduciendo aceleraciones registradas",
+    )
+    comprobar(
+        resultado.pasos_reales == 6
+        and resultado.error_porcentual
+        == abs(resultado.pasos_detectados - 6) / 6 * 100.0,
+        "reporta los pasos reales y el error porcentual absoluto",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2843,6 +2876,7 @@ def main() -> int:
         test_llegada_por_ventana()
         test_zancada_adaptativa()
         test_detector_de_pasos()
+        test_evaluacion_offline_pasos()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

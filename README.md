@@ -67,6 +67,8 @@ proyectoesmi/
 ├── pruebas/test_flujo.py    prueba completa sin hardware
 ├── pruebas/prueba_ultrasonido.py  verificación del HC-SR04 en la Pi
 ├── pruebas/caracterizar_mpu6050.py  offset y ruido del MPU6050
+├── pruebas/registrar_caminata.py  registro de sensores a CSV (app cerrada)
+├── pruebas/evaluar_pasos.py       reproducción offline del contador de pasos
 ├── mi_deteccion/            modelos YOLO (best.pt, yolo11n_ncnn_model…)
 ├── piper_voices/            voces Piper (es_MX-claude-high…)
 ├── vosk/                    modelo Vosk en español
@@ -153,6 +155,29 @@ python pruebas/test_flujo.py
 Comprueba comandos de voz, planificación de rutas, giro por
 integración, caídas, proximidad y el flujo completo
 (giro → señal → destino → navegación → llegada) con sensores simulados.
+
+### Registrar y evaluar una caminata
+
+Con la aplicación principal **cerrada**, registra el MPU6050 y el
+HC-SR04 directamente en la Pi. La captura termina con `Ctrl+C`; también
+se puede limitar con `--duracion-s`:
+
+```bash
+python pruebas/registrar_caminata.py --salida pruebas/caminata.csv
+python pruebas/registrar_caminata.py --salida pruebas/caminata.csv --duracion-s 30
+```
+
+Cuenta manualmente los pasos de la caminata y reproduce el archivo en la
+Pi o en un PC para comparar el detector sin hardware:
+
+```bash
+python pruebas/evaluar_pasos.py pruebas/caminata.csv --pasos-reales 42
+```
+
+El CSV incluye `t, ax, ay, az, gx, gy, gz, distancia_ultrasonido`;
+la distancia queda vacía si no hay eco. El evaluador informa los pasos
+detectados y el error porcentual absoluto. Los CSV de caminatas pueden
+contener datos personales y no se guardan automáticamente en el repositorio.
 
 ---
 
