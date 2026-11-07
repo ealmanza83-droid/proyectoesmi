@@ -1986,6 +1986,38 @@ def test_sesgo_corregido_en_marcha() -> None:
     )
 
 
+def test_rumbo_resiste_aceleracion_de_pasos() -> None:
+    """La aceleracion lateral de cada paso no debe inclinar la vertical."""
+    print("\n[19b] Rumbo: aceleracion lateral correlacionada con balanceo")
+    config = dataclasses.replace(
+        Configuracion(),
+        offset_giroscopio=0.0,
+        constante_sesgo_s=1e9,
+    )
+    rumbo = Rumbo()
+    giro = movimiento.MedidorGiro(config, rumbo=rumbo)
+    dt = 0.01
+
+    # Sensor inclinado: el balanceo ocurre sobre X, ortogonal a la
+    # gravedad. La aceleracion lateral correlacionada hacia X falseaba
+    # la proyeccion instantanea como si fuera giro sobre la vertical.
+    for i in range(int(20.0 / dt)):
+        balanceo = math.sin(2.0 * math.pi * 1.5 * i * dt)
+        lectura = LecturaMPU(
+            0.3 * balanceo,
+            0.93,
+            0.2,
+            40.0 * balanceo,
+            0.0,
+            0.0,
+        )
+        giro.en_muestra(lectura, dt)
+    comprobar(
+        abs(rumbo.grados) < 5.0,
+        f"20 s de balanceo inclinado no acumulan rumbo ({rumbo.grados:.1f}°)",
+    )
+
+
 def test_desvio_requiere_confirmacion() -> None:
     """El aviso de desvio espera la confirmacion y libera con histéresis.
 
@@ -3449,6 +3481,7 @@ def main() -> int:
         test_pasos_con_media_cambiada()
         test_rumbo_ignora_balanceo()
         test_sesgo_corregido_en_marcha()
+        test_rumbo_resiste_aceleracion_de_pasos()
         test_desvio_requiere_confirmacion()
         test_obstaculos_un_aviso_por_encuentro()
         test_pasos_sin_ritmo_se_descartan()

@@ -106,6 +106,7 @@ class MedidorGiro:
         self._angulo_izquierda = 0.0
         self._sesgo = config.offset_giroscopio
         self._velocidad_derecha = 0.0
+        self._gravedad_filtrada: tuple[float, float, float] | None = None
         # Media (pasa-largas) de la direccion de giro: decide si hay
         # un giro SOSTENIDO que llevar al rumbo (ver en_muestra).
         self._sostenida = 0.0
@@ -118,17 +119,34 @@ class MedidorGiro:
         # (valvula de recalibracion del sesgo, ver en_muestra).
         self._plano_girando_s = 0.0
 
-    def _velocidad_de_giro(self, lectura: LecturaMPU) -> float:
+    def _velocidad_de_giro(self, lectura: LecturaMPU, dt: float) -> float:
         """Velocidad de giro sobre la vertical, positiva hacia la derecha."""
         modulo = lectura.magnitud_aceleracion
         if modulo >= MAGNITUD_MINIMA_VERTICAAL_G:
-            proyectada = (
-                lectura.ax * lectura.gx
-                + lectura.ay * lectura.gy
-                + lectura.az * lectura.gz
-            ) / modulo
-            return -proyectada
-        # Sin gravedad fiable (caida libre): se asume el montaje plano.
+            if self._gravedad_filtrada is None:
+                self._gravedad_filtrada = (lectura.ax, lectura.ay, lectura.az)
+            else:
+                tau = max(self._config.tau_gravedad_giro_s, 1e-6)
+                alfa = 1.0 - math.exp(-dt / tau)
+                self._gravedad_filtrada = tuple(
+                    anterior + (actual - anterior) * alfa
+                    for anterior, actual in zip(
+                        self._gravedad_filtrada,
+                        (lectura.ax, lectura.ay, lectura.az),
+                    )
+                )
+
+        if self._gravedad_filtrada is not None:
+            ax, ay, az = self._gravedad_filtrada
+            norma = math.sqrt(ax * ax + ay * ay + az * az)
+            if norma >= MAGNITUD_MINIMA_VERTICAAL_G:
+                proyectada = (
+                    ax * lectura.gx + ay * lectura.gy + az * lectura.gz
+                ) / norma
+                return -proyectada
+
+        # Hasta obtener un vector de gravedad fiable no se conoce el
+        # montaje: conservar la convencion anterior como respaldo.
         return -lectura.gz
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
@@ -155,7 +173,7 @@ class MedidorGiro:
         giro.
         """
         dt = min(dt, DT_MAXIMO_S)
-        velocidad = self._velocidad_de_giro(lectura)
+        velocidad = self._velocidad_de_giro(lectura, dt)
         self._velocidad_derecha = velocidad
 
         # --- Ventana deslizante: maximo y minimo de la oscilacion -------
@@ -293,6 +311,7 @@ class MedidorGiro:
         self._angulo_derecha = 0.0
         self._angulo_izquierda = 0.0
         self._sostenida = 0.0
+        self._gravedad_filtrada = None
         # La valvula de recalibracion cronometra un giro sostenido: cada
         # instruccion empieza con su propio cronometro.
         self._plano_girando_s = 0.0

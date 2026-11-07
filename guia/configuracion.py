@@ -142,6 +142,10 @@ class Configuracion:
     # en cero, mientras que un giro de verdad (y tambien la deriva
     # lenta, que no llega al umbral) pasa el filtro.
     tau_sostenida_giro_s: float = 0.5
+    # Suaviza el vector de aceleracion antes de usarlo como vertical.
+    # El balanceo e impactos de cada paso no deben inclinar el eje de
+    # proyeccion del giroscopio.
+    tau_gravedad_giro_s: float = 0.5
     # ------------------------------------------------------------------
     # Pasos: banda del paso y umbral adaptativo (ver ContadorPasos)
     # ------------------------------------------------------------------

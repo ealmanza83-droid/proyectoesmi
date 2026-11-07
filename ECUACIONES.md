@@ -171,7 +171,11 @@ girando al lado contrario" (la etiqueta de diagnóstico lo muestra).
 ## 6. Rumbo relativo — `guia/navegacion/rumbo.py`
 
 ```
-rumbo[k] = rumbo[k−1] + ω·dt     (acumulación, solo con giro sostenido)
+g_filtrada[k] = g_filtrada[k−1] + (1 − exp(−dt/τg)) · (a[k] − g_filtrada[k−1])
+ω_vertical[k] = −(g_filtrada · gyro[k]) / |g_filtrada|
+direccion[k] = (ω_vertical[k] − sesgo) · signo_derecha
+rumbo[k] = rumbo[k−1] + direccion[k]·dt
+            solo si |sostenida[k]| ≥ velocidad_minima_giro_dps
 rumbo = 0 al confirmar una señal  (re-anclaje)
 ```
 
@@ -179,16 +183,23 @@ Como el MPU6050 **no tiene magnetómetro**, no hay norte: la referencia de 0°
 la da la señal orientadora enfrente. La deriva del giroscopio se corrige
 re-anclando en cada señal.
 
+La vertical se estima filtrando el acelerómetro con `tau_gravedad_giro_s`
+(0,5 s por defecto) antes de proyectar el giroscopio. Usar la aceleración
+instantánea hacía que la aceleración lateral de cada paso inclinara el eje
+de proyección y convirtiera parte del balanceo en un giro falso. El rumbo
+usa esta proyección filtrada y conserva la velocidad instantánea corregida
+para integrar los grados del giro.
+
 **Gate de giro sostenido** (`MedidorGiro.en_muestra`): la velocidad
-instantánea pasa primero por un EMA (`tau_sostenida_giro_s = 0.5 s`):
+proyectada pasa primero por un EMA (`tau_sostenida_giro_s = 0.5 s`):
 
 ```
-sostenida[k] = sostenida[k−1] + (dt/0,5)·(velocidad[k] − sostenida[k−1])
+sostenida[k] = sostenida[k−1] + min(dt/0,5, 1)·(direccion[k] − sostenida[k−1])
 ```
 
-y el rumbo **solo avanza** cuando `|sostenida| ≥ 5 °/s`. Así el balanceo al
-caminar (±20 °/s alternando a 2 Hz, promedio 0 tras el EMA) no deforma el
-rumbo: solo integra un giro mantenido.
+y el rumbo **solo integra** cuando `|sostenida| ≥ 5 °/s`. Así el balanceo
+alternante no abre por sí solo la puerta de integración, y la proyección no
+se contamina con la aceleración lateral de los pasos.
 
 **Vigilancia de línea recta** — `aplicacion.py` (`_vigilar_desvio`):
 
