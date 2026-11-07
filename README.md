@@ -249,8 +249,12 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Recorte mínimo/máximo de la zancada medida | `zancada_min_m` / `zancada_max_m` | `0.30` / `0.90` m por paso |
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
-| Inicio de la ventana de llegada del tramo (ahí la cámara empieza a poder cerrarlo) | `ventana_llegada_inicio` | `0.70` (70 % de los pasos esperados) |
+| Umbral mínimo para cerrar el tramo con señal de cámara | `ventana_llegada_inicio` | `0.70` (70 % de avance) |
 | Fin de la ventana de llegada (límite para tramos intermedios) | `ventana_llegada_fin` | `1.30` (130 % de los pasos esperados) |
+| Cadencia de paso si aún no hay suficientes muestras | `periodo_paso_llegada_s` | `0.6` s |
+| Tiempo de reacción para estimar frenado | `tiempo_reaccion_llegada_s` | `0.8` s |
+| Desaceleración usada para estimar frenado | `desaceleracion_llegada_m_s2` | `1.2` m/s² |
+| Adelanto máximo adicional del aviso | `anticipacion_llegada_max_fraccion` | `0.15` (15 % del tramo) |
 | Umbral de impacto para detectar caída | `umbral_caida_g` | `2.5` |
 | Cambio brusco de aceleración que delata una caída | `umbral_cambio_caida_g` | `1.5` |
 | Muestras seguidas que confirman una caída (mata glitches I2C) | `muestras_caida_requeridas` | `2` |
@@ -421,17 +425,19 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
   desviada.
 * **Al acercarse al final de un tramo (ventana de llegada)**: los pasos
   son solo la estimación, así que el tramo ya **no** se da por
-  terminado en "N pasos" exactos. Al llegar al **70 %** de los pasos
-  esperados el sistema avisa *"Reduce el paso, ya casi llegas."* y el
-  tramo lo **cierra la cámara**, si ve la señal interior de la zona de
-  cierre (la siguiente del camino) entre el 70 % y el **130 %**:
-  *"Ya veo la señal. Puedes parar."* Si se pasa del 130 % sin verla
-  avisa *"Pasos completados. Puedes parar."* + *"Llevas más pasos de
-  los esperados y no veo la señal."* y sigue el flujo de siempre
-  (encarada intermedia o `CONFIRMANDO_LLEGADA`). En el tramo final, si
-  no ve la señal, continúa despacio hasta la distancia máxima de búsqueda
-  configurada y luego vuelve a buscarla. La llegada al destino
-  **nunca** se anuncia sin haber visto su señal. Además ver
+  terminado en "N pasos" exactos. El sistema calcula el aviso de
+  reducción de paso según la cadencia reciente y una distancia de
+  reacción/frenado, adelantándolo como máximo un 15 % del tramo; dice
+  *"Reduce el paso; te indicaré dónde detenerte."* El aviso no cierra el
+  tramo. Solo la cámara lo **cierra** si ve la señal interior de la zona
+  siguiente entre el **70 %** y el **130 %**:
+  *"Ya veo la señal. Puedes parar."* Si se pasa del 130 % sin verla,
+  indica que se detenga y explica que aún no confirmó la señal; sigue
+  el flujo de siempre (encarada intermedia o `CONFIRMANDO_LLEGADA`).
+  En el tramo final, si no ve la señal, continúa despacio hasta la
+  distancia máxima de búsqueda configurada y luego vuelve a buscarla.
+  La llegada al destino **nunca** se anuncia sin haber visto su señal.
+  Además ver
   la puerta de la zona de cierre mientras se camina no se lee como
   una desviación (antes provocaba un *"Te saliste de la ruta"* falso).
 

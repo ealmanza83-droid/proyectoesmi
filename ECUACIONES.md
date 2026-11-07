@@ -450,16 +450,31 @@ el error se acumula), así que el tramo **no** se da por terminado en
 "N pasos" exactos. Con `N` = pasos esperados del tramo:
 
 ```
-inicio = ventana_llegada_inicio · N   (0,70 · N)
-fin    = ventana_llegada_fin · N      (1,30 · N)
+v = zancada_m / mediana(intervalos_recientes)
+d_reacción = v · tiempo_reaccion_llegada_s
+d_frenado  = v² / (2 · desaceleracion_llegada_m_s2)
+margen     = min(d_reacción + d_frenado,
+                 distancia_tramo · anticipacion_llegada_max_fraccion)
+umbral_aviso = ventana_llegada_inicio − margen / distancia_tramo
 
-datos ≥ inicio  ∧  la cámara ve la señal interior de la zona de cierre
+avance ≥ umbral_aviso
+    → aviso para reducir el paso (no cierra el tramo)
+
+avance ≥ ventana_llegada_inicio
+    ∧ la cámara ve la señal interior de la zona de cierre
     → el tramo se cierra  (re-localización VERIFICADA)
 
-datos ≥ fin  sin esa señal
-    → aviso ("Llevas más pasos…")  +  el tramo se cierra igual,
-      con el flujo de siempre (encarada intermedia o CONFIRMANDO_LLEGADA)
+avance ≥ ventana_llegada_fin  sin esa señal
+    → se detiene y busca la señal mediante el flujo existente
+      (encarada intermedia o CONFIRMANDO_LLEGADA)
 ```
+
+El aviso se limita a adelantarse como máximo `anticipacion_llegada_max_fraccion`
+(0,15 del tramo por defecto). Si aún no hay cadencia medida, se estima
+con `periodo_paso_llegada_s`. El cálculo anticipa reacción y desaceleración;
+no altera el umbral mínimo de 70 % para cerrar con cámara ni anuncia una
+llegada por sí solo. Si el tramo no tiene distancia conocida, se conserva
+el aviso en el umbral de `ventana_llegada_inicio`.
 
 La **zona de cierre** es `_camino[tramos_completados + 1]` (la siguiente
 del camino, la que este tramo debe alcanzar): verla **no** es una

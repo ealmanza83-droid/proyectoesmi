@@ -254,11 +254,11 @@ class Configuracion:
     # se da por terminado exactamente en "N pasos", sino en una
     # VENTANA alrededor de los pasos esperados:
     #
-    # * al llegar al ``ventana_llegada_inicio`` (70 %) se anuncia
-    #   "Reduce el paso, ya casi llegas" y la camara empieza a buscar
-    #   la senal del siguiente punto (en la practica la camara ya lee
-    #   la senal en cada frame; a partir de ahi esa lectura CERRA el
-    #   tramo);
+    # * antes de ``ventana_llegada_inicio`` se anticipa el aviso de
+    #   frenado según la cadencia y la distancia estimada de parada;
+    #   este aviso nunca cierra el tramo;
+    # * la cámara ya lee la senal en cada frame; el cierre visual sigue
+    #   limitado al umbral de ``ventana_llegada_inicio``);
     # * si la camara confirma la senal esperada entre el 70 % y el
     #   ``ventana_llegada_fin`` (130 %), el tramo se da por completado
     #   (re-localizacion verificada: nunca se anuncia una llegada sin
@@ -270,6 +270,14 @@ class Configuracion:
     #   ultrasónica exacta para cerrar el tramo.
     ventana_llegada_inicio: float = 0.70
     ventana_llegada_fin: float = 1.30
+    # Adelanta el aviso de frenado según la velocidad estimada por la
+    # cadencia reciente y una distancia de reacción + desaceleración.
+    # El adelanto se limita para no pedir que reduzca el paso demasiado
+    # pronto; solo afecta al aviso, nunca al umbral de cierre visual.
+    periodo_paso_llegada_s: float = 0.6
+    tiempo_reaccion_llegada_s: float = 0.8
+    desaceleracion_llegada_m_s2: float = 1.2
+    anticipacion_llegada_max_fraccion: float = 0.15
 
     # ------------------------------------------------------------------
     # Navegacion asistida (rumbo y linea recta)

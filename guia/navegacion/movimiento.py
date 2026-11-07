@@ -467,6 +467,7 @@ class ContadorPasos:
         # entran): de ahi sale la cadencia con la que se juzga el
         # proximo paso.
         self._ritmo: deque[float] = deque(maxlen=5)
+        self._cadencia_s: float | None = None
         self._rechazos = 0
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
@@ -570,6 +571,7 @@ class ContadorPasos:
         self._pico_contado = True
         if intervalo is not None:
             self._ritmo.append(intervalo)
+            self._cadencia_s = self._mediana(self._ritmo)
         self._rechazos = 0
         self._ultimo_paso = self._tiempo
         ritmo = "" if intervalo is None else f", cada {intervalo:.2f} s"
@@ -592,6 +594,7 @@ class ContadorPasos:
             # marcha; un movimiento aislado durante la pausa no cuenta.
             self._paso_pendiente = (pico, umbral, self._tiempo)
             self._ritmo.clear()
+            self._cadencia_s = None
             self._rechazos = 0
             print(
                 "PASO PENDIENTE: reanudacion; se confirmara con el "
@@ -610,6 +613,7 @@ class ContadorPasos:
             # La cadencia ya no describe la señal: se olvida y el
             # siguiente pico arranca un ritmo nuevo.
             self._ritmo.clear()
+            self._cadencia_s = None
             self._rechazos = 0
             print("RITMO REBASELADO: los ultimos pasos no encajaban")
 
@@ -617,6 +621,11 @@ class ContadorPasos:
     def pasos(self) -> int:
         """Pasos contados desde la ultima vez que se reinicio."""
         return self._pasos
+
+    @property
+    def cadencia_s(self) -> float | None:
+        """Mediana reciente de segundos por paso contado, si está disponible."""
+        return self._cadencia_s
 
     def avanzar(self) -> int:
         """Devuelve los pasos contados hasta ahora."""

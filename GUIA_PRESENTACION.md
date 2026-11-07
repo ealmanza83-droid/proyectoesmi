@@ -362,8 +362,9 @@ Los pasos son una estimación: la zancada cambia y la deriva puede
 dejar a la persona a un lado de la puerta. Por eso el tramo **no** se
 da por terminado en "N pasos" exactos, sino en una **ventana**:
 
-* al **70 %** de los pasos esperados → *"Reduce el paso, ya casi
-  llegas."*
+* antes del 70 %, el sistema estima la reacción y el frenado a partir
+  de la cadencia reciente y avisa *"Reduce el paso; te indicaré dónde
+  detenerte."* El adelanto está limitado al 15 % del tramo;
 * entre el 70 % y el **130 %** → quien cierra el tramo es **la
   cámara**, si ve la señal interior de la zona de cierre (la
   siguiente del camino): *"Ya veo la señal. Puedes parar."*
@@ -518,10 +519,11 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     y *"Puedes parar"* sale primero en la frase.
     El rumbo se normaliza a ±180° para que una vuelta acumulada no
     invierta la dirección de la corrección.
-27. **Llegada por ventana**: al 70 % avisa *"Reduce el paso, ya casi
-    llegas"*; entre 70 % y 130 % **la cámara** cierra el tramo viendo
-    la señal de cierre; pasado el 130 % sin señal avisa y el flujo
-    sigue como siempre (sin anunciar llegadas falsas).
+27. **Llegada por ventana**: calcula el aviso de reducción según la
+    cadencia y el frenado, con adelanto máximo del 15 %; entre 70 % y
+    130 % **la cámara** cierra el tramo viendo la señal de cierre;
+    pasado el 130 % sin señal avisa y el flujo sigue como siempre (sin
+    anunciar llegadas falsas).
 28. **Zancada adaptativa**: el plan usa los pasos del mapa mientras no
     haya medida; la EMA se actualiza solo con el cierre verificado por
     la cámara (el de 130 % no mide nada) y el plan siguiente calcula
@@ -672,6 +674,7 @@ Todo umbral vive en `guia/configuracion.py`:
 | Adelanto del corte de giro | `grados_compensacion_giro = 12` |
 | Pasos del tramo de re-búsqueda | `pasos_objetivo = 5` |
 | Ventana de llegada del tramo | `ventana_llegada_inicio = 0.70` / `ventana_llegada_fin = 1.30` |
+| Aviso de frenado por ritmo | reacción `0.8 s`, desaceleración `1.2 m/s²`, adelanto máximo `0.15` del tramo |
 | Zancada: peso de la última medida (EMA) | `zancada_ema_alfa = 0.30` |
 | Zancada: recorte de la medida | `zancada_min_m = 0.30` / `zancada_max_m = 0.90` |
 | Mediana de distancia visual | `distancia_mediana_frames = 5` / `distancia_mediana_perdidas = 3` |

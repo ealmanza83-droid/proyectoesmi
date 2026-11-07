@@ -1445,9 +1445,9 @@ class Aplicacion:
         con la senal interior de la zona de cierre (la siguiente del
         camino):
 
-        * antes del ``ventana_llegada_inicio`` (70 %) la senal vista
-          todavia NO cierra el tramo (se ve desde lejos): solo se
-          anuncia una vez "Reduce el paso, ya casi llegas";
+        * antes del ``ventana_llegada_inicio`` se anticipa una sola vez
+          el aviso para reducir el paso, estimando reacción y frenado;
+          el adelanto está acotado y no cierra el tramo;
         * entre el 70 % y el ``ventana_llegada_fin`` (130 %) esa
           lectura da el tramo por completado (re-localizacion
           verificada: nunca se anuncia sin verla);
@@ -1463,17 +1463,6 @@ class Aplicacion:
             else 0.0
         )
         fraccion_avance = max(fraccion_pasos, fraccion_posicion)
-        fraccion_busqueda = fraccion_avance
-        if self._distancia_tramo > 0:
-            limite_superior = (
-                self.estimador_posicion.posicion_m
-                + self.config.sigmas_inicio_busqueda
-                * self.estimador_posicion.incertidumbre_m
-            )
-            fraccion_busqueda = max(
-                fraccion_busqueda,
-                limite_superior / self._distancia_tramo,
-            )
         inicio = self.config.ventana_llegada_inicio
         fin = self.config.ventana_llegada_fin
         senal = resultado.senal
@@ -1502,9 +1491,12 @@ class Aplicacion:
             self._cerrar_tramo(dados)
             return
 
-        if fraccion_busqueda >= inicio and not self._aviso_ventana_dado:
+        umbral_aviso = self._umbral_aviso_llegada()
+        if fraccion_avance >= umbral_aviso and not self._aviso_ventana_dado:
             self._aviso_ventana_dado = True
-            self._hablar("Reduce el paso, ya casi llegas.")
+            self._hablar(
+                "Reduce el paso; te indicaré dónde detenerte."
+            )
 
         if fraccion_avance >= fin:
             if (
@@ -1561,6 +1553,40 @@ class Aplicacion:
                 "no confirmé la señal. Voy a buscarla."
             )
             self._cerrar_tramo(dados)
+
+    def _umbral_aviso_llegada(self) -> float:
+        """Adelanta el aviso con el ritmo de marcha, sin mover el cierre."""
+        if self._distancia_tramo <= 0:
+            return self.config.ventana_llegada_inicio
+
+        periodo_paso = (
+            self.pasos.cadencia_s or self.config.periodo_paso_llegada_s
+        )
+        if (
+            periodo_paso <= 0
+            or self.config.tiempo_reaccion_llegada_s < 0
+            or self.config.desaceleracion_llegada_m_s2 <= 0
+            or not (
+                0
+                <= self.config.anticipacion_llegada_max_fraccion
+                <= self.config.ventana_llegada_inicio
+            )
+        ):
+            raise ValueError("Parámetros de anticipación de llegada inválidos")
+        velocidad = self.zancada.metros / periodo_paso
+        distancia_reaccion = velocidad * self.config.tiempo_reaccion_llegada_s
+        distancia_frenado = velocidad**2 / (
+            2.0 * self.config.desaceleracion_llegada_m_s2
+        )
+        margen = min(
+            distancia_reaccion + distancia_frenado,
+            self._distancia_tramo
+            * self.config.anticipacion_llegada_max_fraccion,
+        )
+        return max(
+            0.0,
+            self.config.ventana_llegada_inicio - margen / self._distancia_tramo,
+        )
 
     def _aprender_zancada(self, dados: int) -> None:
         """Mide la zancada con el tramo que acaba de cerrar la camara.

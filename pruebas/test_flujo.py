@@ -2600,8 +2600,9 @@ def test_llegada_por_ventana() -> None:
 
     Los pasos son solo la estimacion: quien VERIFICA que el tramo
     termino es la camara con la senal interior de la zona de cierre
-    (la siguiente del camino).  Antes del 70 % la senal vista no
-    cierra (se ve desde lejos); entre el 70 % y el 130 % la cierra;
+    (la siguiente del camino). El aviso de frenado puede adelantarse
+    según la cadencia, pero la señal antes del 70 % no cierra el tramo;
+    entre el 70 % y el 130 % sí lo cierra;
     pasados los 130 % sin senal se avisa y el flujo sigue como
     siempre.  Ademas ver la senal de cierre (la puerta enfrente, que
     puede aparecer en frames seguidos) NO es una desviacion: no debe
@@ -2671,22 +2672,33 @@ def test_llegada_por_ventana() -> None:
         "ver la senal de cierre no se lee como una desviacion",
     )
 
-    # --- 27.2 Al cruzar el 70 % avisa una sola vez -----------------
+    # --- 27.2 Aviso anticipado según cadencia, sin cambiar el cierre --
     detector.senal = None
     locutor.frases.clear()
-    caminar_hasta(8)  # 80 %: en el 70 % (7 pasos) suena el aviso
+    aplicacion._distancia_tramo = 4.6
+    aplicacion.pasos._cadencia_s = 0.4
     comprobar(
-        any("ya casi llegas" in frase for frase in locutor.frases),
-        "al 70 % avisa que ya casi llega",
+        0.54 <= aplicacion._umbral_aviso_llegada() < 0.70,
+        "limita el aviso a un adelanto corto calculado por cadencia y frenado",
+    )
+    caminar_hasta(5)
+    comprobar(
+        not any("Reduce el paso" in frase for frase in locutor.frases),
+        "no adelanta el aviso más de lo configurado",
+    )
+    caminar_hasta(6)
+    comprobar(
+        any("Reduce el paso" in frase for frase in locutor.frases),
+        "estima reacción y frenado para avisar antes del 70 %",
     )
     comprobar(
         aplicacion.estado is Estado.NAVEGANDO,
-        "sin la senal el tramo sigue abierto",
+        "el aviso anticipado no cierra el tramo",
     )
     locutor.frases.clear()
     caminar_hasta(9)
     comprobar(
-        not any("ya casi llegas" in frase for frase in locutor.frases),
+        not any("Reduce el paso" in frase for frase in locutor.frases),
         "el aviso de la ventana se da una sola vez por tramo",
     )
 
