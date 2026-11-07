@@ -2315,6 +2315,150 @@ def test_giro_compensado() -> None:
     )
 
 
+def test_llegada_por_ventana() -> None:
+    """El tramo se cierra dentro de la ventana [70 %, 130 %].
+
+    Los pasos son solo la estimacion: quien VERIFICA que el tramo
+    termino es la camara con la senal interior de la zona de cierre
+    (la siguiente del camino).  Antes del 70 % la senal vista no
+    cierra (se ve desde lejos); entre el 70 % y el 130 % la cierra;
+    pasados los 130 % sin senal se avisa y el flujo sigue como
+    siempre.  Ademas ver la senal de cierre (la puerta enfrente, que
+    puede aparecer en frames seguidos) NO es una desviacion: no debe
+    salir "Te saliste de la ruta".
+    """
+    print("\n[27] Llegada por ventana: la camara cierra el tramo")
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    def caminar_hasta(pasos: int) -> None:
+        """Da pasos rectos hasta acreditar ``pasos`` (o cambiar de estado)."""
+        for i in range(400):
+            mpu.az = 1.6 if i % 2 else 1.0
+            paso(aplicacion, detector, mpu)
+            if (
+                aplicacion._pasos_acreditados >= pasos
+                or aplicacion.estado is not Estado.NAVEGANDO
+            ):
+                return
+
+    def empezar_tramo() -> None:
+        aplicacion.ubicacion = "Inicio"
+        aplicacion.lado_puerta = LADO_INTERIOR
+        aplicacion.destino = "Sala"
+        aplicacion._iniciar_navegacion(
+            [Instruccion(Accion.CAMINAR, 10), Instruccion(Accion.LLEGADA)]
+        )
+        detector.senal = None
+        mpu.gz = 0.0
+
+    # Tramo de 10 pasos: la zona de cierre es la siguiente del camino.
+    empezar_tramo()
+    paso(aplicacion, detector, mpu)  # toma la instruccion CAMINAR
+    comprobar(
+        aplicacion._zona_cierre_tramo == "Cuarto",
+        "la zona de cierre es la siguiente del camino",
+    )
+
+    # --- 27.1 Antes del 70 % la senal vista NO cierra el tramo -----
+    caminar_hasta(5)  # 50 % de 10
+    comprobar(aplicacion._pasos_acreditados == 5, "camina hasta el 50 % del tramo")
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "al 50 % la senal de la zona de cierre no cierra el tramo",
+    )
+    comprobar(aplicacion._tramos_completados == 0, "el tramo sigue abierto")
+    comprobar(
+        not any("saliste de la ruta" in frase for frase in locutor.frases),
+        "ver la senal de cierre no se lee como una desviacion",
+    )
+
+    # --- 27.2 Al cruzar el 70 % avisa una sola vez -----------------
+    detector.senal = None
+    locutor.frases.clear()
+    caminar_hasta(8)  # 80 %: en el 70 % (7 pasos) suena el aviso
+    comprobar(
+        any("ya casi llegas" in frase for frase in locutor.frases),
+        "al 70 % avisa que ya casi llega",
+    )
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "sin la senal el tramo sigue abierto",
+    )
+    locutor.frases.clear()
+    caminar_hasta(9)
+    comprobar(
+        not any("ya casi llegas" in frase for frase in locutor.frases),
+        "el aviso de la ventana se da una sola vez por tramo",
+    )
+
+    # --- 27.3 Entre el 70 % y el 130 % la camara CIERRA el tramo ---
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._tramos_completados == 1,
+        "la senal de la camara cierra el tramo dentro de la ventana",
+    )
+    comprobar(
+        not any("saliste de la ruta" in frase for frase in locutor.frases),
+        "la segunda vez que se ve la senal tampoco replanifica",
+    )
+    comprobar(
+        any("Ya veo la señal" in frase for frase in locutor.frases),
+        "anuncia que vio la senal y puede parar",
+    )
+    detector.senal = None
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "con el tramo cerrado pasa a confirmar la llegada del destino",
+    )
+    comprobar(
+        not any("Has llegado" in frase for frase in locutor.frases),
+        "sin la senal del destino no anuncia llegada",
+    )
+
+    # --- 27.4 Pasado el 130 % sin senal: aviso y flujo de siempre --
+    empezar_tramo()
+    locutor.frases.clear()
+    caminar_hasta(14)  # el 130 % de 10 es 13: ahi se corta sin senal
+    comprobar(
+        any("Llevas más pasos" in frase for frase in locutor.frases),
+        "al 130 % sin senal avisa que se paso de pasos",
+    )
+    comprobar(
+        any("Pasos completados" in frase for frase in locutor.frases),
+        "igual da el tramo por completado (la llegada no: falta verla)",
+    )
+    comprobar(
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "el tramo cerrado pasa a confirmar la llegada con la camara",
+    )
+    comprobar(
+        not any("Has llegado" in frase for frase in locutor.frases),
+        "sin la senal del destino no anuncia llegada falsa",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2351,6 +2495,7 @@ def main() -> int:
         test_obstaculos_esperan_su_turno()
         test_fragmentos_de_la_imagen()
         test_giro_compensado()
+        test_llegada_por_ventana()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

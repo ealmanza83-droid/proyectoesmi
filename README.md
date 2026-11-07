@@ -188,6 +188,8 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` |
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
+| Inicio de la ventana de llegada del tramo (ahí la cámara empieza a poder cerrarlo) | `ventana_llegada_inicio` | `0.70` (70 % de los pasos esperados) |
+| Fin de la ventana de llegada (sin señal: aviso y el tramo se cierra igual) | `ventana_llegada_fin` | `1.30` (130 % de los pasos esperados) |
 | Umbral de impacto para detectar caída | `umbral_caida_g` | `2.5` |
 | Cambio brusco de aceleración que delata una caída | `umbral_cambio_caida_g` | `1.5` |
 | Muestras seguidas que confirman una caída (mata glitches I2C) | `muestras_caida_requeridas` | `2` |
@@ -288,8 +290,19 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
   y, al parar, acabas mirando donde toca. Antes girar al lado contrario
   no se tenía en cuenta y el giro se completaba con la persona
   desviada.
-* **Al completar los pasos** de un tramo: *"Pasos completados. Puedes
-  parar."* y después la llegada o el siguiente paso de la ruta.
+* **Al acercarse al final de un tramo (ventana de llegada)**: los pasos
+  son solo la estimación, así que el tramo ya **no** se da por
+  terminado en "N pasos" exactos. Al llegar al **70 %** de los pasos
+  esperados el sistema avisa *"Reduce el paso, ya casi llegas."* y el
+  tramo lo **cierra la cámara**, si ve la señal interior de la zona de
+  cierre (la siguiente del camino) entre el 70 % y el **130 %**:
+  *"Ya veo la señal. Puedes parar."* Si se pasa del 130 % sin verla
+  avisa *"Pasos completados. Puedes parar."* + *"Llevas más pasos de
+  los esperados y no veo la señal."* y sigue el flujo de siempre
+  (encarada intermedia o `CONFIRMANDO_LLEGADA`): la llegada al
+  destino **nunca** se anuncia sin haber visto su señal. Además ver
+  la puerta de la zona de cierre mientras se camina no se lee como
+  una desviación (antes provocaba un *"Te saliste de la ruta"* falso).
 
 Así la persona nunca se queda sin saber cuándo detenerse ni en qué
 punto del recorrido va.

@@ -363,6 +363,33 @@ si ángulo ≥ objetivo − 8     → "Puedes parar. …"  (orden primero; el co
 
 ---
 
+## 14. Ventana de llegada del tramo — `guia/aplicacion.py` (`_valorar_llegada_del_tramo`)
+
+Los pasos son lazo abierto (la zancada cambia entre personas y ritmos, y
+el error se acumula), así que el tramo **no** se da por terminado en
+"N pasos" exactos. Con `N` = pasos esperados del tramo:
+
+```
+inicio = ventana_llegada_inicio · N   (0,70 · N)
+fin    = ventana_llegada_fin · N      (1,30 · N)
+
+datos ≥ inicio  ∧  la cámara ve la señal interior de la zona de cierre
+    → el tramo se cierra  (re-localización VERIFICADA)
+
+datos ≥ fin  sin esa señal
+    → aviso ("Llevas más pasos…")  +  el tramo se cierra igual,
+      con el flujo de siempre (encarada intermedia o CONFIRMANDO_LLEGADA)
+```
+
+La **zona de cierre** es `_camino[tramos_completados + 1]` (la siguiente
+del camino, la que este tramo debe alcanzar): verla **no** es una
+desviación y `_seguir_senal` la excluye de la replanificación (antes,
+verla dos veces seguidas — la puerta enfrente mientras se camina —
+provocaba un "Te saliste de la ruta" falso). La llegada al destino sigue
+siendo un caso aparte: solo la señal **interior del destino** la anuncia.
+
+---
+
 ## Resumen en tabla
 
 | Parte del sistema | Ecuación | Archivo |
@@ -380,4 +407,5 @@ si ángulo ≥ objetivo − 8     → "Puedes parar. …"  (orden primero; el co
 | Audio | `s[i] = A·sin(2π f i/fs)` | `audio/alarma.py:62` |
 | Confirmación de señal | racha ≥ 3, tolera 2 fallos, conf ≥ 0,60 | `vision/detector.py` |
 | Desvío en línea recta | `\|θ−θ₀\| ≥ 25°` durante 1 s → corregir; libera a 0,6·25° | `aplicacion.py` (`_vigilar_desvio`) |
+| Ventana de llegada del tramo | `0,70·N ≤ ventana ≤ 1,30·N`; cierra la cámara con la señal de cierre | `aplicacion.py` (`_valorar_llegada_del_tramo`) |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |

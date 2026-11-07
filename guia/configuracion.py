@@ -200,6 +200,29 @@ class Configuracion:
     velocidad_m_s: float = 1.85   # velocidad de desplazamiento (m/s)
 
     # ------------------------------------------------------------------
+    # Llegada por VENTANA (no por "N pasos exactos")
+    # ------------------------------------------------------------------
+    # Los pasos son un metodo de lazo abierto: la zancada cambia entre
+    # personas y ritmos, y el error se acumula.  Por eso un tramo ya no
+    # se da por terminado exactamente en "N pasos", sino en una
+    # VENTANA alrededor de los pasos esperados:
+    #
+    # * al llegar al ``ventana_llegada_inicio`` (70 %) se anuncia
+    #   "Reduce el paso, ya casi llegas" y la camara empieza a buscar
+    #   la senal del siguiente punto (en la practica la camara ya lee
+    #   la senal en cada frame; a partir de ahi esa lectura CERRA el
+    #   tramo);
+    # * si la camara confirma la senal esperada entre el 70 % y el
+    #   ``ventana_llegada_fin`` (130 %), el tramo se da por completado
+    #   (re-localizacion verificada: nunca se anuncia una llegada sin
+    #   verla);
+    # * si se pasa del 130 % sin ver la senal, se avisa y se continua
+    #   con el flujo existente (CONFIRMANDO_LLEGADA en el ultimo
+    #   tramo, encarada de la zona alcanzada en los demas).
+    ventana_llegada_inicio: float = 0.70
+    ventana_llegada_fin: float = 1.30
+
+    # ------------------------------------------------------------------
     # Navegacion asistida (rumbo y linea recta)
     # ------------------------------------------------------------------
     # El rumbo integra el giroscopio desde la ultima senal vista.  Si

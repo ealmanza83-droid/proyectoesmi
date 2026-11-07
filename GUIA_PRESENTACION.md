@@ -314,12 +314,29 @@ del pasillo."*
 
 ### 5.8 Llegada verificada (nunca mentir)
 
-Los pasos son una estimación: la deriva puede dejar a la persona a un
-lado de la puerta. Por eso, tras *"Pasos completados"*, el sistema **no**
-anuncia la llegada: entra en `CONFIRMANDO_LLEGADA` y pide girar despacio
-hasta ver la señal del destino. Si ve la señal de **otra** zona, avisa
-*"Parece que pasaste de largo. Estás en Sala."* y replanifica. Es el
-principio rector: **mejor callar que dar una indicación errada**.
+Los pasos son una estimación: la zancada cambia y la deriva puede
+dejar a la persona a un lado de la puerta. Por eso el tramo **no** se
+da por terminado en "N pasos" exactos, sino en una **ventana**:
+
+* al **70 %** de los pasos esperados → *"Reduce el paso, ya casi
+  llegas."*
+* entre el 70 % y el **130 %** → quien cierra el tramo es **la
+  cámara**, si ve la señal interior de la zona de cierre (la
+  siguiente del camino): *"Ya veo la señal. Puedes parar."*
+* pasado el 130 % sin verla → *"Pasos completados. Puedes parar."* +
+  *"Llevas más pasos de los esperados y no veo la señal."*, y el
+  flujo sigue como siempre (encarada intermedia o
+  `CONFIRMANDO_LLEGADA`).
+
+En ningún caso los pasos por sí solos anuncian la llegada: tras el
+tramo entra en `CONFIRMANDO_LLEGADA` y pide girar despacio hasta ver
+la señal del destino. Si ve la señal de **otra** zona, avisa *"Parece
+que pasaste de largo. Estás en Sala."* y replanifica. Es el principio
+rector: **mejor callar que dar una indicación errada**.
+
+Detalle fino: ver la señal de la zona de cierre **dos veces** (la
+puerta enfrente mientras se camina) no se lee como desviación — antes
+provocaba un *"Te saliste de la ruta"* falso.
 
 ### 5.9 Re-localización: cada señal es un GPS a pie
 

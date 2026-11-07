@@ -213,6 +213,11 @@ class Aplicacion:
         # ANTES del giro del siguiente tramo, igual que al arrancar.
         self._tramos_completados = 0
         self._falta_encarar = False
+        # Llegada del tramo por VENTANA (ver _valorar_llegada_del_tramo):
+        # la zona que cierra el tramo en curso (la siguiente del camino)
+        # y el aviso de "ya casi llegas", dado una sola vez por tramo.
+        self._zona_cierre_tramo: str | None = None
+        self._aviso_ventana_dado = False
         self._inicio_llegada = 0.0
 
         # Busqueda de senal
@@ -710,6 +715,8 @@ class Aplicacion:
         self._en_pausa = False
         self._pasos_acreditados = 0
         self._pasos_previos = 0
+        self._zona_cierre_tramo = None
+        self._aviso_ventana_dado = False
         # Zonas del recorrido: la primera es donde se parte, y cada
         # senal interior confirmada va avanzando por la lista.
         self._camino = self._planificador.camino(self.ubicacion, self.destino) or []
@@ -779,6 +786,13 @@ class Aplicacion:
             return False
 
         # Detras del plan o fuera de el: el tramo ya no sirve.
+        if senal.zona == self._zona_cierre_tramo:
+            # La senal de la zona que CIERRA el tramo (la siguiente
+            # del camino, hacia la que se camina) no es una
+            # desviacion: la puerta se ve desde la recta del tramo y
+            # puede repetirse en frames seguidos.  Replanificar aqui
+            # mandaria "Te saliste de la ruta" sin haberse salido.
+            return False
         self._indice_zona = max(indice, 0)
         self._replanificar_desde()
         return True
@@ -1230,8 +1244,18 @@ class Aplicacion:
         dados = self._creditar_pasos()
         self._etiqueta = f"Caminando - {dados}/{objetivo} pasos"
         self._vigilar_desvio()
+        inicio = objetivo * self.config.ventana_llegada_inicio
+        fin = objetivo * self.config.ventana_llegada_fin
 
-        if dados >= objetivo:
+        # Mientras camina tambien mira la camara: dentro de la
+        # ventana, cualquier senal resuelve la busqueda (dice en que
+        # zona esta la persona); fuera de ella se espera llegar al
+        # tope de la ventana.
+        if dados >= inicio and resultado.senal is not None:
+            self._en_buscar_senal(resultado)
+            return
+
+        if dados >= fin:
             self._hablar(
                 f"{objetivo} pasos completados. Puedes parar. Gira "
                 f"{self.config.grados_giro_inicial} grados a la derecha "
@@ -1321,19 +1345,75 @@ class Aplicacion:
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
             self._guiar_con_senal(resultado)
             self._vigilar_desvio()
-            if dados >= instruccion.cantidad:
-                # Deja en consola lo que senso el contador: si el tramo
-                # termina antes de tiempo, la diferencia entre crudos
-                # y acreditados (y los intervalos de la linea PASO)
-                # muestran si entraron pasos de mas.
-                print(
-                    f"TRAMO: {dados} pasos acreditados de "
-                    f"{self.pasos.avanzar()} crudos"
-                )
-                self._hablar("Pasos completados. Puedes parar.")
-                self._tramos_completados += 1
-                self._falta_encarar = True
-                self._instruccion_actual = None
+            self._valorar_llegada_del_tramo(
+                resultado, dados, instruccion.cantidad
+            )
+
+    def _valorar_llegada_del_tramo(
+        self, resultado: ResultadoVision, dados: int, objetivo: int
+    ) -> None:
+        """Ventana de llegada del tramo: manda la camara, no el contador.
+
+        Los pasos son un metodo de lazo abierto (la zancada cambia y el
+        error se acumula), asi que el tramo ya NO se da por terminado
+        exacto en "N pasos".  Quien verifica que termino es la camara
+        con la senal interior de la zona de cierre (la siguiente del
+        camino):
+
+        * antes del ``ventana_llegada_inicio`` (70 %) la senal vista
+          todavia NO cierra el tramo (se ve desde lejos): solo se
+          anuncia una vez "Reduce el paso, ya casi llegas";
+        * entre el 70 % y el ``ventana_llegada_fin`` (130 %) esa
+          lectura da el tramo por completado (re-localizacion
+          verificada: nunca se anuncia sin verla);
+        * pasados los 130 % sin senal se avisa que algo no cuadra y el
+          tramo se cierra con el flujo de siempre (encarada intermedia
+          o CONFIRMANDO_LLEGADA): los pasos de mas no dejan la ruta
+          colgada, y la llegada sigue sin anunciarce hasta VER la
+          senal del destino.
+        """
+        inicio = objetivo * self.config.ventana_llegada_inicio
+        fin = objetivo * self.config.ventana_llegada_fin
+        senal = resultado.senal
+
+        if (
+            dados >= inicio
+            and senal is not None
+            and senal.lado == LADO_INTERIOR
+            and senal.zona == self._zona_cierre_tramo
+        ):
+            print(
+                f"TRAMO cerrado por camara: senal de {senal.zona} vista "
+                f"con {dados} pasos acreditados"
+            )
+            self._hablar("Ya veo la señal. Puedes parar.")
+            self._cerrar_tramo(dados)
+            return
+
+        if dados >= inicio and not self._aviso_ventana_dado:
+            self._aviso_ventana_dado = True
+            self._hablar("Reduce el paso, ya casi llegas.")
+
+        if dados >= fin:
+            print(
+                f"TRAMO: {dados} pasos acreditados de {objetivo} "
+                "esperados sin ver la senal de cierre"
+            )
+            self._hablar("Pasos completados. Puedes parar.")
+            self._hablar("Llevas más pasos de los esperados y no veo la señal.")
+            self._cerrar_tramo(dados)
+
+    def _cerrar_tramo(self, dados: int) -> None:
+        """Da el tramo por terminado: toca encarar la zona alcanzada.
+
+        Deja en consola lo que senso el contador: la diferencia entre
+        crudos y acreditados (y los intervalos de la linea PASO)
+        muestran si entraron pasos de mas.
+        """
+        print(f"TRAMO: {dados} pasos acreditados de {self.pasos.avanzar()} crudos")
+        self._tramos_completados += 1
+        self._falta_encarar = True
+        self._instruccion_actual = None
 
     def _empezar_a_caminar(self) -> None:
         """Reinicia el tramo a pie: pasos, rumbo de partida y avisos."""
@@ -1348,6 +1428,17 @@ class Aplicacion:
         self._avances_correccion.clear()
         self._pasos_previos = 0
         self._pasos_acreditados = 0
+        # Quien cierra este tramo es la camara viendo la senal de la
+        # zona SIGUIENTE del camino (la de cierre).  Se fija aqui, al
+        # tomar la instruccion CAMINAR, para que _seguir_senal sepa
+        # que ver esa senal no es una desviacion y para que la
+        # ventana de llegada sepa que senal buscar.
+        self._zona_cierre_tramo = (
+            self._camino[self._tramos_completados + 1]
+            if self._tramos_completados + 1 < len(self._camino)
+            else None
+        )
+        self._aviso_ventana_dado = False
 
     def _creditar_pasos(self) -> int:
         """Pasos que cuentan hacia el tramo: solo los dados rectos.
