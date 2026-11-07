@@ -258,6 +258,16 @@ class DetectorVisual:
         self._confirmador = ConfirmadorSenal(config)
         self._modelo = YOLO(str(config.ruta_modelo), task="detect")
         print("YOLO OK")
+        nombres = self._modelo.names
+        clases_modelo = set(nombres.values() if isinstance(nombres, dict) else nombres)
+        clases_puerta_ausentes = set(self._puertas) - clases_modelo
+        if clases_puerta_ausentes:
+            print(
+                "AVISO YOLO: el modelo no incluye la clase "
+                f"{', '.join(sorted(clases_puerta_ausentes))}; "
+                "no se podrán detectar puertas. Configura ruta_modelo "
+                "con un modelo entrenado que incluya esa clase."
+            )
         self._precalentar()
 
     def _precalentar(self) -> None:

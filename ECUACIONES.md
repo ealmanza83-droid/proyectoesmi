@@ -568,6 +568,28 @@ la corrección débil es `z = D·k/(M+1)`. Ninguna de estas medidas produce
 `Senal`, avanza identidad de zona ni cierra un tramo sin confirmación de
 la señal interior.
 
+La llegada a una señal interior esperada exige además distancia frontal
+estable en el rango configurado de 70–80 cm. Se usa la mediana de
+`muestras_ultrasonido_puerta` lecturas nuevas; la señal debe estar
+centrada y no puede haber un obstáculo visual en el centro del camino:
+
+```
+d_ultra = mediana(d_1, ..., d_M)
+confirmar = señal_interior_esperada
+            ∧ centro_señal
+            ∧ distancia_puerta_min_cm ≤ d_ultra ≤ distancia_puerta_max_cm
+            ∧ camino_frontal_libre
+            ∧ tiempo_desde_aviso_obstáculo ≥ espera_llegada_tras_obstaculo_s
+```
+
+Los pasos y una advertencia de obstáculo no confirman la llegada; tras un
+aviso se espera el intervalo configurado aunque la señal aparezca en el
+frame siguiente. Si la señal aún no aparece, la aproximación final
+continúa lentamente hasta el rango ultrasónico y entonces vuelve a
+buscarla con la cámara. Los modelos incluidos deben contener
+explícitamente la clase `door`; de lo contrario, el detector lo advierte
+al arrancar.
+
 ---
 
 ## Resumen en tabla

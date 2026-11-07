@@ -20,15 +20,18 @@ ultrasonico + MPU6050 + micrófono + altavoz) que:
 2. **Navega por voz**: la persona pide *"Raspi, ve al baño"* y el
    sistema da instrucciones habladas: *"Gira a la izquierda 90
    grados"*, *"Camina 6 pasos"*.
-3. **No miente**: nunca anuncia una llegada que no verificó; nunca
-   da una instrucción medida desde una orientación que no conoce.
+3. **No miente**: nunca anuncia una llegada que no verificó; exige la
+   señal centrada, 70–80 cm estables por ultrasonido, camino frontal
+   libre y una pausa tras avisar un obstáculo.
 4. **Cuida la seguridad**: avisa obstáculos cercanos (pitidos que se
    aceleran) y detecta caídas (alarma continua + "di silencia").
 
-**Dato clave para la presentación**: el modelo YOLO11 usado para la casa
-reconoce las señales de animales y contiene la clase personalizada
-`door`, entrenada por el usuario. Una puerta ayuda a orientar la
-búsqueda, pero solo una señal interior determina la zona.
+**Dato clave para la presentación**: el código admite la clase
+personalizada `door`, pero los modelos incluidos en el repositorio no la
+contienen. El modelo configurado debe incluir tanto `door` como las
+señales de animales; si falta `door`, el arranque lo advierte. Una puerta
+ayuda a orientar la búsqueda, pero solo una señal interior determina la
+zona.
 
 ---
 
@@ -319,21 +322,23 @@ los últimos `distancia_mediana_frames` suaviza el parpadeo; el historial
 se descarta tras perder la clase. Hasta calibrar `focal_px` (por defecto
 0), no se usa una distancia visual.
 
-La clase `door` se devuelve aparte de las señales, con caja, centro,
-alto, ancho y distancia suavizada con la mediana. En una búsqueda, si
+Si el modelo configurado contiene `door`, se devuelve aparte de las
+señales, con caja, centro, alto, ancho y distancia suavizada con la mediana. En una búsqueda, si
 hay una puerta y todavía no se confirma una señal, se anuncia una vez
 su ubicación izquierda/centro/derecha y se guía hacia ella. El animal
 detectado dentro de la caja de puerta tiene prioridad sobre animales en
-otras zonas del frame. La puerta nunca identifica la zona: sigue siendo
-necesaria la señal interior.
+otras zonas del frame. El ultrasonido filtra tres lecturas nuevas para
+guiar la aproximación al rango configurable de 70–80 cm; una señal solo
+confirma llegada si está centrada y no hay un obstáculo frontal. La
+puerta nunca identifica la zona: sigue siendo necesaria la señal interior.
 
 ### 5.7 Señales de las dos caras de la puerta (idea original)
 
 Cada puerta tiene **dos fotos**: la cara *interior* (se ve estando
 dentro de la zona) y la cara del *pasillo* (se ve desde el otro lado).
-Las fotos de animales usan clases reconocidas por el modelo base; la
-clase personalizada `door` sirve solo para localizar el marco y guiar
-hacia él:
+Las fotos de animales usan clases reconocidas por el modelo base. Para
+que la clase personalizada `door` localice el marco, el modelo cargado
+debe haber sido entrenado/exportado con esa clase además de las señales:
 
 | Zona | Cara interior (dentro) | Cara pasillo (fuera) |
 |---|---|---|
@@ -361,8 +366,10 @@ da por terminado en "N pasos" exactos, sino en una **ventana**:
   siguiente del camino): *"Ya veo la señal. Puedes parar."*
 * pasado el 130 % sin verla → *"Pasos completados. Puedes parar."* +
   *"Llevas más pasos de los esperados y no veo la señal."*, y el
-  flujo sigue como siempre (encarada intermedia o
-  `CONFIRMANDO_LLEGADA`).
+  flujo sigue como siempre en tramos intermedios. En el tramo final,
+  con ultrasonido estable y aún por encima de 80 cm, se mantiene la
+  aproximación lenta; entre 70 y 80 cm se detiene para volver a buscar
+  la señal.
 
 En ningún caso los pasos por sí solos anuncian la llegada: tras el
 tramo entra en `CONFIRMANDO_LLEGADA` y pide girar despacio hasta ver
@@ -586,8 +593,9 @@ hacia la pared o puerta de fin de tramo.
 6. **Demostración del desvío**: caminar curvando a propósito → aviso,
    corrección guiada en vivo, *"Ya enderezaste. Los pasos vuelven a
    contar."*
-7. Llegar: *"Pasos completados"* → girar hasta ver la señal → *"Has
-   llegado a Sala."*
+7. Llegar: acercarse despacio hasta que el ultrasonido indique el rango
+   configurado de 70–80 cm; después, la cámara debe confirmar la señal
+   interior para anunciar *"Has llegado a Sala."*
 8. (Opcional) Simular una caída (golpe suave al sensor) y silenciar
    diciendo solo *"silencia"*.
 9. Cerrar con el principio: *"el sistema prefiere callar antes que
@@ -598,10 +606,11 @@ hacia la pared o puerta de fin de tramo.
 
 ## 9. Preguntas típicas y posibles respuestas
 
-**¿Hay que entrenar un modelo?** Las imágenes de señales son clases
-reconocidas por YOLO y el modelo usado incluye la clase `door` que
-entrenó el usuario. El entrenamiento de `door` no cambia la regla de
-identidad: solo una señal interior confirma la zona.
+**¿Hay que entrenar un modelo?** Las señales de animales están en el
+modelo COCO. Para detectar marcos, hace falta además un modelo con la
+clase `door`; los modelos incluidos ahora mismo no la contienen y el
+programa lo advierte. La puerta no cambia la regla de identidad: solo
+una señal interior confirma la zona.
 
 **¿Cómo sabe en qué zona está?** Viendo la cara interior de la señal
 de esa zona (3 detecciones seguidas). La cara del pasillo solo dice

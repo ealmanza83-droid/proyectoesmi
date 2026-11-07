@@ -65,6 +65,11 @@ class Configuracion:
     ancho_puerta_m: float = 0.9
     salto_maximo_puerta_px: float = 160.0
     frames_puerta_perdida: int = 4
+    muestras_ultrasonido_puerta: int = 3
+    salto_maximo_ultrasonido_puerta_cm: float = 60.0
+    distancia_puerta_min_cm: float = 70.0
+    distancia_puerta_max_cm: float = 80.0
+    espera_llegada_tras_obstaculo_s: float = 4.0
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
 
     # ------------------------------------------------------------------
@@ -247,9 +252,10 @@ class Configuracion:
     #   ``ventana_llegada_fin`` (130 %), el tramo se da por completado
     #   (re-localizacion verificada: nunca se anuncia una llegada sin
     #   verla);
-    # * si se pasa del 130 % sin ver la senal, se avisa y se continua
-    #   con el flujo existente (CONFIRMANDO_LLEGADA en el ultimo
-    #   tramo, encarada de la zona alcanzada en los demas).
+    # * si se pasa del 130 % sin ver la senal, los tramos intermedios
+    #   siguen el flujo existente; en el tramo final, una lectura
+    #   ultrasónica estable por encima del rango de puerta mantiene la
+    #   aproximación lenta hasta quedar entre 70 y 80 cm.
     ventana_llegada_inicio: float = 0.70
     ventana_llegada_fin: float = 1.30
 

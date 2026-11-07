@@ -11,9 +11,24 @@ from ..configuracion import Configuracion
 class OdometroUltrasonico:
     """Devuelve distancias estables en cm, filtrando ruido y saltos."""
 
-    def __init__(self, config: Configuracion):
-        self._muestras_requeridas = max(1, config.muestras_ultrasonido_odometro)
-        self._salto_maximo_cm = config.salto_maximo_ultrasonido_cm
+    def __init__(
+        self,
+        config: Configuracion,
+        *,
+        muestras_requeridas: int | None = None,
+        salto_maximo_cm: float | None = None,
+    ):
+        self._muestras_requeridas = max(
+            1,
+            config.muestras_ultrasonido_odometro
+            if muestras_requeridas is None
+            else muestras_requeridas,
+        )
+        self._salto_maximo_cm = (
+            config.salto_maximo_ultrasonido_cm
+            if salto_maximo_cm is None
+            else salto_maximo_cm
+        )
         self._muestras: deque[float] = deque(maxlen=self._muestras_requeridas)
 
     def observar(self, distancia_cm: float | None) -> float | None:

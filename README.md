@@ -236,7 +236,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
 | Inicio de la ventana de llegada del tramo (ahí la cámara empieza a poder cerrarlo) | `ventana_llegada_inicio` | `0.70` (70 % de los pasos esperados) |
-| Fin de la ventana de llegada (sin señal: aviso y el tramo se cierra igual) | `ventana_llegada_fin` | `1.30` (130 % de los pasos esperados) |
+| Fin de la ventana de llegada (límite para tramos intermedios) | `ventana_llegada_fin` | `1.30` (130 % de los pasos esperados) |
 | Umbral de impacto para detectar caída | `umbral_caida_g` | `2.5` |
 | Cambio brusco de aceleración que delata una caída | `umbral_cambio_caida_g` | `1.5` |
 | Muestras seguidas que confirman una caída (mata glitches I2C) | `muestras_caida_requeridas` | `2` |
@@ -253,6 +253,9 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Frames perdidos que conservan la mediana visual | `distancia_mediana_perdidas` | `3` |
 | Frames perdidos antes de rearmar el aviso de puerta | `frames_puerta_perdida` | `4` |
 | Salto horizontal máximo al seguir una puerta | `salto_maximo_puerta_px` | `160` px |
+| Rango de aproximación a la señal | `distancia_puerta_min_cm` / `distancia_puerta_max_cm` | `70`–`80` cm |
+| Muestras ultrasónicas estables para aproximación | `muestras_ultrasonido_puerta` | `3` |
+| Espera tras un aviso de obstáculo antes de confirmar llegada | `espera_llegada_tras_obstaculo_s` | `4` s |
 | Muestras estables del odómetro ultrasónico | `muestras_ultrasonido_odometro` | `5` |
 | Salto máximo entre lecturas estables | `salto_maximo_ultrasonido_cm` | `60` cm |
 | Incertidumbre inicial de posición | `sigma_inicial_posicion_m` | `0.5` m |
@@ -262,6 +265,11 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
+El modelo configurado debe contener las clases de señales orientadoras y
+`door` para detectar ambos. El modelo COCO incluido no tiene `door`, y el
+`best_ncnn_model` incluido solo contiene `maceta`, `mesa` y `silla`; al
+arrancar, el sistema avisa si faltan las clases de puerta. Entrena/exporta
+un modelo con las clases necesarias y apunta `ruta_modelo` a ese modelo.
 
 ### Señales orientadoras (`guia/dominio/catalogo.py`)
 
@@ -279,6 +287,11 @@ visible sin señal confirmada se anuncia una vez por encuentro; el animal
 detectado dentro de su caja tiene prioridad. El rango usa
 `altura_puerta_m` (o `ancho_puerta_m` como respaldo) y la misma
 `focal_px` calibrada. La puerta nunca cambia `ubicacion`.
+Cuando la señal interior esperada está centrada, la llegada solo se
+confirma con la señal de cámara y una mediana ultrasónica estable entre
+`distancia_puerta_min_cm` y `distancia_puerta_max_cm`; un obstáculo frontal
+bloquea esa confirmación. Sin señal, la aproximación final continúa
+despacio hasta el rango configurado y luego busca la señal.
 
 ### Mapa de la casa (`guia/dominio/rutas.py`)
 
@@ -398,8 +411,10 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
   *"Ya veo la señal. Puedes parar."* Si se pasa del 130 % sin verla
   avisa *"Pasos completados. Puedes parar."* + *"Llevas más pasos de
   los esperados y no veo la señal."* y sigue el flujo de siempre
-  (encarada intermedia o `CONFIRMANDO_LLEGADA`): la llegada al
-  destino **nunca** se anuncia sin haber visto su señal. Además ver
+  (encarada intermedia o `CONFIRMANDO_LLEGADA`). En el tramo final, si
+  el ultrasonido estable aún marca más de 80 cm, continúa despacio hasta
+  el rango configurado y luego busca la señal. La llegada al destino
+  **nunca** se anuncia sin haber visto su señal. Además ver
   la puerta de la zona de cierre mientras se camina no se lee como
   una desviación (antes provocaba un *"Te saliste de la ruta"* falso).
 
