@@ -408,8 +408,12 @@ def test_flujo_completo() -> None:
         "avisa cuando parar el giro de 90",
     )
     comprobar(
-        any("Vas por la mitad" in frase for frase in locutor.frases),
-        "da avance del giro mientras gira",
+        not any("Vas por la mitad" in frase for frase in locutor.frases),
+        "no habla a mitad del giro (la frase desfasaba el giro)",
+    )
+    comprobar(
+        not any("Ya casi listo" in frase for frase in locutor.frases),
+        "no avisa ya casi listo mientras la persona gira",
     )
     comprobar(
         microfono.modo is ModoMicrofono.DESPERTADOR,
@@ -912,8 +916,12 @@ def test_encarada_y_desvio() -> None:
         "recuerda que los pasos vuelven a contar",
     )
     comprobar(
-        any("mitad del giro" in frase for frase in locutor.frases),
-        "da avances mientras corrige el rumbo",
+        not any("mitad del giro" in frase for frase in locutor.frases),
+        "no da avisos a mitad del giro de correccion",
+    )
+    comprobar(
+        not any("Ya casi enderezas" in frase for frase in locutor.frases),
+        "no avisa ya casi enderezas mientras corrige",
     )
     mpu.gz = 0.0
     # El tramo completo Sala -> Baño (dos vueltas por paso).

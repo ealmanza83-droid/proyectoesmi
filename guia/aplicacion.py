@@ -211,7 +211,6 @@ class Aplicacion:
         # sigue en vivo (no con un numero fijo) hasta decir "para".
         self._corrigiendo = False
         self._desvio_inicial = 0.0
-        self._avances_correccion: set[float] = set()
         self._pasos_acreditados = 0
         self._pasos_previos = 0
         # Zonas del plan en curso: sirven para seguir el avance y para
@@ -268,9 +267,6 @@ class Aplicacion:
         self._medio_libre_desde: float | None = None
         self._lado_anunciado: tuple[str, ...] = ()
         self._lado_libre_desde: float | None = None
-        # Avisos de avance del giro en curso (0.5 y 0.75 del objetivo)
-        self._avances_anunciados: set[float] = set()
-        self._ultimo_angulo_giro = 0.0
         self._ventana = ventana or VentanaDiagnostico()
 
         self._manejadores: dict[Estado, Callable[["Aplicacion", ResultadoVision], None]] = {
@@ -1126,8 +1122,8 @@ class Aplicacion:
         # apaga: se reconoce sin palabras clave y mucho mas rapido.
         self.microfono.cambiar_modo(ModoMicrofono.SILENCIO)
 
-    def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> bool:
-        """Etiqueta de diagnostico, aviso de consola y voz del giro.
+    def _mostrar_giro(self, sentido: str, angulo: float, objetivo: float) -> None:
+        """Etiqueta de diagnostico y aviso de consola del giro.
 
         La consola muestra los grados netos que faltan del giro pedido y
         la velocidad de giro actual (positiva = derecha).  Si al girar
@@ -1135,11 +1131,11 @@ class Aplicacion:
         esta invertido; si los grados salen NEGATIVOS, la persona se
         esta girando al lado contrario y esos grados se descuentan.
 
-        Se avisa por voz al 50% y al 75% del objetivo con frases
-        *cortas* (sin numeros): la voz tarda su tiempo y mientras se
-        habla la persona sigue girando, por eso el manejador vuelve a
-        medir tras cualquier aviso.  Devuelve ``True`` si acaba de
-        hablar.
+        Durante el giro NO se habla: los avisos al 50% y al 75%
+        ("Vas por la mitad", "Ya casi listo") tardaban mas que la
+        persona en girar, asi que cuando terminaba de decir la frase ya
+        habia girado mas de lo pedido y el giro se deshacia.  La unica
+        voz del giro es la frase final con la orden de parar.
         """
         self._etiqueta = (
             f"Giro {sentido}: {angulo:.1f}/{objetivo} grados"
@@ -1154,23 +1150,6 @@ class Aplicacion:
                 f" | vel {velocidad:+.1f} dps"
             )
 
-        # El acumulado baja al reiniciar el giro (o al irse al lado
-        # contrario, que resta): en ese momento se olvidan los avisos
-        # del giro anterior y se pueden volver a dar.
-        if angulo < self._ultimo_angulo_giro:
-            self._avances_anunciados.clear()
-        self._ultimo_angulo_giro = angulo
-
-        for parte, texto in (
-            (0.75, "Ya casi listo."),
-            (0.5, "Vas por la mitad."),
-        ):
-            if parte not in self._avances_anunciados and angulo >= objetivo * parte:
-                self._avances_anunciados.add(parte)
-                self._hablar(texto)
-                return True
-        return False
-
     # ------------------------------------------------------------------
     # Manejadores de estado
     # ------------------------------------------------------------------
@@ -1184,11 +1163,7 @@ class Aplicacion:
     def _en_giro_inicial(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.grados_giro_inicial
         angulo = self.giro.avanzar(derecha=True)
-        if self._mostrar_giro("derecha", angulo, objetivo):
-            # Mientras la voz aviso el avance, la persona sigue
-            # girando: se vuelve a medir para no dejar pasar el
-            # objetivo (antes se giraba de mas esperando el aviso).
-            angulo = self.giro.avanzar(derecha=True)
+        self._mostrar_giro("derecha", angulo, objetivo)
 
         # El corte se adelanta ``grados_compensacion_giro``: mientras
         # suena la frase final la persona sigue girando (y luego
@@ -1197,7 +1172,6 @@ class Aplicacion:
         # pasado.  "Puedes parar" va PRIMERO en la frase: es la orden
         # y cuanto antes se oiga, antes se deja de girar.
         if angulo >= objetivo - self.config.grados_compensacion_giro:
-            self._avances_anunciados.clear()
             self._hablar(f"Puedes parar. Ya giraste {objetivo:.0f} grados.")
             self._iniciar_busqueda(intento=1)
 
@@ -1257,13 +1231,11 @@ class Aplicacion:
     def _en_media_vuelta(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.grados_media_vuelta
         angulo = self.giro.avanzar(derecha=False)
-        if self._mostrar_giro("izquierda", angulo, objetivo):
-            angulo = self.giro.avanzar(derecha=False)
+        self._mostrar_giro("izquierda", angulo, objetivo)
 
         # Igual que en el giro inicial: el corte se adelanta para
         # absorber el giro que se da mientras suena la frase.
         if angulo >= objetivo - self.config.grados_compensacion_giro:
-            self._avances_anunciados.clear()
             self._hablar(f"Puedes parar. Ya giraste {objetivo:.0f} grados.")
             self._iniciar_busqueda(intento=2)
 
@@ -1354,8 +1326,7 @@ class Aplicacion:
             derecha = instruccion.accion is Accion.GIRAR_DERECHA
             sentido = "derecha" if derecha else "izquierda"
             angulo = self.giro.avanzar(derecha=derecha)
-            if self._mostrar_giro(sentido, angulo, float(instruccion.cantidad)):
-                angulo = self.giro.avanzar(derecha=derecha)
+            self._mostrar_giro(sentido, angulo, float(instruccion.cantidad))
             # Mismo adelanto que en los giros de la busqueda: la
             # persona sigue girando mientras suena la frase y la
             # instruccion siguiente, asi que el corte va antes del
@@ -1364,7 +1335,6 @@ class Aplicacion:
                 float(instruccion.cantidad)
                 - self.config.grados_compensacion_giro
             ):
-                self._avances_anunciados.clear()
                 self._hablar("Puedes parar. Giro completo.")
                 self._instruccion_actual = None
 
@@ -1471,7 +1441,6 @@ class Aplicacion:
         self._ultima_alerta_desvio = None
         self._corrigiendo = False
         self._desvio_inicial = 0.0
-        self._avances_correccion.clear()
         self._pasos_previos = 0
         self._pasos_acreditados = 0
         # Quien cierra este tramo es la camara viendo la senal de la
@@ -1590,10 +1559,13 @@ class Aplicacion:
 
         La correccion se sigue EN VIVO: no se manda un numero fijo de
         grados (que se queda viejo mientras la persona oye la voz y
-        sigue caminando), sino que se guia el giro con avances al 50%
-        y al 75% y se dice "ya enderezaste" al entrar en la recta.
-        Asi la persona sabe cuando PARAR de girar y no termina
-        caminando en la direccion contraria.
+        sigue caminando), sino que el giro se mide en cada muestra y
+        se dice "ya enderezaste" al entrar en la recta.  Asi la
+        persona sabe cuando PARAR de girar y no termina caminando en
+        la direccion contraria.  Tampoco hay avisos a mitad del giro
+        de correccion: la voz tarda mas que la persona en girar y,
+        cuando terminaba la frase, el giro quedaba pasado y se
+        deshacia.
         """
         desvio = self.rumbo.grados - self._rumbo_al_caminar
         umbral = self.config.desvio_maximo_grados
@@ -1606,7 +1578,6 @@ class Aplicacion:
             self._inicio_desvio = None
             if self._corrigiendo:
                 self._corrigiendo = False
-                self._avances_correccion.clear()
                 self._ultima_alerta_desvio = None
                 self._hablar("Ya enderezaste. Los pasos vuelven a contar.")
             return
@@ -1642,7 +1613,6 @@ class Aplicacion:
             self._ultima_alerta_desvio = ahora
             self._corrigiendo = True
             self._desvio_inicial = abs(desvio)
-            self._avances_correccion.clear()
             print(f"DESVIO: {desvio:+.1f} grados -> corregir a la {sentido}")
             self._hablar(
                 f"Alto un momento. Te estás desviando de la línea "
@@ -1661,7 +1631,6 @@ class Aplicacion:
         if abs(desvio) >= self._desvio_inicial:
             self._desvio_inicial = abs(desvio)
             if ahora - self._ultima_alerta_desvio >= RECORDATORIO_CORRECCION_S:
-                self._avances_correccion.clear()
                 print(f"DESVIO SIN MEJORAR: {desvio:+.1f} grados")
                 self._hablar(
                     f"Sigues fuera de la línea recta: {grados} grados. "
@@ -1670,19 +1639,14 @@ class Aplicacion:
                 self._ultima_alerta_desvio = time.monotonic()
             return
 
-        # Avances del giro de correccion (fraccion ya recuperada).
+        # El giro de correccion se sigue en vivo hasta aqui: no se
+        # anuncia la fraccion recuperada ("Llevas la mitad del giro
+        # para enderezar", "Ya casi enderezas").  La voz es lenta y la
+        # persona sigue girando mientras suena, de modo que cuando
+        # terminaba la frase ya habia girado mas de lo que tocaba y el
+        # giro se deshacia.  Solo se recuerda el desvio maximo, para
+        # avisar si el desvio no baja.
         self._desvio_inicial = max(self._desvio_inicial, abs(desvio))
-        fraccion = 1.0 - abs(desvio) / max(self._desvio_inicial, 1.0)
-        # Frases propias de la correccion (no las de los giros de la
-        # ruta): la persona debe poder distinguir de cual giro se habla.
-        for parte, texto in (
-            (0.75, "Ya casi enderezas."),
-            (0.5, "Llevas la mitad del giro para enderezar."),
-        ):
-            if parte not in self._avances_correccion and fraccion >= parte:
-                self._avances_correccion.add(parte)
-                self._hablar(texto)
-                return
 
     def _anunciar_instruccion(self, instruccion: Instruccion) -> None:
         if instruccion.accion is Accion.GIRAR_DERECHA:

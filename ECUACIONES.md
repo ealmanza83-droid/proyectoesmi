@@ -352,13 +352,15 @@ No hay ecuación clásica, pero sí **umbral estadístico y lógica de conteo**:
 
 ---
 
-## 13. Guía de giros por voz — `guia/aplicacion.py` (líneas 443-445)
+## 13. Guía de giros por voz — `guia/aplicacion.py` (`_mostrar_giro`)
 
-**Anuncios por fracciones del ángulo objetivo**:
+**Sin anuncios por fracciones del ángulo objetivo**: al 50 % y al 75 %
+antes se hablaba ("Vas por la mitad", "Ya casi listo") y la frase
+llegaba tarde: la persona sigue girando mientras la voz suena, así que
+cuando terminaba ya había girado más de lo pedido y el giro se
+deshacía. Queda un solo anuncio:
 
 ```
-si ángulo ≥ objetivo · 0,50  → "Vas por la mitad"
-si ángulo ≥ objetivo · 0,75  → "Ya casi listo"
 si ángulo ≥ objetivo − 8     → "Puedes parar. …"  (orden primero; el corte
                                 se adelanta grados_compensacion_giro = 8°
                                 para absorber el giro de la frase siguiente)

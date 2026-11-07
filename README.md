@@ -284,11 +284,12 @@ Palabra clave: **"Raspi"** (también "ras pi", "ras py").
 
 Mientras la persona gira o camina, el sistema la guía en todo momento:
 
-* **Durante el giro**: al llegar a la mitad anuncia *"Vas por la
-  mitad"* y a las tres cuartas partes *"Ya casi listo."* — frases
-  cortas sin números, porque la voz tarda y mientras se habla la
-  persona sigue girando (tras cualquier aviso el sistema **vuelve a
-  medir** el ángulo antes de decidir, para no pedir giros de más).
+* **Durante el giro**: no se habla. Antes anunciaba *"Vas por la
+  mitad"* (al 50 %) y *"Ya casi listo"* (al 75 %), pero la voz es
+  lenta: mientras la persona gira de forma constante, cuando
+  terminaba de decir la frase ya había girado más de lo pedido y el
+  giro se deshacía. Ahora el giro transcurre en silencio y solo
+  habla al final, con la orden de parar.
 * **Al completar el giro** (el inicial de 90°, la media vuelta de 180°
   o el giro de una ruta): *"Puedes parar. Ya giraste 90 grados."* /
   *"Puedes parar. Giro completo."* — la **orden va primero** (es lo
@@ -372,10 +373,12 @@ llegarían al sitio medido. En ese caso la corrección se guía **en
 vivo**: *"Alto un momento. Te estás desviando de la línea recta, unos
 30 grados. Gira despacio a la izquierda hasta que te diga que ya
 enderezaste"* — con el lado de la corrección calculado al revés del
-desvío. Mientras gira, el sistema integra el giro de corrección y da
-avances (*"Llevas la mitad del giro para enderezar"*, *"Ya casi
-enderezas"*); si el desvio no baja vuelve a avisar cada 15 s con el
-grados actualizado, y al entrar en la recta anuncia *"Ya enderezaste.
+desvío. Mientras gira, el sistema integra el giro de corrección, sin
+avisos a mitad de giro (*"Llevas la mitad del giro para enderezar"*,
+*"Ya casi enderezas"* se quitaron por el mismo motivo de desfase: la
+voz tarda más que la persona en girar); si el desvio no baja vuelve a
+avisar cada 15 s con el grados actualizado, y al entrar en la recta
+anuncia *"Ya enderezaste.
 Los pasos vuelven a contar"*. El número de grados del aviso es solo
 contexto (cuánto te desviaste): el criterio para parar de girar es la
 voz, no cumplir un número fijo que se quedaría viejo mientras la

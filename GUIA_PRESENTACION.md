@@ -127,7 +127,7 @@ código se convierte en banderas globales imposibles de explicar.
 **Historia completa de un recorrido** (el guion de la demo, sección 10):
 
 1. Arranque: *"Gira 90 grados a la derecha suavemente para buscar la
-   señal orientadora"* → avanza a mitad → *"Puedes parar. Ya giraste
+   señal orientadora"* → giro en silencio → *"Puedes parar. Ya giraste
    90 grados."*
 2. Búsqueda: *"Buscando la señal durante un minuto"* → la cámara ve la
    vaca (cara interior de Inicio) → *"Estás en Inicio. ¿A dónde
@@ -147,8 +147,8 @@ código se convierte en banderas globales imposibles de explicar.
    (`ENCARADA AUTOMATICA` en consola). En casa no podría encontrarse
    otra señal en el mismo sitio, así que pedirla otra vez dejaría a
    la persona girando sin salida.
-5. Navegación: *"Gira a la izquierda 90 grados"* → *"Vas por la
-   mitad"* → *"Puedes parar. Giro completo."* → *"Camina 14 pasos"*
+5. Navegación: *"Gira a la izquierda 90 grados"* → *"Puedes parar.
+   Giro completo."* → *"Camina 14 pasos"*
    (hasta el Cuarto) → cuenta solo pasos rectos → *"Pasos
    completados. Puedes parar."* → **encarada intermedia**: como al
    terminar el tramo la persona queda de espaldas a la señal de esa
@@ -240,13 +240,16 @@ voz habla y tú sigues caminando. En su lugar guía el giro **en vivo**:
 2. *"Alto un momento. Te estás desviando de la línea recta, unos 30
    grados. Gira despacio a la izquierda hasta que te diga que ya
    enderezaste."*
-3. Avances al 50% y 75% del giro de corrección: *"Llevas la mitad del
-   giro para enderezar"*, *"Ya casi enderezas"*.
-4. Al volver por debajo del 60% del umbral (histéresis): *"Ya
+3. Al volver por debajo del 60% del umbral (histéresis): *"Ya
    enderezaste. Los pasos vuelven a contar."*
-5. Respaldo: si a los 15 s de terminar de sonar el aviso sigues fuera
+4. Respaldo: si a los 15 s de terminar de sonar el aviso sigues fuera
    de la recta (o giraste al revés), se recuerda con los grados
    actualizados.
+
+No hay avisos al 50% ni al 75% del giro de corrección (antes decían
+*"Llevas la mitad del giro para enderezar"* y *"Ya casi enderezas"*):
+la voz es lenta y, cuando terminaba de decir la frase, la persona ya
+había girado más de lo que tocaba y el giro se deshacía.
 
 Los pasos de la corrección **tampoco se acreditan** hasta enderezar.
 
@@ -477,16 +480,17 @@ es esta suite (más la prueba física en la casa).
 
 1. Encender y arrancar `python main.py` — mencionar los hilos y que el
    banner muestra el commit en ejecución.
-2. Hacer el giro inicial en voz alta: mostrar avances *"Vas por la
-   mitad"* y *"Puedes parar. Ya giraste 90 grados."* (el corte se
+2. Hacer el giro inicial en voz alta: el giro transcurre en silencio
+   (antes se anunciaba *"Vas por la mitad"*) y al final *"Puedes
+   parar. Ya giraste 90 grados."* (el corte se
    adelanta 8°: la orden sale primero mientras sigues girando)
 3. Dejar que encuentre la señal: *"Estás en Inicio. ¿A dónde quieres
    ir?"*
 4. Pedir *"Raspi, ve a la sala"* → encarar la señal → ruta.
-5. Mostrar el giro de la ruta con avances y *"Puedes parar. Giro
+5. Mostrar el giro de la ruta (en silencio) hasta *"Puedes parar. Giro
    completo."*
 6. **Demostración del desvío**: caminar curvando a propósito → aviso,
-   corrección guiada con avances, *"Ya enderezaste. Los pasos vuelven a
+   corrección guiada en vivo, *"Ya enderezaste. Los pasos vuelven a
    contar."*
 7. Llegar: *"Pasos completados"* → girar hasta ver la señal → *"Has
    llegado a Sala."*
