@@ -54,6 +54,13 @@ class Configuracion:
     # punto al que caminar (ir hacia ella seria chocar con la pared).
     guia_senal_centro_min: float = 0.40
     guia_senal_centro_max: float = 0.60
+    # Distancia visual (pinhole): d = focal_px * altura_real / alto_px.
+    # Define la altura real de la imagen impresa y calibra focal_px con
+    # pruebas/calibrar_focal.py; cero desactiva mediciones no calibradas.
+    altura_senal_m: float = 0.20
+    focal_px: float = 0.0
+    distancia_mediana_frames: int = 5
+    distancia_mediana_perdidas: int = 3
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
 
     # ------------------------------------------------------------------

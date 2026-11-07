@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from collections import deque
+from statistics import median
 
 from ..configuracion import Configuracion
 from ..dominio.catalogo import (
@@ -31,6 +33,58 @@ class Deteccion:
     caja: tuple[int, int, int, int]
     es_senal: bool
     es_obstaculo: bool
+    distancia_m: float | None = None
+
+    @property
+    def alto_px(self) -> int:
+        return max(0, self.caja[3] - self.caja[1])
+
+    @property
+    def ancho_px(self) -> int:
+        return max(0, self.caja[2] - self.caja[0])
+
+    @property
+    def centro_x_px(self) -> float:
+        return (self.caja[0] + self.caja[2]) / 2
+
+
+class MedianaDistanciasVisuales:
+    """Suaviza medidas por clase y descarta historiales ya obsoletos."""
+
+    def __init__(self, frames: int, perdidas: int):
+        self._frames = max(1, frames)
+        self._perdidas_maximas = max(0, perdidas)
+        self._historiales: dict[str, deque[float]] = {}
+        self._perdidas: dict[str, int] = {}
+
+    def suavizar(self, clase: str, distancia_m: float) -> float:
+        historial = self._historiales.setdefault(
+            clase, deque(maxlen=self._frames)
+        )
+        historial.append(distancia_m)
+        self._perdidas[clase] = 0
+        return float(median(historial))
+
+    def cerrar_frame(self, clases_vistas: set[str]) -> None:
+        for clase in tuple(self._historiales):
+            if clase in clases_vistas:
+                self._perdidas[clase] = 0
+                continue
+            perdidas = self._perdidas.get(clase, 0) + 1
+            if perdidas > self._perdidas_maximas:
+                del self._historiales[clase]
+                self._perdidas.pop(clase, None)
+            else:
+                self._perdidas[clase] = perdidas
+
+
+def distancia_por_altura(
+    focal_px: float, altura_real_m: float, alto_px: int
+) -> float | None:
+    """Estima distancia de cámara a objeto con el modelo de cámara pinhole."""
+    if focal_px <= 0 or altura_real_m <= 0 or alto_px <= 0:
+        return None
+    return focal_px * altura_real_m / alto_px
 
 
 # Posicion de un obstaculo respecto al camino de la persona (valor de
@@ -165,6 +219,10 @@ class DetectorVisual:
         self._config = config
         self._senales = SENALES_ORIENTADORAS
         self._objetos = OBJETOS_PERMITIDOS
+        self._distancias = MedianaDistanciasVisuales(
+            config.distancia_mediana_frames,
+            config.distancia_mediana_perdidas,
+        )
         self._confirmador = ConfirmadorSenal(config)
         self._modelo = YOLO(str(config.ruta_modelo), task="detect")
         print("YOLO OK")
@@ -198,6 +256,8 @@ class DetectorVisual:
         detecciones: list[Deteccion] = []
         obstaculos: list[ObstaculoVisto] = []
         senal_vista: str | None = None
+        clases_vistas: set[str] = set()
+        candidatas_senal: list[tuple[float, str]] = []
 
         for caja in resultados[0].boxes:
             clase_id = int(caja.cls[0])
@@ -210,6 +270,16 @@ class DetectorVisual:
             x1, y1, x2, y2 = map(int, caja.xyxy[0])
             es_senal = nombre in self._senales
             es_obstaculo = nombre in self._objetos
+            medida = distancia_por_altura(
+                self._config.focal_px,
+                self._config.altura_senal_m,
+                y2 - y1,
+            ) if es_senal else None
+            if medida is not None:
+                distancia_m = self._distancias.suavizar(nombre, medida)
+                clases_vistas.add(nombre)
+            else:
+                distancia_m = None
 
             detecciones.append(
                 Deteccion(
@@ -218,11 +288,12 @@ class DetectorVisual:
                     caja=(x1, y1, x2, y2),
                     es_senal=es_senal,
                     es_obstaculo=es_obstaculo,
+                    distancia_m=distancia_m,
                 )
             )
 
             if es_senal:
-                senal_vista = nombre
+                candidatas_senal.append((confianza, nombre))
             elif es_obstaculo:
                 objeto = self._objetos[nombre]
                 # Sin enfriamiento: se anuncia lo que se VE ahora y
@@ -241,6 +312,10 @@ class DetectorVisual:
                         ),
                     )
                 )
+
+        self._distancias.cerrar_frame(clases_vistas)
+        if candidatas_senal:
+            senal_vista = max(candidatas_senal)[1]
 
         return ResultadoVision(
             detecciones=tuple(detecciones),

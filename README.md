@@ -69,6 +69,7 @@ proyectoesmi/
 ├── pruebas/caracterizar_mpu6050.py  offset y ruido del MPU6050
 ├── pruebas/registrar_caminata.py  registro de sensores a CSV (app cerrada)
 ├── pruebas/evaluar_pasos.py       reproducción offline del contador de pasos
+├── pruebas/calibrar_focal.py      calibración de la cámara por tamaño conocido
 ├── mi_deteccion/            modelos YOLO (best.pt, yolo11n_ncnn_model…)
 ├── piper_voices/            voces Piper (es_MX-claude-high…)
 ├── vosk/                    modelo Vosk en español
@@ -179,6 +180,20 @@ la distancia queda vacía si no hay eco. El evaluador informa los pasos
 detectados y el error porcentual absoluto. Los CSV de caminatas pueden
 contener datos personales y no se guardan automáticamente en el repositorio.
 
+### Calibrar distancia visual
+
+Mide la altura real de la señal (y configura `altura_senal_m` con ese
+valor), colócala de frente a una distancia medida y anota el alto de su
+caja en píxeles. Calcula la focal con:
+
+```bash
+python pruebas/calibrar_focal.py --distancia-m 1.5 --altura-real-m 0.20 --alto-px 96
+```
+
+Copia `focal_px` al `Configuracion`. El detector informa alto/ancho de
+caja y distancia suavizada con la mediana de `distancia_mediana_frames`;
+sin focal calibrada no publica una distancia.
+
 ---
 
 ## Configuración importante
@@ -228,6 +243,9 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Pines HC-SR04 | `pin_echo` / `pin_trigger` | `23` / `18` (BCM) |
 | Chip gpiozero del HC-SR04 (`/dev/gpiochipN`) | `chip_lgpio` | `15` |
 | Rango de los pitidos (obstáculo **frontal**) | `distancia_alerta_cm` | `300` cm |
+| Altura real de la señal impresa | `altura_senal_m` | `0.20` m (medir en la casa) |
+| Focal calibrada de la cámara | `focal_px` | `0` (desactivada hasta calibrar) |
+| Ventana de mediana para distancia visual | `distancia_mediana_frames` | `5` frames |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).

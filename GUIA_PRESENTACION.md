@@ -80,6 +80,7 @@ pruebas/
   caracterizar_mpu6050.py   Offset y ruido del MPU6050 en reposo
   registrar_caminata.py     CSV de sensores con la aplicación cerrada
   evaluar_pasos.py          Reproducción offline y error del contador
+  calibrar_focal.py         Calibración de distancia visual
 mi_deteccion/               Modelos YOLO (yolo11n COCO activo)
 piper_voices/  vosk/        Modelos de voz (TTS y reconocimiento)
 ```
@@ -306,6 +307,13 @@ señal solo se acepta tras **3 detecciones seguidas** (tolerando 2
 pérdidas) — `ConfirmadorSenal`. Es confirmación, no promedio: cambiar de
 señal reinicia la cuenta.
 
+La caja de cada señal incluye su alto y ancho en píxeles. Si se conoce
+la altura de la imagen impresa y la focal calibrada, se estima la
+distancia con `d = focal_px * altura_senal_m / alto_px`. La mediana de
+los últimos `distancia_mediana_frames` suaviza el parpadeo; el historial
+se descarta tras perder la clase. Hasta calibrar `focal_px` (por defecto
+0), no se usa una distancia visual.
+
 ### 5.7 Señales de las dos caras de la puerta (idea original)
 
 Cada puerta tiene **dos fotos**: la cara *interior* (se ve estando
@@ -489,6 +497,9 @@ sensor), y verifican el comportamiento completo. Ejemplos:
 30. **Evaluación offline**: un CSV registrado con la aplicación cerrada
     se reproduce con el mismo `ContadorPasos`; la prueba verifica que
     cuenta y calcula el error porcentual frente al conteo manual.
+31. **Distancia visual**: el tamaño de caja produce alto/ancho en
+    píxeles y `d=f·H/h`; una mediana de cinco frames reduce saltos y
+    una focal sin calibrar no produce distancia.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
@@ -506,6 +517,12 @@ El porcentaje es el error absoluto del conteo; úsalo para ajustar banda,
 piso y factor del umbral en `guia/configuracion.py`. Los registros son
 locales y pueden revelar patrones de movimiento: no los subas al repo
 sin revisar su contenido.
+
+Para estimar la distancia de la señal, mide su altura real y el alto de
+su caja en un frame tomado a distancia conocida. Ejecuta
+`python pruebas/calibrar_focal.py --distancia-m 1.5 --altura-real-m 0.20 --alto-px 96`
+y copia la salida en `Configuracion.focal_px`; reemplaza las medidas del
+ejemplo por las reales de la casa.
 
 ---
 

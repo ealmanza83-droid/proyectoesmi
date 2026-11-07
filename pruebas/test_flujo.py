@@ -125,10 +125,13 @@ from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
 from guia.navegacion.rumbo import Rumbo  # noqa: E402
 from guia.vision.detector import (  # noqa: E402
+    Deteccion,
     EN_MEDIO_DEL_CAMINO,
     ConfirmadorSenal,
+    MedianaDistanciasVisuales,
     ObstaculoVisto,
     ResultadoVision,
+    distancia_por_altura,
     posicion_en_frame,
 )
 
@@ -2837,6 +2840,40 @@ def test_evaluacion_offline_pasos() -> None:
     )
 
 
+def test_distancia_visual_y_mediana() -> None:
+    """La distancia por tamaño se calcula y suaviza por clase."""
+    print("\n[31] Distancia visual: tamaño de caja y mediana de frames")
+    deteccion = Deteccion(
+        "cow", 0.9, (20, 10, 80, 110), True, False
+    )
+    comprobar(
+        deteccion.alto_px == 100
+        and deteccion.ancho_px == 60
+        and deteccion.centro_x_px == 50,
+        "la caja expone alto, ancho y centro horizontal en píxeles",
+    )
+    comprobar(
+        distancia_por_altura(500.0, 0.2, 100) == 1.0,
+        "distancia pinhole d=f·H/h da 1 m",
+    )
+    comprobar(
+        distancia_por_altura(0.0, 0.2, 100) is None,
+        "no devuelve distancias si la focal no está calibrada",
+    )
+    suavizador = MedianaDistanciasVisuales(frames=3, perdidas=1)
+    medidas = [suavizador.suavizar("cow", valor) for valor in (1.0, 2.0, 9.0)]
+    comprobar(
+        medidas == [1.0, 1.5, 2.0],
+        "la salida visual usa la mediana de los últimos tres frames",
+    )
+    suavizador.cerrar_frame(set())
+    suavizador.cerrar_frame(set())
+    comprobar(
+        suavizador.suavizar("cow", 4.0) == 4.0,
+        "un historial visual obsoleto no contamina una detección nueva",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2877,6 +2914,7 @@ def main() -> int:
         test_zancada_adaptativa()
         test_detector_de_pasos()
         test_evaluacion_offline_pasos()
+        test_distancia_visual_y_mediana()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

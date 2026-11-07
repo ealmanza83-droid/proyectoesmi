@@ -476,6 +476,26 @@ incompletas invalida el archivo en vez de producir una evaluación parcial.
 
 ---
 
+## 17. Distancia a una señal por cámara
+
+Con el modelo de cámara pinhole y la altura real impresa `H` en metros,
+la altura detectada `h` en píxeles y la focal calibrada `f` en píxeles:
+
+```
+d_m = f_px · H_m / h_px
+f_px = d_m · h_px / H_m       (calibración a distancia conocida)
+```
+
+La aplicación acumula las últimas `distancia_mediana_frames` medidas por
+clase y usa su mediana; tras `distancia_mediana_perdidas` frames sin la
+clase, vacía el historial para no reutilizar una distancia antigua. Una
+focal `<= 0`, una altura física no positiva o una caja sin altura produce
+`None`, no una distancia inventada. `altura_senal_m` debe medirse para la
+impresión usada y coincidir con `--altura-real-m` de
+`pruebas/calibrar_focal.py`.
+
+---
+
 ## Resumen en tabla
 
 | Parte del sistema | Ecuación | Archivo |
@@ -495,4 +515,5 @@ incompletas invalida el archivo en vez de producir una evaluación parcial.
 | Desvío en línea recta | `\|θ−θ₀\| ≥ 25°` durante 1 s → corregir; libera a 0,6·25° | `aplicacion.py` (`_vigilar_desvio`) |
 | Ventana de llegada del tramo | `0,70·N ≤ ventana ≤ 1,30·N`; cierra la cámara con la señal de cierre | `aplicacion.py` (`_valorar_llegada_del_tramo`) |
 | Zancada adaptativa | `z_k = α·(D/N) + (1−α)·z_{k−1}` con recorte 0,30…0,90; pasos `= round(D/z)` | `dominio/zancada.py` |
+| Distancia visual | `d=f·H/h`; focal `f=d·h/H`; mediana por clase | `vision/detector.py` |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |
