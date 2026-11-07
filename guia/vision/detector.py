@@ -6,7 +6,9 @@ volver a recorrer los resultados en varias funciones.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
+from statistics import median
 
 import cv2
 import numpy as np
@@ -18,6 +20,7 @@ from ..configuracion import Configuracion
 from ..dominio.catalogo import (
     CLASES_PERMITIDAS,
     OBJETOS_PERMITIDOS,
+    PUERTAS,
     SENALES_ORIENTADORAS,
     Senal,
     senal_de_clase,
@@ -34,6 +37,7 @@ class Deteccion:
     es_senal: bool
     es_obstaculo: bool
     distancia_m: float | None = None
+    es_puerta: bool = False
 
     @property
     def alto_px(self) -> int:
@@ -105,6 +109,19 @@ class ObstaculoVisto:
 
 
 @dataclass(frozen=True)
+class PuertaVisto:
+    """Una puerta detectada con geometría y distancia opcional."""
+
+    nombre: str
+    caja: tuple[int, int, int, int]
+    centro_x_px: float
+    alto_px: int
+    ancho_px: int
+    posicion: str
+    distancia_m: float | None = None
+
+
+@dataclass(frozen=True)
 class ResultadoVision:
     """Lo que la camara descubrio en un frame."""
 
@@ -120,6 +137,8 @@ class ResultadoVision:
     "desaparecia" y "volvia" cada pocos segundos y el anuncio se
     repetia igual.
     """
+    puertas: tuple[PuertaVisto, ...] = ()
+    """Puertas detectadas en este frame (no identifican una zona)."""
 
 
 def posicion_en_frame(
@@ -163,6 +182,18 @@ def posicion_en_frame(
     if centro < minimo:
         return "izquierda"
     if centro > maximo:
+        return "derecha"
+    return EN_MEDIO_DEL_CAMINO
+
+
+def posicion_del_centro(
+    centro_x_px: float, *, ancho: int, minimo: float, maximo: float
+) -> str:
+    """Clasifica el centro horizontal en izquierda, centro o derecha."""
+    fraccion = centro_x_px / ancho
+    if fraccion < minimo:
+        return "izquierda"
+    if fraccion > maximo:
         return "derecha"
     return EN_MEDIO_DEL_CAMINO
 
@@ -219,6 +250,7 @@ class DetectorVisual:
         self._config = config
         self._senales = SENALES_ORIENTADORAS
         self._objetos = OBJETOS_PERMITIDOS
+        self._puertas = PUERTAS
         self._distancias = MedianaDistanciasVisuales(
             config.distancia_mediana_frames,
             config.distancia_mediana_perdidas,
@@ -253,33 +285,66 @@ class DetectorVisual:
             frame, conf=self._config.confianza_minima, verbose=False
         )
 
-        detecciones: list[Deteccion] = []
-        obstaculos: list[ObstaculoVisto] = []
-        senal_vista: str | None = None
-        clases_vistas: set[str] = set()
-        candidatas_senal: list[tuple[float, str]] = []
-
+        observaciones: list[
+            tuple[str, float, tuple[int, int, int, int]]
+        ] = []
+        medidas_por_clase: dict[str, float] = {}
         for caja in resultados[0].boxes:
             clase_id = int(caja.cls[0])
             nombre = self._modelo.names[clase_id]
-            confianza = float(caja.conf[0])
-
             if nombre not in CLASES_PERMITIDAS:
                 continue
-
             x1, y1, x2, y2 = map(int, caja.xyxy[0])
+            confianza = float(caja.conf[0])
+            limites = (x1, y1, x2, y2)
+            observaciones.append((nombre, confianza, limites))
+
+            if nombre in self._senales:
+                medida = distancia_por_altura(
+                    self._config.focal_px,
+                    self._config.altura_senal_m,
+                    y2 - y1,
+                )
+            elif nombre in self._puertas:
+                medida = distancia_por_altura(
+                    self._config.focal_px,
+                    self._config.altura_puerta_m,
+                    y2 - y1,
+                )
+                if medida is None:
+                    medida = distancia_por_altura(
+                        self._config.focal_px,
+                        self._config.ancho_puerta_m,
+                        x2 - x1,
+                    )
+            else:
+                medida = None
+            if medida is not None:
+                # Un solo rango por clase y frame evita ponderar más las
+                # clases que tengan varias cajas (se conserva la más cercana).
+                medidas_por_clase[nombre] = min(
+                    medidas_por_clase.get(nombre, medida), medida
+                )
+
+        distancias_frame = {
+            clase: self._distancias.suavizar(clase, medida)
+            for clase, medida in medidas_por_clase.items()
+        }
+        clases_vistas = set(distancias_frame)
+        detecciones: list[Deteccion] = []
+        obstaculos: list[ObstaculoVisto] = []
+        puertas: list[PuertaVisto] = []
+        candidatas_senal: list[
+            tuple[float, str, tuple[int, int, int, int]]
+        ] = []
+        cajas_puertas: list[tuple[int, int, int, int]] = []
+
+        for nombre, confianza, limites in observaciones:
+            x1, y1, x2, y2 = limites
             es_senal = nombre in self._senales
             es_obstaculo = nombre in self._objetos
-            medida = distancia_por_altura(
-                self._config.focal_px,
-                self._config.altura_senal_m,
-                y2 - y1,
-            ) if es_senal else None
-            if medida is not None:
-                distancia_m = self._distancias.suavizar(nombre, medida)
-                clases_vistas.add(nombre)
-            else:
-                distancia_m = None
+            es_puerta = nombre in self._puertas
+            distancia_m = distancias_frame.get(nombre)
 
             detecciones.append(
                 Deteccion(
@@ -289,11 +354,31 @@ class DetectorVisual:
                     es_senal=es_senal,
                     es_obstaculo=es_obstaculo,
                     distancia_m=distancia_m,
+                    es_puerta=es_puerta,
                 )
             )
 
             if es_senal:
-                candidatas_senal.append((confianza, nombre))
+                candidatas_senal.append((confianza, nombre, (x1, y1, x2, y2)))
+            elif es_puerta:
+                caja = (x1, y1, x2, y2)
+                cajas_puertas.append(caja)
+                puertas.append(
+                    PuertaVisto(
+                        nombre=self._puertas[nombre],
+                        caja=caja,
+                        centro_x_px=(x1 + x2) / 2,
+                        alto_px=max(0, y2 - y1),
+                        ancho_px=max(0, x2 - x1),
+                        posicion=posicion_del_centro(
+                            (x1 + x2) / 2,
+                            ancho=self._config.ancho,
+                            minimo=self._config.obstaculo_centro_min,
+                            maximo=self._config.obstaculo_centro_max,
+                        ),
+                        distancia_m=distancia_m,
+                    )
+                )
             elif es_obstaculo:
                 objeto = self._objetos[nombre]
                 # Sin enfriamiento: se anuncia lo que se VE ahora y
@@ -314,13 +399,25 @@ class DetectorVisual:
                 )
 
         self._distancias.cerrar_frame(clases_vistas)
+        senal_vista: str | None = None
         if candidatas_senal:
-            senal_vista = max(candidatas_senal)[1]
+            dentro_de_puerta = [
+                candidata
+                for candidata in candidatas_senal
+                if any(
+                    puerta[0] <= (candidata[2][0] + candidata[2][2]) / 2 <= puerta[2]
+                    and puerta[1] <= (candidata[2][1] + candidata[2][3]) / 2 <= puerta[3]
+                    for puerta in cajas_puertas
+                )
+            ]
+            prioridad = dentro_de_puerta or candidatas_senal
+            senal_vista = max(prioridad, key=lambda deteccion: deteccion[0])[1]
 
         return ResultadoVision(
             detecciones=tuple(detecciones),
             senal=self._confirmador.observar(senal_vista),
             obstaculos=tuple(obstaculos),
+            puertas=tuple(puertas),
         )
 
     def reiniciar_confirmacion(self) -> None:

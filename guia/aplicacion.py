@@ -81,6 +81,7 @@ from .navegacion.caida import DetectorCaida
 from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
 from .navegacion.odometro import OdometroUltrasonico
 from .navegacion.posicion import EstimadorPosicionTramo
+from .navegacion.puertas import ContadorPuertas
 from .navegacion.rumbo import Rumbo
 from .version import obtener_version
 from .vision.detector import (
@@ -174,6 +175,9 @@ class Aplicacion:
         self.pasos = ContadorPasos(config)
         self._odometro_ultrasonico = OdometroUltrasonico(config)
         self.estimador_posicion = EstimadorPosicionTramo(config)
+        self._contador_puertas = ContadorPuertas(config)
+        self._puerta_guiada = False
+        self._puertas_ausentes = 0
         self._pasos_estimador_previos = 0
         self._ultima_medicion_ultra_aplicada: float | None = None
         # Zancada de la persona: se mide en cada tramo que cierra la
@@ -1188,6 +1192,7 @@ class Aplicacion:
         self._etiqueta = f"Buscando senal - intento {self._intento}"
 
         senal = resultado.senal
+        self._guiar_con_puerta(resultado)
         if senal is not None:
             self.rumbo.anclar()  # se mira la senal: rumbo conocido
             if senal.lado == LADO_INTERIOR:
@@ -1252,6 +1257,7 @@ class Aplicacion:
         objetivo = self.config.pasos_objetivo
         dados = self._creditar_pasos()
         self._etiqueta = f"Caminando - {dados}/{objetivo} pasos"
+        self._guiar_con_puerta(resultado)
         self._vigilar_desvio()
         inicio = objetivo * self.config.ventana_llegada_inicio
         fin = objetivo * self.config.ventana_llegada_fin
@@ -1357,6 +1363,12 @@ class Aplicacion:
             self._valorar_llegada_del_tramo(
                 resultado, dados, instruccion.cantidad
             )
+            if (
+                self._instruccion_actual is not None
+                and self._aviso_ventana_dado
+                and resultado.senal is None
+            ):
+                self._guiar_con_puerta(resultado)
 
     def _valorar_llegada_del_tramo(
         self, resultado: ResultadoVision, dados: int, objetivo: int
@@ -1494,6 +1506,9 @@ class Aplicacion:
         self._pasos_estimador_previos = 0
         self._ultima_medicion_ultra_aplicada = None
         self._odometro_ultrasonico.reiniciar()
+        self._contador_puertas.reiniciar()
+        self._puerta_guiada = False
+        self._puertas_ausentes = 0
         self._distancia_frontal_inicio_cm = None
         self._avance_ultrasonico_m = None
         self._ultima_secuencia_ultrasonica = getattr(
@@ -1578,6 +1593,61 @@ class Aplicacion:
                 self.config.varianza_medicion_ultrasonido_m2,
             )
             self._ultima_medicion_ultra_aplicada = self._avance_ultrasonico_m
+
+        if self._distancia_tramo > 0:
+            for puerta in resultado.puertas:
+                if puerta.posicion != "centro" or puerta.distancia_m is None:
+                    continue
+                self.estimador_posicion.corregir(
+                    self._distancia_tramo - puerta.distancia_m,
+                    self.config.varianza_medicion_puerta_m2,
+                )
+                break
+
+        pasadas_antes = self._contador_puertas.pasadas
+        pasadas = self._contador_puertas.actualizar(
+            (puerta.centro_x_px, puerta.posicion == "centro")
+            for puerta in resultado.puertas
+        )
+        if (
+            instruccion.puertas_en_tramo > 0
+            and pasadas > pasadas_antes
+            and self._distancia_tramo > 0
+        ):
+            medicion = self._distancia_tramo * pasadas / (
+                instruccion.puertas_en_tramo + 1
+            )
+            self.estimador_posicion.corregir(
+                medicion, self.config.varianza_medicion_puerta_m2
+            )
+
+    def _guiar_con_puerta(self, resultado: ResultadoVision) -> None:
+        """Da una sola indicación direccional por puerta visible."""
+        if not resultado.puertas:
+            self._puertas_ausentes += 1
+            if self._puertas_ausentes > self.config.frames_puerta_perdida:
+                self._puerta_guiada = False
+            return
+
+        self._puertas_ausentes = 0
+        if resultado.senal is not None or self._puerta_guiada:
+            return
+
+        puerta = max(
+            resultado.puertas,
+            key=lambda deteccion: deteccion.alto_px * deteccion.ancho_px,
+        )
+        if puerta.posicion in ("izquierda", "derecha"):
+            self._hablar(
+                f"La puerta está a la {puerta.posicion}. Gira despacio a la "
+                f"{puerta.posicion} hacia ella para buscar la señal."
+            )
+        else:
+            self._hablar(
+                "Hay una puerta frente a ti. Mantenla centrada mientras "
+                "buscas la señal interior."
+            )
+        self._puerta_guiada = True
 
     def _creditar_pasos(self) -> int:
         """Pasos que cuentan hacia el tramo: solo los dados rectos.

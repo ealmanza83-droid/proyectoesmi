@@ -29,6 +29,9 @@ class TramoRuta:
     # Distancia frontal conocida al final del pasillo. None desactiva
     # el odómetro ultrasónico para este tramo.
     distancia_frontal_fin_cm: float | None = None
+    # Número de puertas intermedias conocidas; aporta una corrección
+    # débil de avance, nunca una confirmación de llegada.
+    puertas_en_tramo: int = 0
 
 
 class Accion(Enum):
@@ -50,6 +53,7 @@ class Instruccion:
     # los pasos).  0.0 si el mapa no lo midio.
     distancia_m: float = 0.0
     distancia_frontal_fin_cm: float | None = None
+    puertas_en_tramo: int = 0
 
     @property
     def es_giro(self) -> bool:
@@ -176,6 +180,7 @@ class PlanificadorRutas:
                     giros=tuple(_GIRO_ESPEJO[g] for g in reversed(tramo.giros)),
                     distancia_m=tramo.distancia_m,
                     distancia_frontal_fin_cm=tramo.distancia_frontal_fin_cm,
+                    puertas_en_tramo=tramo.puertas_en_tramo,
                 ),
             )
         return completos
@@ -274,6 +279,7 @@ class PlanificadorRutas:
                         pasos,
                         tramo.distancia_m,
                         tramo.distancia_frontal_fin_cm,
+                        tramo.puertas_en_tramo,
                     )
                 )
 

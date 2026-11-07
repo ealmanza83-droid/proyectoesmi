@@ -58,11 +58,14 @@ proyectoesmi/
 │   │   ├── gramaticas.py    gramáticas reducidas por modo
 │   │   └── alarma.py        beep de proximidad + alarma continua de caída
 │   ├── vision/
-│   │   ├── detector.py      YOLO: señales + obstáculos (1 inferencia)
+│   │   ├── detector.py      YOLO: señales, puertas + obstáculos (1 inferencia)
 │   │   └── interfaz.py      ventana de diagnóstico
 │   └── navegacion/
 │       ├── movimiento.py    MuestreadorMPU (100 Hz) + MedidorGiro + ContadorPasos
 │       ├── rumbo.py         Rumbo (orientación relativa anclada a la señal)
+│       ├── posicion.py      Estimador 1D por pasos y mediciones de sensores
+│       ├── odometro.py      Filtrado de avance opcional por ultrasonido
+│       ├── puertas.py       Seguimiento horizontal y conteo opcional de puertas
 │       └── caida.py         DetectorCaida (acelerómetro)
 ├── pruebas/test_flujo.py    prueba completa sin hardware
 ├── pruebas/prueba_ultrasonido.py  verificación del HC-SR04 en la Pi
@@ -244,8 +247,12 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Chip gpiozero del HC-SR04 (`/dev/gpiochipN`) | `chip_lgpio` | `15` |
 | Rango de los pitidos (obstáculo **frontal**) | `distancia_alerta_cm` | `300` cm |
 | Altura real de la señal impresa | `altura_senal_m` | `0.20` m (medir en la casa) |
+| Altura/ancho real de puerta | `altura_puerta_m` / `ancho_puerta_m` | `2.0` / `0.9` m (medir en la casa) |
 | Focal calibrada de la cámara | `focal_px` | `0` (desactivada hasta calibrar) |
 | Ventana de mediana para distancia visual | `distancia_mediana_frames` | `5` frames |
+| Frames perdidos que conservan la mediana visual | `distancia_mediana_perdidas` | `3` |
+| Frames perdidos antes de rearmar el aviso de puerta | `frames_puerta_perdida` | `4` |
+| Salto horizontal máximo al seguir una puerta | `salto_maximo_puerta_px` | `160` px |
 | Muestras estables del odómetro ultrasónico | `muestras_ultrasonido_odometro` | `5` |
 | Salto máximo entre lecturas estables | `salto_maximo_ultrasonido_cm` | `60` cm |
 | Incertidumbre inicial de posición | `sigma_inicial_posicion_m` | `0.5` m |
@@ -261,9 +268,17 @@ funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
 ```python
 SENALES_ORIENTADORAS = {"cow": "Inicio", "zebra": "Sala",
                         "giraffe": "Baño", "sheep": "Cuarto"}
+PUERTAS              = {"door": "puerta"}  # guía visual; no identifica zona
 OBJETOS_PERMITIDOS   = {"chair": "silla", "table": "mesa",
                         "potted plant": "maceta"}
 ```
+
+El detector devuelve las puertas en una lista aparte con caja,
+centro horizontal, alto/ancho y rango. Durante la búsqueda, una puerta
+visible sin señal confirmada se anuncia una vez por encuentro; el animal
+detectado dentro de su caja tiene prioridad. El rango usa
+`altura_puerta_m` (o `ancho_puerta_m` como respaldo) y la misma
+`focal_px` calibrada. La puerta nunca cambia `ubicacion`.
 
 ### Mapa de la casa (`guia/dominio/rutas.py`)
 
@@ -307,6 +322,11 @@ zancada vigente, y corrige con la distancia a la señal esperada y, cuando
 se configuró, con el HC-SR04 frontal. Expone posición e incertidumbre.
 La incertidumbre puede iniciar antes el aviso de búsqueda, pero la ventana
 solo se cierra al confirmar con cámara la señal interior esperada.
+
+Un tramo también puede declarar `puertas_en_tramo` (cantidad de puertas
+intermedias esperadas). El contador horizontal corrige débilmente la
+posición al pasar cada puerta, una vez por detección; no la usa para
+identificar la zona ni para anunciar llegada.
 
 **Zancada adaptativa** (`guia/dominio/zancada.py`): mientras no haya
 ninguna medida, el plan usa `pasos` (el conteo del mapa). En cuanto la

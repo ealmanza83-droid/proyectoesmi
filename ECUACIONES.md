@@ -542,6 +542,34 @@ Ni los pasos ni el filtro anuncian la llegada al destino.
 
 ---
 
+## 20. Puertas como guía visual y medición auxiliar
+
+La clase YOLO `door` es independiente de `SENALES_ORIENTADORAS`: una
+puerta puede orientar un giro o aportar distancia, pero no puede asignar
+la zona. Si la señal aún no está confirmada, el animal detectado dentro
+de la caja de puerta tiene prioridad; la aplicación anuncia la posición
+horizontal una vez por encuentro y re-arma el aviso tras varios frames
+sin verla.
+
+La puerta usa sus dimensiones físicas configurables, con la altura como
+medida primaria y el ancho como respaldo:
+
+```
+d_puerta = f_px · altura_puerta_m / alto_px
+       o  f_px · ancho_puerta_m / ancho_px
+```
+
+La mediana de `distancia_mediana_frames` suaviza el rango. Una puerta
+centrada puede corregir el filtro con `z = distancia_tramo − d_puerta`
+(varianza `varianza_medicion_puerta_m2`). El seguimiento asocia detecciones
+por centro horizontal y cuenta solo una vez cuando cada caja entra al
+fragmento central. Si el tramo espera `M` puertas y ya se pasaron `k`,
+la corrección débil es `z = D·k/(M+1)`. Ninguna de estas medidas produce
+`Senal`, avanza identidad de zona ni cierra un tramo sin confirmación de
+la señal interior.
+
+---
+
 ## Resumen en tabla
 
 | Parte del sistema | Ecuación | Archivo |
@@ -564,4 +592,5 @@ Ni los pasos ni el filtro anuncian la llegada al destino.
 | Distancia visual | `d=f·H/h`; focal `f=d·h/H`; mediana por clase | `vision/detector.py` |
 | Odómetro opcional | `avance=clip((d_inicio−d_actual)/100, 0, d_inicio−d_fin)` tras mediana estable | `navegacion/odometro.py` |
 | Posición por tramo | Predicción por pasos + corrección Kalman `K=P/(P+R)`; `σ=√P` | `navegacion/posicion.py` |
+| Puertas | Rango por `f·H/h`; conteo por caja centrada, una vez por rastro | `vision/detector.py`, `navegacion/puertas.py` |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |

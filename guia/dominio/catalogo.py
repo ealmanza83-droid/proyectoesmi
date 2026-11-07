@@ -38,10 +38,9 @@ class Senal:
 # Y el lado de su puerta desde el que se ve.  Imprime la cara interior
 # dentro de la zona y la del pasillo al otro lado de la puerta.
 #
-# El modelo en uso (yolo11n, COCO genérico) ya reconoce estos
-# animales: no hace falta reentrenar nada, solo imprimir una foto por
-# clase.  Las cuatro primeras (cow, zebra, giraffe, sheep) son las que
-# ya estan impresas como interiores.
+# El modelo COCO reconoce estos animales sin reentrenamiento. La clase
+# personalizada ``door`` se declara por separado en PUERTAS. Las cuatro
+# primeras (cow, zebra, giraffe, sheep) son las senales interiores.
 SENALES_ORIENTADORAS: dict[str, Senal] = {
     # Zona Inicio
     "cow": Senal("Inicio", LADO_INTERIOR),
@@ -57,6 +56,10 @@ SENALES_ORIENTADORAS: dict[str, Senal] = {
     "dog": Senal("Cuarto", LADO_PASILLO),
 }
 
+# Clase de marco de puerta del modelo del usuario. La puerta es una
+# referencia visual, nunca una clase que identifique una zona.
+PUERTAS: dict[str, str] = {"door": "puerta"}
+
 # Obstaculos que conviene anunciar en voz alta para evitar golpes.
 # Ojo: en COCO la mesa se llama "dining table" (antes el catalogo decia
 # "table" y ese obstaculo nunca se anunciaba).
@@ -69,7 +72,9 @@ OBJETOS_PERMITIDOS: dict[str, str] = {
 
 # Clases que la camara tiene permiso para dibujar/anunciar.
 CLASES_PERMITIDAS: frozenset[str] = (
-    frozenset(SENALES_ORIENTADORAS) | frozenset(OBJETOS_PERMITIDOS)
+    frozenset(SENALES_ORIENTADORAS)
+    | frozenset(PUERTAS)
+    | frozenset(OBJETOS_PERMITIDOS)
 )
 
 # Lugares que la persona puede pedir por voz.

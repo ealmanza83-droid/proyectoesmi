@@ -63,6 +63,8 @@ class Configuracion:
     distancia_mediana_perdidas: int = 3
     altura_puerta_m: float = 2.0
     ancho_puerta_m: float = 0.9
+    salto_maximo_puerta_px: float = 160.0
+    frames_puerta_perdida: int = 4
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
 
     # ------------------------------------------------------------------

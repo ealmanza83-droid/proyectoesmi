@@ -25,10 +25,10 @@ ultrasonico + MPU6050 + micrófono + altavoz) que:
 4. **Cuida la seguridad**: avisa obstáculos cercanos (pitidos que se
    aceleran) y detecta caídas (alarma continua + "di silencia").
 
-**Dato clave para la presentación**: NO se entrenó ningún modelo de
-inteligencia artificial nuevo. Se usa YOLO11n genérico (entrenado con
-la base COCO de 80 clases) y cada zona de la casa se identifica con
-fotos de animales que el modelo ya reconoce.
+**Dato clave para la presentación**: el modelo YOLO11 usado para la casa
+reconoce las señales de animales y contiene la clase personalizada
+`door`, entrenada por el usuario. Una puerta ayuda a orientar la
+búsqueda, pero solo una señal interior determina la zona.
 
 ---
 
@@ -61,9 +61,12 @@ guia/
     movimiento.py           Muestreador MPU (100 Hz), medidor de giro,
                             contador de pasos
     rumbo.py                Orientación relativa desde la última señal
+    posicion.py             Estimador 1D de avance e incertidumbre
+    odometro.py             Avance con ultrasonido opcional por tramo
+    puertas.py              Seguimiento y conteo auxiliar de puertas
     caida.py                Detección de caídas por el acelerómetro
   vision/                   El "ojo"
-    detector.py             YOLO + confirmación temporal de señales
+    detector.py             YOLO: señales, puertas y obstáculos
     interfaz.py             Ventana de diagnóstico (para quien ve la pantalla)
   audio/                    La "voz y oído"
     locutor.py              Sintesis de voz (Piper + caché)
@@ -75,13 +78,13 @@ guia/
     camara.py               Captura de frames
     ultrasonido.py          HC-SR04 (gpiozero) en hilo propio + alerta
 pruebas/
-  test_flujo.py             15 pruebas automatizadas sin hardware
+  test_flujo.py             34 pruebas automatizadas sin hardware
   prueba_ultrasonido.py     Verificación directa del HC-SR04 en la Pi
   caracterizar_mpu6050.py   Offset y ruido del MPU6050 en reposo
   registrar_caminata.py     CSV de sensores con la aplicación cerrada
   evaluar_pasos.py          Reproducción offline y error del contador
   calibrar_focal.py         Calibración de distancia visual
-mi_deteccion/               Modelos YOLO (yolo11n COCO activo)
+mi_deteccion/               Modelos YOLO (incluye la clase personalizada door)
 piper_voices/  vosk/        Modelos de voz (TTS y reconocimiento)
 ```
 
@@ -270,6 +273,8 @@ Los pasos de la corrección **tampoco se acreditan** hasta enderezar.
 detecciones por el catálogo (`dominio/catalogo.py`):
 
 * **Señales orientadoras** (una foto por zona por cara de puerta).
+* **Puertas** (`door`): geometría y rango para guiar la búsqueda y
+  corregir posición; no identifican una zona.
 * **Obstáculos** que se anuncian en voz alta con su nombre: silla,
   mesa (*"dining table"*, el nombre real en COCO), maceta. La imagen
   se divide en **3 fragmentos iguales** (izquierda, centro, derecha);
@@ -314,11 +319,21 @@ los últimos `distancia_mediana_frames` suaviza el parpadeo; el historial
 se descarta tras perder la clase. Hasta calibrar `focal_px` (por defecto
 0), no se usa una distancia visual.
 
+La clase `door` se devuelve aparte de las señales, con caja, centro,
+alto, ancho y distancia suavizada con la mediana. En una búsqueda, si
+hay una puerta y todavía no se confirma una señal, se anuncia una vez
+su ubicación izquierda/centro/derecha y se guía hacia ella. El animal
+detectado dentro de la caja de puerta tiene prioridad sobre animales en
+otras zonas del frame. La puerta nunca identifica la zona: sigue siendo
+necesaria la señal interior.
+
 ### 5.7 Señales de las dos caras de la puerta (idea original)
 
 Cada puerta tiene **dos fotos**: la cara *interior* (se ve estando
 dentro de la zona) y la cara del *pasillo* (se ve desde el otro lado).
-Con el mismo modelo genérico, ocho clases de COCO:
+Las fotos de animales usan clases reconocidas por el modelo base; la
+clase personalizada `door` sirve solo para localizar el marco y guiar
+hacia él:
 
 | Zona | Cara interior (dentro) | Cara pasillo (fuera) |
 |---|---|---|
@@ -518,6 +533,9 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     por zancada, corrección visual, propagación/reducción de
     incertidumbre y que esa incertidumbre inicia la búsqueda, pero no
     cierra un tramo sin señal interior.
+34. **Puertas**: detecciones simuladas centradas/laterales verifican
+    caja y distancia; varias apariciones de la misma puerta no duplican
+    el conteo ni confirman zona/llegada.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
@@ -580,9 +598,10 @@ hacia la pared o puerta de fin de tramo.
 
 ## 9. Preguntas típicas y posibles respuestas
 
-**¿Hay que entrenar un modelo?** No. YOLO11n genérico COCO ya
-reconoce las ocho fotos usadas; el "entrenamiento" fue imprimir las
-fotos correctas en las caras correctas de cada puerta.
+**¿Hay que entrenar un modelo?** Las imágenes de señales son clases
+reconocidas por YOLO y el modelo usado incluye la clase `door` que
+entrenó el usuario. El entrenamiento de `door` no cambia la regla de
+identidad: solo una señal interior confirma la zona.
 
 **¿Cómo sabe en qué zona está?** Viendo la cara interior de la señal
 de esa zona (3 detecciones seguidas). La cara del pasillo solo dice
@@ -636,6 +655,11 @@ Todo umbral vive en `guia/configuracion.py`:
 | Ventana de llegada del tramo | `ventana_llegada_inicio = 0.70` / `ventana_llegada_fin = 1.30` |
 | Zancada: peso de la última medida (EMA) | `zancada_ema_alfa = 0.30` |
 | Zancada: recorte de la medida | `zancada_min_m = 0.30` / `zancada_max_m = 0.90` |
+| Mediana de distancia visual | `distancia_mediana_frames = 5` / `distancia_mediana_perdidas = 3` |
+| Tamaño físico de señal/puerta | `altura_senal_m`, `altura_puerta_m`, `ancho_puerta_m` |
+| Seguimiento horizontal de puerta | `salto_maximo_puerta_px = 160` / `frames_puerta_perdida = 4` |
+| Ruido de las mediciones de posición | `varianza_medicion_senal_m2`, `varianza_medicion_ultrasonido_m2`, `varianza_medicion_puerta_m2` |
+| Margen de incertidumbre de búsqueda | `sigmas_inicio_busqueda = 1.0` |
 
 La casa (mapa) se define en `guia/dominio/rutas.py` (`TRAMOS_DEMO`):
 cada tramo solo se mide en un sentido; el inverso se calcula con los

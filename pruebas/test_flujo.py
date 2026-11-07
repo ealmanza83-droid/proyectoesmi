@@ -106,7 +106,14 @@ from guia.aplicacion import Aplicacion  # noqa: E402
 from guia.audio.microfono import EventoVoz, ModoMicrofono  # noqa: E402
 from guia.configuracion import Configuracion  # noqa: E402
 from guia.dominio.comandos import TipoComando, extraer_destino, quitar_despertador, reconocer  # noqa: E402
-from guia.dominio.catalogo import LADO_INTERIOR, LADO_PASILLO, Senal  # noqa: E402
+from guia.dominio.catalogo import (  # noqa: E402
+    LADO_INTERIOR,
+    LADO_PASILLO,
+    OBJETOS_PERMITIDOS,
+    PUERTAS,
+    SENALES_ORIENTADORAS,
+    Senal,
+)
 from guia.dominio.estados import Estado  # noqa: E402
 from guia.dominio.rutas import (  # noqa: E402
     Accion,
@@ -125,13 +132,16 @@ from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
 from guia.navegacion.odometro import OdometroUltrasonico  # noqa: E402
 from guia.navegacion.posicion import EstimadorPosicionTramo  # noqa: E402
+from guia.navegacion.puertas import ContadorPuertas  # noqa: E402
 from guia.navegacion.rumbo import Rumbo  # noqa: E402
 from guia.vision.detector import (  # noqa: E402
     Deteccion,
     EN_MEDIO_DEL_CAMINO,
     ConfirmadorSenal,
+    DetectorVisual,
     MedianaDistanciasVisuales,
     ObstaculoVisto,
+    PuertaVisto,
     ResultadoVision,
     distancia_por_altura,
     posicion_en_frame,
@@ -235,9 +245,14 @@ class DetectorFalso:
     def __init__(self) -> None:
         self.senal: Senal | None = None
         self.obstaculos: tuple[ObstaculoVisto, ...] = ()
+        self.puertas: tuple[PuertaVisto, ...] = ()
 
     def analizar(self, frame) -> ResultadoVision:
-        return ResultadoVision(senal=self.senal, obstaculos=self.obstaculos)
+        return ResultadoVision(
+            senal=self.senal,
+            obstaculos=self.obstaculos,
+            puertas=self.puertas,
+        )
 
     def reiniciar_confirmacion(self) -> None:
         pass
@@ -2909,6 +2924,7 @@ def test_odometro_ultrasonico_estable() -> None:
                 giros=("izquierda",),
                 distancia_m=2.0,
                 distancia_frontal_fin_cm=40.0,
+                puertas_en_tramo=2,
             )
         }
     )
@@ -2918,8 +2934,9 @@ def test_odometro_ultrasonico_estable() -> None:
         ida is not None
         and vuelta is not None
         and ida[1].distancia_frontal_fin_cm == 40.0
-        and vuelta[1].distancia_frontal_fin_cm == 40.0,
-        "la distancia frontal opcional acompaña el tramo en ambos sentidos",
+        and vuelta[1].distancia_frontal_fin_cm == 40.0
+        and ida[1].puertas_en_tramo == vuelta[1].puertas_en_tramo == 2,
+        "las referencias opcionales acompañan el tramo en ambos sentidos",
     )
     aplicacion = Aplicacion(
         config=config,
@@ -3025,6 +3042,161 @@ def test_estimador_posicion_tramo() -> None:
     )
 
 
+def test_deteccion_y_seguimiento_de_puertas() -> None:
+    """Las puertas guían y corrigen avance, pero no identifican zonas."""
+    print("\n[34] Puertas: detección, guía única y conteo por posición")
+
+    class CajaFalsaVision:
+        def __init__(self, clase: int, confianza: float, caja: tuple[int, ...]):
+            self.cls = [clase]
+            self.conf = [confianza]
+            self.xyxy = [caja]
+
+    class ModeloFalsoVision:
+        names = {0: "door", 1: "sheep", 2: "cow"}
+
+        def __init__(self) -> None:
+            self.cajas = []
+
+        def __call__(self, frame, **kwargs):
+            return [types.SimpleNamespace(boxes=self.cajas)]
+
+    config = dataclasses.replace(
+        Configuracion(),
+        focal_px=1000.0,
+        distancia_mediana_frames=3,
+        detecciones_senal_requeridas=1,
+        frames_puerta_perdida=1,
+    )
+    modelo = ModeloFalsoVision()
+    detector = DetectorVisual.__new__(DetectorVisual)
+    detector._config = config
+    detector._senales = SENALES_ORIENTADORAS
+    detector._objetos = OBJETOS_PERMITIDOS
+    detector._puertas = PUERTAS
+    detector._distancias = MedianaDistanciasVisuales(
+        config.distancia_mediana_frames,
+        config.distancia_mediana_perdidas,
+    )
+    detector._confirmador = ConfirmadorSenal(config)
+    detector._modelo = modelo
+
+    resultado = None
+    for alto in (400, 200, 100):
+        modelo.cajas = [
+            CajaFalsaVision(0, 0.9, (200, 0, 440, alto)),
+            CajaFalsaVision(1, 0.7, (250, 20, 300, 40)),
+            CajaFalsaVision(2, 0.99, (450, 100, 500, 200)),
+        ]
+        resultado = detector.analizar(object())
+    comprobar(
+        resultado is not None
+        and len(resultado.puertas) == 1
+        and resultado.puertas[0].centro_x_px == 320
+        and resultado.puertas[0].alto_px == 100
+        and resultado.puertas[0].ancho_px == 240,
+        "devuelve caja, centro, alto y ancho de la puerta",
+    )
+    comprobar(
+        resultado is not None
+        and abs(resultado.puertas[0].distancia_m - 10.0) < 1e-9,
+        "suaviza distancia a puerta con mediana de frames",
+    )
+    comprobar(
+        resultado is not None
+        and resultado.senal == Senal("Cuarto", LADO_INTERIOR),
+        "prioriza el animal dentro de la puerta sobre otra señal exterior",
+    )
+    modelo.cajas = [CajaFalsaVision(0, 0.9, (10, 0, 150, 460))]
+    lateral = detector.analizar(object())
+    comprobar(
+        lateral.puertas[0].posicion == "izquierda" and lateral.senal is None,
+        "clasifica una puerta lateral en el mismo fragmento de imagen",
+    )
+
+    contador = ContadorPuertas(config)
+    comprobar(
+        contador.actualizar(((320.0, True),)) == 1,
+        "cuenta una puerta centrada al cruzar el fragmento central",
+    )
+    comprobar(
+        contador.actualizar(((320.0, True),)) == 1,
+        "frames repetidos de la misma puerta no duplican el conteo",
+    )
+    contador.reiniciar()
+    comprobar(
+        contador.actualizar(((100.0, False),)) == 0,
+        "una puerta que permanece a un lado no se cuenta como pasada",
+    )
+
+    app_conteo = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=LocutorFalso(),
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    app_conteo._distancia_tramo = 6.0
+    app_conteo._zona_cierre_tramo = "Cuarto"
+    app_conteo.estimador_posicion.reiniciar(6.0)
+    instruccion = Instruccion(
+        Accion.CAMINAR, 10, distancia_m=6.0, puertas_en_tramo=1
+    )
+    puerta_central = PuertaVisto(
+        "puerta", (200, 0, 440, 460), 320.0, 460, 240, "centro", None
+    )
+    resultado_puerta = ResultadoVision(puertas=(puerta_central,))
+    app_conteo._actualizar_posicion_tramo(resultado_puerta, instruccion, 0)
+    posicion_tras_puerta = app_conteo.estimador_posicion.posicion_m
+    app_conteo._actualizar_posicion_tramo(resultado_puerta, instruccion, 0)
+    comprobar(
+        app_conteo._contador_puertas.pasadas == 1
+        and app_conteo.estimador_posicion.posicion_m == posicion_tras_puerta,
+        "el conteo de puerta corrige avance una vez sin acumular duplicados",
+    )
+    app_conteo._valorar_llegada_del_tramo(
+        resultado_puerta, dados=10, objetivo=10
+    )
+    comprobar(
+        app_conteo._tramos_completados == 0
+        and not any(
+            "Has llegado" in frase for frase in app_conteo.locutor.frases
+        ),
+        "ni una puerta centrada confirma el tramo o la llegada",
+    )
+
+    locutor = LocutorFalso()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    aplicacion._guiar_con_puerta(lateral)
+    aplicacion._guiar_con_puerta(lateral)
+    comprobar(
+        len(locutor.frases) == 1
+        and "izquierda" in locutor.frases[0],
+        "anuncia una sola vez la posición de puerta y guía el giro",
+    )
+    aplicacion._guiar_con_puerta(ResultadoVision())
+    aplicacion._guiar_con_puerta(ResultadoVision())
+    aplicacion._guiar_con_puerta(lateral)
+    comprobar(
+        len(locutor.frases) == 2,
+        "vuelve a guiar solo después de que la puerta desaparece",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -3068,6 +3240,7 @@ def main() -> int:
         test_distancia_visual_y_mediana()
         test_odometro_ultrasonico_estable()
         test_estimador_posicion_tramo()
+        test_deteccion_y_seguimiento_de_puertas()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1
