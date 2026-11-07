@@ -185,7 +185,9 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
 | Intervalo máximo entre picos (sin ritmo de marcha) | `intervalo_paso_max_s` | `1.5` s (piso; el límite crece con el ritmo propio, ver fila siguiente; en `0` se desactiva) |
 | Factor que afloja el tope según el ritmo propio | `intervalo_paso_factor_ritmo` | `2.5` (el límite es 2.5 × la mediana de sus últimos intervalos) |
-| Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` |
+| Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` (semilla: hasta que no se mide la primera, el plan usa los pasos del mapa) |
+| Peso de la última zancada medida (EMA) | `zancada_ema_alfa` | `0.30` |
+| Recorte mínimo/máximo de la zancada medida | `zancada_min_m` / `zancada_max_m` | `0.30` / `0.90` m por paso |
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
 | Inicio de la ventana de llegada del tramo (ahí la cámara empieza a poder cerrarlo) | `ventana_llegada_inicio` | `0.70` (70 % de los pasos esperados) |
@@ -224,24 +226,35 @@ hardcodeado: sale de `GIRO_SENAL_NORMAL` / `GIRO_SENAL_INVERSO` en
 
 ```python
 TRAMOS_DEMO = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=14, giros=("izquierda",)),
-    ("Cuarto", "Sala"):   TramoRuta(pasos=10, giros=("izquierda",)),
-    ("Sala", "Baño"):     TramoRuta(pasos=45, giros=("izquierda",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=11, giros=("izquierda",), distancia_m=6.1),
+    ("Cuarto", "Sala"):   TramoRuta(pasos=8,  giros=("izquierda",), distancia_m=4.4),
+    ("Sala", "Baño"):     TramoRuta(pasos=31, giros=("izquierda",), distancia_m=19.7),
 }
 ```
 
-Los pasos salen de dividir la distancia del tramo entre la zancada de
-la persona (0.46 m de referencia); los valores del mapa (14, 10 y 45)
-son los **calibrados en casa**:
+Cada tramo lleva **dos** medidas: `pasos` (el conteo de quien lo
+anduvo) y `distancia_m` (cinta métrica). Son las dos caras de la
+misma realidad y no hace falta que cuadren con una zancada fija:
 
-| Tramo | Distancia | 0.46 m/paso | En el mapa |
-|-------|-----------|-------------|------------|
-| Inicio → Cuarto | 6.1 m | 13.3 | 14 |
-| Cuarto → Sala | 10.5 - 6.1 = 4.4 m | 9.6 | 10 |
-| Sala → Baño | 30.2 - 10.5 = 19.7 m | 42.8 | 45 |
+| Tramo | Distancia | Pasos andados | Zancada implícita |
+|-------|-----------|---------------|-------------------|
+| Inicio → Cuarto | 6.1 m | 11 | 0.55 m |
+| Cuarto → Sala | 10.5 - 6.1 = 4.4 m | 8 | 0.55 m |
+| Sala → Baño | 30.2 - 10.5 = 19.7 m | 31 | 0.64 m |
 
 (las distancias se midieron desde Inicio; el tramo intermedio es la
 diferencia entre una medida y la siguiente).
+
+**Zancada adaptativa** (`guia/dominio/zancada.py`): mientras no haya
+ninguna medida, el plan usa `pasos` (el conteo del mapa). En cuanto la
+cámara cierra un tramo dentro de la ventana de llegada, se mide
+`distancia_m / pasos` y se guarda como media móvil exponencial
+(`zancada_ema_alfa`, recortada entre `zancada_min_m` y
+`zancada_max_m`); a partir de ahí el plan recalcula
+`round(distancia / zancada)`, así el número de pasos anunciado se
+acerca al paso real de la persona. Solo sirve el cierre **verificado
+con la cámara**: el cierre por pasos de más (130 % sin señal) no mide
+nada, porque ahí no se sabe dónde acabó el tramo de verdad.
 
 Cada tramo se pone **en un solo sentido**; el planificador calcula
 solo el camino de vuelta con los mismos pasos y los giros espejados
@@ -251,9 +264,11 @@ tambien `Baño → Sala`, y el planificador busca el camino mas corto
 aunque la ruta cruce varios tramos (`Inicio → Cuarto → Sala → Baño`,
 y de vuelta `Baño → Sala → Cuarto → Inicio`).
 
-Para ajustar el mapa a tu casa, mide la distancia de cada tramo,
-divídela entre `zancada_m` (0.46) y anota el giro inicial con el que
-se encara la señal de cada puerta.
+Para ajustar el mapa a tu casa, mide la distancia de cada tramo con
+cinta métrica (`distancia_m`) y anota los pasos que diste andándolo
+(`pasos`), más el giro inicial con el que se encara la señal de cada
+puerta. La zancada exacta la calcula el sistema sola, al cerrar el
+primer tramo con la cámara.
 
 ### Comandos de voz
 

@@ -346,6 +346,9 @@ No hay ecuación clásica, pero sí **umbral estadístico y lógica de conteo**:
   revés un pasillo recto.
 - **Cada giro del mapa = 90°** (`GRADOS_POR_GIRO`, línea 15, cuatro
   orientaciones cardinales).
+- **Pasos del tramo**: `tramo.pasos` (el conteo con el que se midió la
+  casa), salvo que se pase `zancada_m` y el tramo tenga `distancia_m`:
+  entonces `max(1, int(distancia/zancada + 0,5))` (ver §15).
 
 ---
 
@@ -390,6 +393,40 @@ siendo un caso aparte: solo la señal **interior del destino** la anuncia.
 
 ---
 
+## 15. Zancada adaptativa — `guia/dominio/zancada.py`
+
+La zancada (metros que avanza la persona con un paso) no es constante:
+cambia con el calzado, el ritmo y la pendiente, y de ella salen los
+pasos de cada tramo (`pasos = round(distancia / zancada)`).
+
+**Medida** — solo en un tramo cerrado **por la cámara** dentro de la
+ventana de llegada (§14): solo ahí se recorrió entera la distancia
+medida del mapa, así que `distancia/pasos` es de verdad la zancada.
+
+```
+medida_k  = distancia_m / pasos_acreditados_k
+medida_k ← clip(medida_k, zancada_min_m, zancada_max_m)   # 0,30 … 0,90
+zancada_k = α · medida_k + (1 − α) · zancada_{k−1}        # α = zancada_ema_alfa = 0,30
+```
+
+El cierre por pasos de más (130 % sin señal, §14) **no** mide: ahí no
+se sabe dónde acabó el tramo, y `distancia/pasos` no sería la zancada.
+
+**Uso** — `PlanificadorRutas.planificar(origen, destino, zancada_m)`:
+
+```
+sin zancada medida → pasos = tramo.pasos                       # semilla del mapa
+con zancada medida → pasos = max(1, int(distancia/zancada + 0,5))
+```
+
+`Aplicacion._zancada_para_plan()` pasa `None` mientras
+`zancada.aprendida` sea falso: el primer plan sigue anunciando los pasos
+del mapa (11 / 8 / 31) y el cambio llega gradual, porque `α = 0,30`
+deja que tres o cuatro tramos midan sin que un tramo raro descuadre el
+plan siguiente.
+
+---
+
 ## Resumen en tabla
 
 | Parte del sistema | Ecuación | Archivo |
@@ -408,4 +445,5 @@ siendo un caso aparte: solo la señal **interior del destino** la anuncia.
 | Confirmación de señal | racha ≥ 3, tolera 2 fallos, conf ≥ 0,60 | `vision/detector.py` |
 | Desvío en línea recta | `\|θ−θ₀\| ≥ 25°` durante 1 s → corregir; libera a 0,6·25° | `aplicacion.py` (`_vigilar_desvio`) |
 | Ventana de llegada del tramo | `0,70·N ≤ ventana ≤ 1,30·N`; cierra la cámara con la señal de cierre | `aplicacion.py` (`_valorar_llegada_del_tramo`) |
+| Zancada adaptativa | `z_k = α·(D/N) + (1−α)·z_{k−1}` con recorte 0,30…0,90; pasos `= round(D/z)` | `dominio/zancada.py` |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |

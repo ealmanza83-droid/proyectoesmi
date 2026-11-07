@@ -196,8 +196,23 @@ class Configuracion:
     # Marcha de la persona (medidas reales): de aqui salen los pasos de
     # cada tramo de la ruta (distancia / zancada, ver dominio/rutas.py)
     # y el ritmo que soporta el contador de pasos (intervalo_paso_s).
+    # Es la SEMILLA: hasta que la camara no cierra ningun tramo, el
+    # plan usa los pasos del mapa; a partir de ahi manda la zancada
+    # medida (ver zancada_ema_alfa).
     zancada_m: float = 0.46       # metros que avanza con un paso
     velocidad_m_s: float = 1.85   # velocidad de desplazamiento (m/s)
+    # Zancada ADAPTATIVA (ver dominio/zancada.py): en cada tramo que
+    # la camara cierra se mide "distancia del mapa / pasos contados"
+    # y se mezcla con la anterior como media movil exponencial:
+    #     zancada = alfa * medida + (1 - alfa) * zancada_anterior
+    # ``alfa`` es el peso de la ultima medida: 0.30 deja que tres o
+    # cuatro tramos midan la zancada de la persona sin que un tramo
+    # raro (contado al reves) descuadre el plan.
+    zancada_ema_alfa: float = 0.30
+    # Recorte de la medida: nadie camina a 0,10 m ni a 2,0 m por paso.
+    # Un tramo contado mal se acota aqui y no arrastra la EMA.
+    zancada_min_m: float = 0.30
+    zancada_max_m: float = 0.90
 
     # ------------------------------------------------------------------
     # Llegada por VENTANA (no por "N pasos exactos")

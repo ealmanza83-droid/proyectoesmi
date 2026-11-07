@@ -21,6 +21,11 @@ class TramoRuta:
 
     pasos: int = 0
     giros: tuple[str, ...] = ()
+    # Distancia medida con cinta metrica (0.0 = sin medir).  Es lo que
+    # permite recalcular los pasos con la zancada REAL de la persona
+    # (ver Zancada y PlanificadorRutas.planificar): ``pasos`` es el
+    # conteo de quien lo anduvo mientras nadie ha medido la zancada.
+    distancia_m: float = 0.0
 
 
 class Accion(Enum):
@@ -38,6 +43,9 @@ class Instruccion:
 
     accion: Accion
     cantidad: int = 0  # grados en los giros, pasos al caminar
+    # Solo al caminar: metros del tramo (lo que hay que repartir entre
+    # los pasos).  0.0 si el mapa no lo midio.
+    distancia_m: float = 0.0
 
     @property
     def es_giro(self) -> bool:
@@ -58,12 +66,17 @@ class Instruccion:
 # camino de vuelta las imagenes quedarian a su izquierda y el giro se
 # invierte solo (derecha), como calcula _ampliar de abajo.
 #
-# Pasos calculados con la zancada real de la persona (0.46 m por paso,
-# ver configuracion.py) a partir de las distancias medidas desde
-# Inicio:
-#   Inicio -> Cuarto   6.1 m               6.1 / 0.46 = 13 pasos
-#   Cuarto -> Sala     10.5 - 6.1 = 4.4 m   4.4 / 0.46 = 10 pasos
-#   Sala   -> Baño     30.2 - 10.5 = 19.7 m 19.7 / 0.46 = 43 pasos
+# Pasos y distancias de cada tramo (medidas reales, desde Inicio):
+#   Inicio -> Cuarto   6.1 m                11 pasos andados
+#   Cuarto -> Sala     10.5 - 6.1 = 4.4 m    8 pasos andados
+#   Sala   -> Baño     30.2 - 10.5 = 19.7 m 31 pasos andados
+#
+# Los dos numeros NO son coherentes entre si con una unica zancada
+# (dan 0,55 / 0,55 / 0,64 m por paso): mientras nadie ha medido la
+# zancada de la persona manda ``pasos`` (lo que se conto andando),
+# y en cuanto la camara cierra un tramo se mide la zancada real
+# (distancia / pasos) y el plan pasa a calcular ``round(distancia /
+# zancada)``.  Ver dominio/zancada.py.
 #
 # Basta con poner cada tramo en UN solo sentido (A -> B): el camino de
 # vuelta (B -> A) se calcula solo, con los mismos pasos y los giros en
@@ -84,9 +97,9 @@ class Instruccion:
 #}
 
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=11, giros=("izquierda",)),
-    ("Cuarto", "Sala"): TramoRuta(pasos=8, giros=("izquierda",)),
-    ("Sala", "Baño"): TramoRuta(pasos=31, giros=("izquierda",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=11, giros=("izquierda",), distancia_m=6.1),
+    ("Cuarto", "Sala"): TramoRuta(pasos=8, giros=("izquierda",), distancia_m=4.4),
+    ("Sala", "Baño"): TramoRuta(pasos=31, giros=("izquierda",), distancia_m=19.7),
 }
 
 #TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
@@ -157,6 +170,7 @@ class PlanificadorRutas:
                 TramoRuta(
                     pasos=tramo.pasos,
                     giros=tuple(_GIRO_ESPEJO[g] for g in reversed(tramo.giros)),
+                    distancia_m=tramo.distancia_m,
                 ),
             )
         return completos
@@ -209,12 +223,24 @@ class PlanificadorRutas:
 
         return GIRO_SENAL_INVERSO if inversos > directos else GIRO_SENAL_NORMAL
 
-    def planificar(self, origen: str | None, destino: str | None) -> list[Instruccion] | None:
+    def planificar(
+        self,
+        origen: str | None,
+        destino: str | None,
+        zancada_m: float | None = None,
+    ) -> list[Instruccion] | None:
         """Devuelve las instrucciones para ir de ``origen`` a ``destino``.
 
         * ``None``     -> no hay ruta conocida (o faltan los datos).
         * ``[]``       -> la persona ya esta en el destino.
         * ``[...]``    -> instrucciones a ejecutar en orden.
+
+        Los pasos de cada tramo salen del conteo del mapa
+        (``tramo.pasos``), que es el que se midio andando.  Si ademas
+        se pasa ``zancada_m`` (los metros por paso de la persona, ver
+        :class:`Zancada`) y el tramo tiene distancia medida, los pasos
+        se recalculan como ``round(distancia / zancada)``: asi el plan
+        se adapta al paso real en vez de fiarse de un conteo antiguo.
         """
         if origen is None or destino is None:
             return None
@@ -231,8 +257,15 @@ class PlanificadorRutas:
             tramo = self._tramos[tramo_enlace]
             for giro in tramo.giros:
                 instrucciones.append(Instruccion(_ACCIONES_POR_GIRO[giro], GRADOS_POR_GIRO))
-            if tramo.pasos > 0:
-                instrucciones.append(Instruccion(Accion.CAMINAR, tramo.pasos))
+            pasos = tramo.pasos
+            if zancada_m is not None and tramo.distancia_m > 0:
+                # int(x + 0.5) redondea a la mitad hacia arriba (round()
+                # de Python corta 12.5 a 12 y el tramo quedaria corto).
+                pasos = max(1, int(tramo.distancia_m / zancada_m + 0.5))
+            if pasos > 0:
+                instrucciones.append(
+                    Instruccion(Accion.CAMINAR, pasos, tramo.distancia_m)
+                )
 
         instrucciones.append(Instruccion(Accion.LLEGADA))
         return instrucciones

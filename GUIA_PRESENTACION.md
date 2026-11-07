@@ -338,7 +338,30 @@ Detalle fino: ver la señal de la zona de cierre **dos veces** (la
 puerta enfrente mientras se camina) no se lee como desviación — antes
 provocaba un *"Te saliste de la ruta"* falso.
 
-### 5.9 Re-localización: cada señal es un GPS a pie
+### 5.9 Zancada adaptativa: el paso real
+
+Cada tramo del mapa lleva **dos** medidas: los `pasos` que se contaron
+andándolo y la `distancia_m` con cinta métrica. Mientras no haya nada
+medido, el plan anuncia los pasos del mapa (es el conteo con el que se
+midio la casa).
+
+En cuanto la cámara cierra un tramo dentro de la ventana (5.8), ese
+tramo sirve para **medir la zancada real** de la persona:
+
+```
+medida  = distancia / pasos_acreditados
+zancada = 0,30 · medida + 0,70 · zancada anterior   (EMA, recortada a 0,30 … 0,90 m)
+pasos   = round(distancia / zancada)
+```
+
+A partir de ahí el plan recalcula los pasos con esa zancada, así el
+número anunciado se acerca al paso real. La media móvil es
+deliberada: un tramo raro (contado al revés) no descuadra el plan
+siguiente. Y **solo mide el cierre verificado**: si el tramo se cerró
+por pasos de más (130 % sin señal), no se sabe dónde acabó y no se
+mide nada.
+
+### 5.10 Re-localización: cada señal es un GPS a pie
 
 Durante la navegación, cada señal interior confirmada corrige la
 ubicación real:
@@ -353,7 +376,7 @@ Además la voz permite recuperarse: *"Raspi, devolverme"* (vuelve a la
 zona anterior de la ruta) y *"Raspi, otra ruta"* (recalcula al mismo
 destino).
 
-### 5.10 Seguridad
+### 5.11 Seguridad
 
 * **Caída**: el `DetectorCaida` exige **2 muestras consecutivas** con
   magnitud > 2.5 g y cambio brusco respecto a hace 0.3 s (mata glitches
@@ -436,6 +459,14 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     anuncia nada.
 26. **Giro sin desfase**: el corte se adelanta `grados_compensacion_giro`
     y *"Puedes parar"* sale primero en la frase.
+27. **Llegada por ventana**: al 70 % avisa *"Reduce el paso, ya casi
+    llegas"*; entre 70 % y 130 % **la cámara** cierra el tramo viendo
+    la señal de cierre; pasado el 130 % sin señal avisa y el flujo
+    sigue como siempre (sin anunciar llegadas falsas).
+28. **Zancada adaptativa**: el plan usa los pasos del mapa mientras no
+    haya medida; la EMA se actualiza solo con el cierre verificado por
+    la cámara (el de 130 % no mide nada) y el plan siguiente calcula
+    `distancia / zancada`.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
@@ -520,6 +551,9 @@ Todo umbral vive en `guia/configuracion.py`:
 | Distancia de alerta | `distancia_alerta_cm = 300` |
 | Adelanto del corte de giro | `grados_compensacion_giro = 8` |
 | Pasos del tramo de re-búsqueda | `pasos_objetivo = 5` |
+| Ventana de llegada del tramo | `ventana_llegada_inicio = 0.70` / `ventana_llegada_fin = 1.30` |
+| Zancada: peso de la última medida (EMA) | `zancada_ema_alfa = 0.30` |
+| Zancada: recorte de la medida | `zancada_min_m = 0.30` / `zancada_max_m = 0.90` |
 
 La casa (mapa) se define en `guia/dominio/rutas.py` (`TRAMOS_DEMO`):
 cada tramo solo se mide en un sentido; el inverso se calcula con los

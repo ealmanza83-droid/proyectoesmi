@@ -113,7 +113,9 @@ from guia.dominio.rutas import (  # noqa: E402
     Instruccion,
     PlanificadorRutas,
     TRAMOS_DEMO,
+    TramoRuta,
 )
+from guia.dominio.zancada import Zancada  # noqa: E402
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
@@ -2459,6 +2461,214 @@ def test_llegada_por_ventana() -> None:
     )
 
 
+def test_zancada_adaptativa() -> None:
+    """La zancada se mide en los tramos que cierra la camara.
+
+    Los pasos del plan salen de ``tramo.pasos`` mientras nadie haya
+    medido la zancada (es el conteo con el que se midio la casa).  En
+    cuanto la camara cierra UN tramo dentro de la ventana, la zancada
+    se mide (distancia del mapa / pasos contados) y a partir de ahi el
+    plan recalcula ``round(distancia / zancada)``: el numero de pasos
+    anunciado se acerca al real de la persona.  La medida se guarda
+    como EMA (un tramo raro no descuadra el plan) y solo sirve el
+    cierre VERIFICADO: el del 130 % sin senal no mide nada.
+    """
+    print("\n[28] Zancada adaptativa: medida en los tramos confirmados")
+    config = Configuracion()
+
+    # --- 28.1 El planificador usa la zancada solo si se la pasan ----
+    tramos = {
+        ("A", "B"): TramoRuta(pasos=10, giros=("izquierda",), distancia_m=5.0),
+    }
+    planificador = PlanificadorRutas(tramos)
+
+    sin = planificador.planificar("A", "B")
+    comprobar(
+        sin is not None
+        and sin[1].es_pasos
+        and sin[1].cantidad == 10
+        and sin[1].distancia_m == 5.0,
+        "sin zancada el plan usa los pasos del mapa (y arrastra la distancia)",
+    )
+
+    con = planificador.planificar("A", "B", zancada_m=0.5)
+    comprobar(
+        con is not None and con[1].cantidad == 10,
+        "con zancada calcula distancia / zancada (5.0 / 0.5 = 10)",
+    )
+
+    vuelta = planificador.planificar("B", "A", zancada_m=0.4)
+    comprobar(
+        vuelta is not None and vuelta[1].cantidad == 13,
+        "5.0 / 0.4 = 12.5 redondea a 13 pasos (hacia arriba)",
+    )
+    comprobar(
+        vuelta is not None and vuelta[1].distancia_m == 5.0,
+        "el tramo al reves conserva la distancia medida",
+    )
+    comprobar(
+        all(tramo.distancia_m > 0 for tramo in TRAMOS_DEMO.values()),
+        "los tramos del mapa llevan su distancia medida",
+    )
+
+    # --- 28.2 La EMA mezcla la ultima medida con lo acumulado ------
+    zancada = Zancada(
+        inicial=config.zancada_m,
+        alfa=config.zancada_ema_alfa,
+        minimo=config.zancada_min_m,
+        maximo=config.zancada_max_m,
+    )
+    comprobar(not zancada.aprendida, "sin ningun tramo medido la zancada no se ha usado")
+    comprobar(
+        zancada.medir(5.0, 10) is not None,
+        "un tramo de 5 m en 10 pasos si se puede medir",
+    )
+    esperado = (
+        config.zancada_ema_alfa * 0.5
+        + (1.0 - config.zancada_ema_alfa) * config.zancada_m
+    )
+    comprobar(
+        abs(zancada.metros - esperado) < 1e-9,
+        "la EMA mezcla la medida (0.50) con el valor anterior",
+    )
+    comprobar(zancada.aprendida, "una medida valida marca la zancada como aprendida")
+
+    zancada.medir(6.1, 100)  # 0.061 m/paso: imposible, se recorta
+    comprobar(
+        zancada.metros >= config.zancada_min_m,
+        "una medida baja se recorta al minimo",
+    )
+    zancada.medir(19.7, 1)  # 19.7 m de un paso: imposible, se recorta
+    comprobar(
+        zancada.metros <= config.zancada_max_m,
+        "una medida alta se recorta al maximo",
+    )
+    comprobar(
+        zancada.medir(5.0, 0) is None and zancada.medir(0.0, 5) is None,
+        "sin pasos o sin distancia no hay medida",
+    )
+
+    # --- 28.3 La aplicacion: el plan cambia tras un cierre real ----
+    movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    class PlanificadorEspia(PlanificadorRutas):
+        """Guarda con que zancada se pidio cada plan."""
+
+        def __init__(self, tramos=None):
+            super().__init__(tramos)
+            self.zancadas: list = []
+            self.ultimo_plan = None
+
+        def planificar(self, origen, destino, zancada_m=None):
+            self.zancadas.append(zancada_m)
+            self.ultimo_plan = super().planificar(origen, destino, zancada_m)
+            return self.ultimo_plan
+
+    planificador = PlanificadorEspia()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=planificador,
+        ventana=VentanaFalsa(),
+    )
+    aplicacion.ubicacion = "Inicio"
+    aplicacion.lado_puerta = LADO_INTERIOR
+
+    # Mientras no haya medida, el plan manda los pasos del mapa.
+    aplicacion._asignar_destino("Sala")
+    comprobar(
+        planificador.zancadas[-1] is None,
+        "sin zancada aprendida el plan no la usa",
+    )
+    camina = [i for i in planificador.ultimo_plan if i.es_pasos][0]
+    comprobar(
+        camina.cantidad == TRAMOS_DEMO[("Inicio", "Cuarto")].pasos,
+        "el plan usa los pasos del mapa (11) mientras no haya medida",
+    )
+
+    def empezar_tramo(distancia: float, pasos: int) -> None:
+        aplicacion.destino = "Sala"
+        aplicacion.lado_puerta = LADO_INTERIOR
+        aplicacion._iniciar_navegacion(
+            [Instruccion(Accion.CAMINAR, pasos, distancia), Instruccion(Accion.LLEGADA)]
+        )
+        detector.senal = None
+        mpu.gz = 0.0
+        paso(aplicacion, detector, mpu)  # toma la instruccion CAMINAR
+
+    def caminar_hasta(pasos: int) -> None:
+        for i in range(400):
+            mpu.az = 1.6 if i % 2 else 1.0
+            paso(aplicacion, detector, mpu)
+            if (
+                aplicacion._pasos_acreditados >= pasos
+                or aplicacion.estado is not Estado.NAVEGANDO
+            ):
+                return
+
+    # --- 28.4 El cierre por pasos de mas NO mide nada --------------
+    empezar_tramo(distancia=6.1, pasos=10)
+    caminar_hasta(14)  # 130 % sin senal: cierra igual, pero sin verificar
+    comprobar(
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "el tramo de mas se cierra por el flujo de siempre",
+    )
+    comprobar(
+        not aplicacion.zancada.aprendida,
+        "el cierre sin la senal no mide la zancada (no se sabe donde acabo)",
+    )
+
+    # --- 28.5 Con la camara la zancada si se mide ------------------
+    empezar_tramo(distancia=6.1, pasos=10)
+    caminar_hasta(8)  # 80 %: dentro de la ventana
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._tramos_completados == 1,
+        "la camara cierra el tramo dentro de la ventana",
+    )
+    comprobar(aplicacion.zancada.aprendida, "ese cierre mide la zancada")
+    esperado = (
+        config.zancada_ema_alfa * (6.1 / 8)
+        + (1.0 - config.zancada_ema_alfa) * config.zancada_m
+    )
+    comprobar(
+        abs(aplicacion.zancada.metros - esperado) < 1e-9,
+        "la medida del tramo entra en la EMA (6.1 m / 8 pasos)",
+    )
+
+    # --- 28.6 El plan siguiente usa la zancada medida --------------
+    detector.senal = None
+    aplicacion.ubicacion = "Cuarto"  # ahi dejo la senal de cierre
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion._asignar_destino("Baño")
+    comprobar(
+        isinstance(planificador.zancadas[-1], float),
+        "con zancada aprendida el plan si la usa",
+    )
+    ultimos = [i for i in planificador.ultimo_plan if i.es_pasos]
+    larga = ultimos[-1]
+    zancada_medida = planificador.zancadas[-1]
+    comprobar(
+        larga.cantidad == int(19.7 / zancada_medida + 0.5),
+        "el tramo largo pasa a calcular distancia / zancada",
+    )
+    comprobar(
+        larga.cantidad != TRAMOS_DEMO[("Sala", "Baño")].pasos,
+        "y ya no es el conteo viejo del mapa (31 pasos)",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2496,6 +2706,7 @@ def main() -> int:
         test_fragmentos_de_la_imagen()
         test_giro_compensado()
         test_llegada_por_ventana()
+        test_zancada_adaptativa()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

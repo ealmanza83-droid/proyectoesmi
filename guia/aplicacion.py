@@ -74,6 +74,7 @@ from .dominio.rutas import (
     Instruccion,
     PlanificadorRutas,
 )
+from .dominio.zancada import Zancada
 from .hardware.mpu6050 import MPU6050
 from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
 from .navegacion.caida import DetectorCaida
@@ -169,6 +170,15 @@ class Aplicacion:
         self.rumbo = Rumbo()
         self.giro = MedidorGiro(config, rumbo=self.rumbo)
         self.pasos = ContadorPasos(config)
+        # Zancada de la persona: se mide en cada tramo que cierra la
+        # camara y de ella salen los pasos del plan siguiente (ver
+        # dominio/zancada.py).  Arranca con la semilla del mapa.
+        self.zancada = Zancada(
+            inicial=config.zancada_m,
+            alfa=config.zancada_ema_alfa,
+            minimo=config.zancada_min_m,
+            maximo=config.zancada_max_m,
+        )
         self.caida = DetectorCaida(config)
         self.muestreador = MuestreadorMPU(
             mpu,
@@ -218,6 +228,10 @@ class Aplicacion:
         # y el aviso de "ya casi llegas", dado una sola vez por tramo.
         self._zona_cierre_tramo: str | None = None
         self._aviso_ventana_dado = False
+        # Distancia medida del tramo en curso (0.0 si el mapa no la
+        # tiene): al cerrarlo con la camara es con lo que se mide la
+        # zancada de la persona.
+        self._distancia_tramo = 0.0
         self._inicio_llegada = 0.0
 
         # Busqueda de senal
@@ -521,6 +535,16 @@ class Aplicacion:
     # ------------------------------------------------------------------
     # Destino y navegacion
     # ------------------------------------------------------------------
+    def _zancada_para_plan(self) -> float | None:
+        """Zancada que usa el planificador al calcular los pasos.
+
+        ``None`` mientras no haya ningun tramo cerrado por la camara:
+        entonces mandan los pasos del mapa (el conteo con el que se
+        midio la casa).  En cuanto se mide la primera, manda esa
+        zancada (EMA, ver :class:`Zancada`).
+        """
+        return self.zancada.metros if self.zancada.aprendida else None
+
     def _asignar_destino(self, destino: str) -> None:
         """Valida el destino pedido y arranca la ruta si existe.
 
@@ -549,7 +573,9 @@ class Aplicacion:
                 "pedir la ruta."
             )
         else:
-            plan = self._planificador.planificar(self.ubicacion, destino)
+            plan = self._planificador.planificar(
+                self.ubicacion, destino, self._zancada_para_plan()
+            )
             if plan is None:
                 self._volver_a_preguntar(
                     f"La ruta hacia {destino} todavía no está configurada."
@@ -800,7 +826,9 @@ class Aplicacion:
     def _replanificar_desde(self) -> None:
         """Rehace la ruta desde la ubicacion real (la persona se desvio)."""
         destino = self.destino
-        plan = self._planificador.planificar(self.ubicacion, destino)
+        plan = self._planificador.planificar(
+            self.ubicacion, destino, self._zancada_para_plan()
+        )
         self._instruccion_actual = None  # el tramo en curso se descarta
         if plan is None:
             self._hablar(
@@ -1387,6 +1415,7 @@ class Aplicacion:
                 f"con {dados} pasos acreditados"
             )
             self._hablar("Ya veo la señal. Puedes parar.")
+            self._aprender_zancada(dados)
             self._cerrar_tramo(dados)
             return
 
@@ -1402,6 +1431,23 @@ class Aplicacion:
             self._hablar("Pasos completados. Puedes parar.")
             self._hablar("Llevas más pasos de los esperados y no veo la señal.")
             self._cerrar_tramo(dados)
+
+    def _aprender_zancada(self, dados: int) -> None:
+        """Mide la zancada con el tramo que acaba de cerrar la camara.
+
+        Solo quien VERIFICA el tramo sirve para medir: la distancia
+        del mapa solo se recorre entera si la camara vio la senal de
+        cierre dentro de la ventana.  El cierre por pasos de mas (130
+        % sin senal) no mide nada, porque ahi no se sabe donde acabo
+        el tramo de verdad.
+        """
+        medida = self.zancada.medir(self._distancia_tramo, dados)
+        if medida is None:
+            return
+        print(
+            f"ZANCADA: {self._distancia_tramo:.1f} m en {dados} pasos "
+            f"-> {medida:.3f} m/paso (EMA)"
+        )
 
     def _cerrar_tramo(self, dados: int) -> None:
         """Da el tramo por terminado: toca encarar la zona alcanzada.
@@ -1439,6 +1485,13 @@ class Aplicacion:
             else None
         )
         self._aviso_ventana_dado = False
+        # Distancia medida del tramo que empieza: sirve para medir la
+        # zancada cuando la camara lo cierre.
+        self._distancia_tramo = (
+            self._instruccion_actual.distancia_m
+            if self._instruccion_actual is not None
+            else 0.0
+        )
 
     def _creditar_pasos(self) -> int:
         """Pasos que cuentan hacia el tramo: solo los dados rectos.
