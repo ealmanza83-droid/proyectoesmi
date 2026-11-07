@@ -663,9 +663,9 @@ Los pasos y una advertencia de obstáculo no confirman la llegada; tras un
 aviso se espera el intervalo configurado aunque la señal aparezca en el
 frame siguiente. Si la señal aún no aparece, la aproximación final
 continúa lentamente hasta `distancia_puerta_max_cm` (140 cm por defecto)
-y entonces vuelve a buscarla con la cámara. Los modelos incluidos deben contener
-explícitamente la clase `door`; de lo contrario, el detector lo advierte
-al arrancar.
+y entonces vuelve a buscarla con la cámara. El modelo de puertas puede ser independiente del modelo principal: se
+configura en `ruta_modelo_puertas` y debe producir la clase configurada
+(`door` por defecto). El principal sigue encargado de señales y obstáculos.
 
 ---
 

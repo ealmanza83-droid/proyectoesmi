@@ -278,6 +278,10 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Muestras ultrasónicas estables para aproximación | `muestras_ultrasonido_puerta` | `3` |
 | Retención de pitido ante una pérdida breve de eco | `retencion_eco_ultrasonido_s` | `0.35` s (solo para el pitido; nunca para confirmar llegada) |
 | Espera tras un aviso de obstáculo antes de confirmar llegada | `espera_llegada_tras_obstaculo_s` | `4` s |
+| Ruta del modelo auxiliar de puertas | `ruta_modelo_puertas` | `None` (desactivado) |
+| Nombre de clase de puerta en el modelo auxiliar | `clase_puerta_modelo` | `"door"` |
+| Confianza mínima del modelo auxiliar de puertas | `confianza_puerta` | `0.45` |
+| Frecuencia del modelo auxiliar de puertas | `intervalo_inferencia_puertas_frames` | cada `3` frames |
 | Muestras estables del odómetro ultrasónico | `muestras_ultrasonido_odometro` | `5` |
 | Salto máximo entre lecturas estables | `salto_maximo_ultrasonido_cm` | `60` cm; cambios mayores se aceptan al repetirse consistentemente |
 | Incertidumbre inicial de posición | `sigma_inicial_posicion_m` | `0.5` m |
@@ -287,11 +291,14 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
-El modelo configurado debe contener las clases de señales orientadoras y
-`door` para detectar ambos. El modelo COCO incluido no tiene `door`, y el
-`best_ncnn_model` incluido solo contiene `maceta`, `mesa` y `silla`; al
-arrancar, el sistema avisa si faltan las clases de puerta. Entrena/exporta
-un modelo con las clases necesarias y apunta `ruta_modelo` a ese modelo.
+El modelo principal (`ruta_modelo`) sigue detectando señales y obstáculos.
+Para añadir puertas sin reemplazarlo, exporta/descarga el detector comunitario
+en un formato local compatible con Ultralytics (recomendado: NCNN en la Pi),
+colócalo en el proyecto y configura `ruta_modelo_puertas` en
+`guia/configuracion.py`. La clase que debe producir ese modelo es `door`;
+si el nombre es distinto, configura `clase_puerta_modelo`. El modelo auxiliar
+se ejecuta cada tres frames por defecto para limitar la carga de CPU. La
+puerta ayuda a orientar y medir avance, pero nunca confirma una llegada.
 
 ### Señales orientadoras (`guia/dominio/catalogo.py`)
 

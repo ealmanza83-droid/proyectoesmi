@@ -3479,8 +3479,10 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
 
         def __init__(self) -> None:
             self.cajas = []
+            self.llamadas = 0
 
         def __call__(self, frame, **kwargs):
+            self.llamadas += 1
             return [types.SimpleNamespace(boxes=self.cajas)]
 
     config = dataclasses.replace(
@@ -3489,8 +3491,11 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
         distancia_mediana_frames=3,
         detecciones_senal_requeridas=1,
         frames_puerta_perdida=1,
+        ruta_modelo_puertas=Path("modelo_puertas_ncnn"),
     )
     modelo = ModeloFalsoVision()
+    modelo_puertas = ModeloFalsoVision()
+    modelo_puertas.names = {0: "door"}
     detector = DetectorVisual.__new__(DetectorVisual)
     detector._config = config
     detector._senales = SENALES_ORIENTADORAS
@@ -3502,6 +3507,8 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
     )
     detector._confirmador = ConfirmadorSenal(config)
     detector._modelo = modelo
+    detector._modelo_puertas = None
+    detector._frames_analizados = 0
 
     resultado = None
     for alto in (400, 200, 100):
@@ -3534,6 +3541,22 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
     comprobar(
         lateral.puertas[0].posicion == "izquierda" and lateral.senal is None,
         "clasifica una puerta lateral en el mismo fragmento de imagen",
+    )
+
+    detector._modelo_puertas = modelo_puertas
+    detector._frames_analizados = 0
+    modelo.cajas = [CajaFalsaVision(1, 0.7, (250, 20, 300, 40))]
+    modelo_puertas.cajas = [CajaFalsaVision(0, 0.85, (180, 0, 460, 450))]
+    con_modelo_aparte = detector.analizar(object())
+    llamadas_puertas = modelo_puertas.llamadas
+    modelo_puertas.cajas = []
+    entre_inferencias = detector.analizar(object())
+    comprobar(
+        len(con_modelo_aparte.puertas) == 1
+        and con_modelo_aparte.puertas[0].centro_x_px == 320
+        and not entre_inferencias.puertas
+        and modelo_puertas.llamadas == llamadas_puertas,
+        "combina un modelo de puertas separado sin alterar el modelo principal",
     )
 
     contador = ContadorPuertas(config)
