@@ -250,16 +250,33 @@ def paso(
 ) -> None:
     """Una iteracion del bucle principal (sin ventana de OpenCV).
 
-    Como en el sistema real, primero se muestrea el MPU6050 y luego se
-    atiende voz, caidas, obstaculos y el estado actual.
+    Como en el sistema real, primero se muestrea el MPU6050, luego se
+    atiende voz y caidas, despues decide el estado actual y AL FINAL
+    los obstaculos (que esperan a que la guia hable, ver ``anunciar``).
     """
     frame = aplicacion.camara.capturar()
     resultado = detector.analizar(frame)
     aplicacion.muestreador.muestrear(mpu.leer(), dt)
     aplicacion._procesar_voz()
     aplicacion._vigilar_caida()
-    aplicacion._anunciar_obstaculos(resultado, aplicacion.sensor.distancia_cm)
     aplicacion._manejadores[aplicacion.estado](aplicacion, resultado)
+    aplicacion._anunciar_obstaculos(resultado, aplicacion.sensor.distancia_cm)
+
+
+def anunciar(
+    aplicacion: Aplicacion, detector: DetectorFalso, distancia: float | None
+) -> None:
+    """Una vuelta de ``_anunciar_obstaculos`` con la voz ya callada.
+
+    La navegacion manda: hasta ``silencio_para_obstaculos_s`` despues
+    de la ultima frase no se anuncia un obstaculo.  Aqui se adelanta
+    ese silencio para poder probar el anuncio en si; la prioridad de
+    la voz se prueba aparte, en [24].
+    """
+    aplicacion._ultima_voz_en = (
+        time.monotonic() - aplicacion.config.silencio_para_obstaculos_s - 1.0
+    )
+    aplicacion._anunciar_obstaculos(detector.analizar(None), distancia)
 
 
 def comprobar(condicion: bool, mensaje: str) -> None:
@@ -1256,7 +1273,13 @@ def test_encarada_por_sentido() -> None:
 def test_obstaculos_en_medio() -> None:
     """Los objetos se anuncian nombrados y con la posicion en la que estan."""
     print("\n[14] Obstaculos: en medio del camino y a los lados")
-    config = Configuracion()
+    # Los anuncios de obstaculos viven SOLO en la navegacion; los
+    # lados se prueban aqui con la voz de lados encendida y el
+    # filtro de fragmento central apagado (por defecto quedan mudos
+    # y solo cuenta el central, ver [24] y [25]).
+    config = dataclasses.replace(
+        Configuracion(), anunciar_lados=True, mirar_solo_centro_en_marcha=False
+    )
 
     def donde(caja: tuple[int, int, int, int]) -> str:
         return posicion_en_frame(
@@ -1295,14 +1318,13 @@ def test_obstaculos_en_medio() -> None:
         planificador=PlanificadorRutas(),
         ventana=VentanaFalsa(),
     )
+    aplicacion.estado = Estado.NAVEGANDO
 
     detector.obstaculos = (
         ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
         ObstaculoVisto("maceta", "izquierda"),
     )
-    aplicacion._anunciar_obstaculos(
-        detector.analizar(None), aplicacion.sensor.distancia_cm
-    )
+    anunciar(aplicacion, detector, aplicacion.sensor.distancia_cm)
     comprobar(
         any(
             "en medio del camino" in frase and "silla" in frase
@@ -1334,9 +1356,7 @@ def test_obstaculos_en_medio() -> None:
         ObstaculoVisto("silla", "izquierda"),
         ObstaculoVisto("mesa", "derecha"),
     )
-    aplicacion._anunciar_obstaculos(
-        detector.analizar(None), aplicacion.sensor.distancia_cm
-    )
+    anunciar(aplicacion, detector, aplicacion.sensor.distancia_cm)
     comprobar(
         len(locutor.frases) == 1,
         "los de los dos lados van en una sola frase",
@@ -1356,9 +1376,7 @@ def test_obstaculos_en_medio() -> None:
         ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
         ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
     )
-    aplicacion._anunciar_obstaculos(
-        detector.analizar(None), aplicacion.sensor.distancia_cm
-    )
+    anunciar(aplicacion, detector, aplicacion.sensor.distancia_cm)
     comprobar(
         any(
             "en medio del camino" in frase and "silla y mesa" in frase
@@ -1393,8 +1411,10 @@ def test_obstaculos_sincronizados() -> None:
         planificador=PlanificadorRutas(),
         ventana=VentanaFalsa(),
     )
+    # Los anuncios de obstaculos viven SOLO en la navegacion.
+    aplicacion.estado = Estado.NAVEGANDO
     detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
-    aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    anunciar(aplicacion, detector, 350.0)
     comprobar(
         any(
             "en medio del camino hay un obstáculo: silla" in frase
@@ -1410,7 +1430,7 @@ def test_obstaculos_sincronizados() -> None:
     locutor.frases.clear()
     aplicacion._cerca_antes = False
     aplicacion._ultimo_anuncio_obstaculo = 0.0
-    aplicacion._anunciar_obstaculos(detector.analizar(None), 120.0)
+    anunciar(aplicacion, detector, 120.0)
     comprobar(
         any("silla, a unos 1.2 metros" in frase for frase in locutor.frases),
         "cerca: nombre y distancia en la misma frase",
@@ -1426,23 +1446,23 @@ def test_obstaculos_sincronizados() -> None:
     detector.obstaculos = ()
     aplicacion._cerca_antes = False
     aplicacion._ultimo_anuncio_obstaculo = 0.0
-    aplicacion._anunciar_obstaculos(detector.analizar(None), 80.0)
+    anunciar(aplicacion, detector, 80.0)
     comprobar(
         any("Hay algo enfrente" in frase for frase in locutor.frases),
         "sin objeto a la vista explica lo que significan los pitidos",
     )
     locutor.frases.clear()
-    aplicacion._anunciar_obstaculos(detector.analizar(None), 75.0)
+    anunciar(aplicacion, detector, 75.0)
     comprobar(
         len(locutor.frases) == 0,
         "siguiendo en rango no repite la explicacion cada vuelta",
     )
 
     # 16.4 Se aleja del obstaculo: se rearmar para el proximo acercamiento.
-    aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    anunciar(aplicacion, detector, 350.0)
     aplicacion._ultima_advertencia.clear()  # olvida el enfriamiento de 16.3
     locutor.frases.clear()
-    aplicacion._anunciar_obstaculos(detector.analizar(None), 60.0)
+    anunciar(aplicacion, detector, 60.0)
     comprobar(
         any("Hay algo enfrente" in frase for frase in locutor.frases),
         "al volver a entrar en rango vuelve a explicar los pitidos",
@@ -1903,71 +1923,73 @@ def test_obstaculos_un_aviso_por_encuentro() -> None:
         planificador=PlanificadorRutas(),
         ventana=VentanaFalsa(),
     )
+    # Los anuncios de obstaculos viven SOLO en la navegacion.
+    aplicacion.estado = Estado.NAVEGANDO
 
-    # El reloj de la aplicacion se toma prestado para pasar el
-    # enfriamiento sin esperar en la prueba.
-    reloj = RelojFalso()
-    modulo = importlib.import_module("guia.aplicacion")
-    reloj_real = modulo.time
-    modulo.time = reloj
-    try:
-        # 22.1 Sigue a la vista muchas veces el enfriamiento: NO se
-        # repite (eso era lo que tapaba las indicaciones).
-        detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
-        for _ in range(3):
-            aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
-            reloj.avanzar(config.enfriamiento_objeto_s + 1.0)
-        comprobar(
-            sum("en medio del camino" in frase for frase in locutor.frases) == 1,
-            "con el objeto siempre a la vista anuncia una sola vez",
+    # El reloj real no llega a cumplir los enfriamientos de la
+    # prueba: para simular "el frame estuvo limpio el tiempo
+    # suficiente" se patea el contador de limpieza, y para probar el
+    # anuncio en si el helper ``anunciar`` adelanta el silencio de la
+    # voz (la prioridad de la guia se prueba en [24]).
+    def frame_limpio() -> None:
+        aplicacion._medio_libre_desde = (
+            time.monotonic() - config.enfriamiento_objeto_s - 1.0
         )
 
-        # 22.2 Se fue el tiempo suficiente y volvio: ahi si se
-        # vuelve a anunciar.
-        detector.obstaculos = ()
-        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
-        reloj.avanzar(config.enfriamiento_objeto_s + 1.0)
-        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
-        locutor.frases.clear()
-        detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
-        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
-        comprobar(
-            any("en medio del camino" in frase for frase in locutor.frases),
-            "cuando desaparece y vuelve se anuncia de nuevo",
-        )
+    # 22.1 Sigue a la vista varias veces: NO se repite (eso era lo
+    # que tapaba las indicaciones).
+    detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
+    for _ in range(3):
+        anunciar(aplicacion, detector, 350.0)
+    comprobar(
+        sum("en medio del camino" in frase for frase in locutor.frases) == 1,
+        "con el objeto siempre a la vista anuncia una sola vez",
+    )
 
-        # 22.3 Aparece un objeto NUEVO al lado del ya nombrado: se
-        # anuncia enseguida, sin esperar a que se vaya el otro.
-        detector.obstaculos = (
-            ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
-            ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
-        )
-        locutor.frases.clear()
-        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
-        comprobar(
-            any("mesa" in frase for frase in locutor.frases),
-            "un obstaculo nuevo se anuncia sin esperar el enfriamiento",
-        )
-        comprobar(
-            len(locutor.frases) == 1,
-            "el nuevo entra en la misma frase, sin repetir la anterior",
-        )
+    # 22.2 Se fue el tiempo suficiente y volvio: ahi si se vuelve a
+    # anunciar.
+    detector.obstaculos = ()
+    anunciar(aplicacion, detector, 350.0)   # empieza a contar limpio
+    frame_limpio()                          # ...y ya paso el enfriamiento
+    anunciar(aplicacion, detector, 350.0)   # re-armado
+    locutor.frases.clear()
+    detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
+    anunciar(aplicacion, detector, 350.0)
+    comprobar(
+        any("en medio del camino" in frase for frase in locutor.frases),
+        "cuando desaparece y vuelve se anuncia de nuevo",
+    )
 
-        # 22.4 Un frame limpio CORTO (un parpadeo de la camara) no
-        # re-arma: hay que estar sin verlo el enfriamiento entero.
-        detector.obstaculos = ()
-        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
-        detector.obstaculos = (
-            ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
-            ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
-        )
-        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
-        comprobar(
-            len(locutor.frases) == 1,
-            "un parpadeo de la camara no repite el anuncio",
-        )
-    finally:
-        modulo.time = reloj_real
+    # 22.3 Aparece un objeto NUEVO al lado del ya nombrado: se
+    # anuncia enseguida, sin esperar a que se vaya el otro.
+    detector.obstaculos = (
+        ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+        ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
+    )
+    locutor.frases.clear()
+    anunciar(aplicacion, detector, 350.0)
+    comprobar(
+        any("mesa" in frase for frase in locutor.frases),
+        "un obstaculo nuevo se anuncia sin esperar el enfriamiento",
+    )
+    comprobar(
+        len(locutor.frases) == 1,
+        "el nuevo entra en la misma frase, sin repetir la anterior",
+    )
+
+    # 22.4 Un frame limpio CORTO (un parpadeo de la camara) no
+    # re-arma: hay que estar sin verlo el enfriamiento entero.
+    detector.obstaculos = ()
+    anunciar(aplicacion, detector, 350.0)
+    detector.obstaculos = (
+        ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+        ObstaculoVisto("mesa", EN_MEDIO_DEL_CAMINO),
+    )
+    anunciar(aplicacion, detector, 350.0)
+    comprobar(
+        len(locutor.frases) == 1,
+        "un parpadeo de la camara no repite el anuncio",
+    )
 
 
 def test_pasos_sin_ritmo_se_descartan() -> None:
@@ -2042,6 +2064,179 @@ def test_pasos_sin_ritmo_se_descartan() -> None:
     )
 
 
+def test_obstaculos_esperan_su_turno() -> None:
+    """La voz de la guia manda: el obstaculo espera su silencio.
+
+    El asistente tiene UN solo canal de voz: si los avisos de objetos
+    hablaban antes que las instrucciones, la ruta se atrasaba y hasta
+    parecia cortada.  Ademas solo se anuncia lo que esta en la
+    DIRECCION que se recorre: "persona" y los lados no frenan el paso.
+    """
+    print("\n[24] Obstaculos: esperan su turno (prioridad de la voz)")
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    config = Configuracion()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(distancia_cm=350.0),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+    # Los anuncios de obstaculos viven SOLO en la navegacion.
+    aplicacion.estado = Estado.NAVEGANDO
+
+    # Objeto a la vista en varios fragmentos del frame.
+    detector.obstaculos = (
+        ObstaculoVisto("persona", EN_MEDIO_DEL_CAMINO),
+        ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+        ObstaculoVisto("maceta", "izquierda"),
+    )
+
+    # 24.1 La guia acabo de hablar (dijo los pasos): el aviso espera
+    # su turno, aunque el objeto este a la vista en varios frames.
+    aplicacion._ultima_voz_en = time.monotonic()
+    for _ in range(3):
+        aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    comprobar(
+        len(locutor.frases) == 0,
+        "con la voz recien usada el obstaculo no interrumpe",
+    )
+
+    # 24.2 Pasado el silencio: UNA sola frase y solo con lo que esta
+    # en la direccion que se recorre (sin "persona", sin lados).
+    aplicacion._ultima_voz_en = (
+        time.monotonic() - config.silencio_para_obstaculos_s - 1.0
+    )
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    comprobar(
+        len(locutor.frases) == 1,
+        "pasado el silencio anuncia una sola vez",
+    )
+    frase = locutor.frases[0]
+    comprobar(
+        "silla" in frase and "en medio del camino" in frase,
+        "nombra lo que esta en medio del camino",
+    )
+    comprobar(
+        "persona" not in frase,
+        "persona no se anuncia: no bloquea el paso",
+    )
+    comprobar(
+        "maceta" not in frase and "izquierda" not in frase,
+        "los lados no se anuncian: estan fuera de la direccion que se recorre",
+    )
+
+    # 24.3 Sigue a la vista: no se repite (un aviso por encuentro).
+    aplicacion._ultima_voz_en = (
+        time.monotonic() - config.silencio_para_obstaculos_s - 1.0
+    )
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    comprobar(
+        len(locutor.frases) == 1,
+        "mientras siga a la vista no repite el aviso",
+    )
+
+    # 24.4 Solo "persona" en el centro: no se dice nada ni con la
+    # voz callada.
+    locutor.frases.clear()
+    aplicacion._medio_anunciado = ()
+    detector.obstaculos = (ObstaculoVisto("persona", EN_MEDIO_DEL_CAMINO),)
+    aplicacion._ultima_voz_en = (
+        time.monotonic() - config.silencio_para_obstaculos_s - 1.0
+    )
+    aplicacion._anunciar_obstaculos(detector.analizar(None), 350.0)
+    comprobar(
+        len(locutor.frases) == 0,
+        "solo 'persona' no anuncia nada",
+    )
+
+
+def test_fragmentos_de_la_imagen() -> None:
+    """Los obstaculos solo existen en la navegacion y en el centro.
+
+    Dando pasos solo se tienen en cuenta los objetos del fragmento
+    central (los de los lados generaban confusion); girando para
+    buscar la senal (o encarando) la camara NO anuncia obstaculo
+    alguno: la persona gira sobre su propio eje.  La senal
+    orientadora no se recorta: se sigue leyendo con los 3
+    fragmentos.
+    """
+    print("\n[25] Obstaculos: solo en navegacion y en el centro")
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    # Con la voz de lados encendida se ve CLARO el efecto del
+    # filtro: si el fragmento lateral contara en marcha, hablaria.
+    config = dataclasses.replace(Configuracion(), anunciar_lados=True)
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(distancia_cm=350.0),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    comprobar(
+        abs(config.obstaculo_centro_min - 1.0 / 3.0) < 1e-9
+        and abs(config.obstaculo_centro_max - 2.0 / 3.0) < 1e-9,
+        "el fragmento central es exactamente un tercio del ancho",
+    )
+
+    # 25.1 Dando pasos (NAVEGANDO): el del fragmento central se
+    # anuncia; los de los lados no se tienen en cuenta.
+    aplicacion.estado = Estado.NAVEGANDO
+    detector.obstaculos = (
+        ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+        ObstaculoVisto("maceta", "izquierda"),
+    )
+    anunciar(aplicacion, detector, 350.0)
+    comprobar(
+        any("silla" in frase for frase in locutor.frases),
+        "dando pasos el fragmento central si se anuncia",
+    )
+    comprobar(
+        not any("maceta" in frase for frase in locutor.frases),
+        "dando pasos el fragmento izquierdo no se tiene en cuenta",
+    )
+
+    locutor.frases.clear()
+    detector.obstaculos = (ObstaculoVisto("maceta", "derecha"),)
+    anunciar(aplicacion, detector, 350.0)
+    comprobar(
+        len(locutor.frases) == 0,
+        "dando pasos un objeto solo a la derecha no dice nada",
+    )
+
+    # 25.2 Buscando la senal o girando para encararla: la camara NO
+    # anuncia obstaculo alguno (la persona gira sobre su propio eje,
+    # no camina).  La senal si se sigue leyendo con los 3 fragmentos:
+    # eso nunca se recorta.
+    for estado in (Estado.BUSCAR_SENAL, Estado.GIRO_INICIAL, Estado.ENCARAR_SENAL):
+        aplicacion.estado = estado
+        locutor.frases.clear()
+        detector.obstaculos = (
+            ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),
+            ObstaculoVisto("maceta", "izquierda"),
+        )
+        anunciar(aplicacion, detector, 350.0)
+        comprobar(
+            len(locutor.frases) == 0,
+            f"en {estado.name} no se anuncian obstaculos (no esta caminando)",
+        )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2075,6 +2270,8 @@ def main() -> int:
         test_desvio_requiere_confirmacion()
         test_obstaculos_un_aviso_por_encuentro()
         test_pasos_sin_ritmo_se_descartan()
+        test_obstaculos_esperan_su_turno()
+        test_fragmentos_de_la_imagen()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

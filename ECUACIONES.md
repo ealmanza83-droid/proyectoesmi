@@ -214,11 +214,20 @@ del umbral bajo — así una aceleración sostenida no genera "pasos fantasma".
 Añade un **tiempo refractario** de 0,18 s (`intervalo_paso_s`), por debajo del
 mínimo fisiológico entre pasos.
 
-**Tope de cadencia**: un cruce con más de `intervalo_paso_max_s` = 1 s desde el
-anterior se **descarta** (`Δt > τ_máx ⇒ no cuenta`). No hay ritmo de marcha
-detrás (la persona se paró y movió el pie), y esos pasos de más adelantaban el
-fin del tramo. El cruce descartado **reinicia** el ritmo (`t_último ← t_ahora`),
-así que tras una pausa se pierde como mucho **un** paso, no la tanda entera; el
+**Tope de cadencia**: un cruce con más del límite desde el anterior se
+**descarta** (`Δt > τ_máx ⇒ no cuenta`). El límite es un **piso** que
+crece con el ritmo propio de la persona:
+
+```
+τ_máx = max(intervalo_paso_max_s ; intervalo_paso_factor_ritmo · mediana)
+       = max(1,5 s ; 2,5 · mediana de sus últimos ≤5 intervalos contados)
+```
+
+Así un paso lento (cada 1,2 s) no se le descarta ("algunos pasos no me los
+cuenta"), mientras que una parada real (a escuchar, a esquivar) dura más que
+eso y sigue descartándose. Esos pasos de más adelantaban el fin del tramo.
+El cruce descartado **reinicia** el ritmo (`t_último ← t_ahora`), así que
+tras una pausa se pierde como mucho **un** paso, no la tanda entera; el
 primer paso de un tramo nuevo (`reiniciar`) siempre cuenta.
 
 *Por qué media local y no línea base antigua:* la media se actualiza **en todo
@@ -302,6 +311,21 @@ No hay ecuación clásica, pero sí **umbral estadístico y lógica de conteo**:
   limpio durante `enfriamiento_objeto_s` = 4 s (`t_ahora − t_limpio ≥ 4 s`), de
   modo que un parpadeo de la cámara no lo repite y un objeto nuevo sí se
   anuncia enseguida.
+- **Tres fragmentos de la imagen**: el frame se divide en 3 partes iguales
+  (izquierda, centro, derecha); el fragmento central va de `1/3` a `2/3`
+  del ancho (`obstaculo_centro_min/max`) y la clasificación usa el **centro
+  de la caja** del objeto: `x_c = (x₁+x₂)/2 / ancho` → izquierda si
+  `x_c < 1/3`, derecha si `x_c > 2/3`, centro en el resto. Dando pasos
+  (`NAVEGANDO`, `CINCO_PASOS`) solo se considera ese fragmento
+  (`mirar_solo_centro_en_marcha` = True); fuera de esos estados la
+  cámara no anuncia **obstáculo alguno** (la persona gira sobre su
+  propio eje para buscar la señal). La señal orientadora no se
+  recorta: se lee con los 3 fragmentos en todo momento.
+- **Prioridad de la voz**: los obstáculos solo hablan si la guía lleva
+  `silencio_para_obstaculos_s` = 4 s sin hablar
+  (`t_ahora − t_última_voz ≥ 4 s ⇒ puede anunciar`); si no, el aviso espera
+  la siguiente vuelta del bucle. Así una instrucción (giro, pasos, llegada)
+  jamás se atrasa ni se corta por un objeto.
 
 ---
 

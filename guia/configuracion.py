@@ -29,13 +29,25 @@ class Configuracion:
     perdidas_senal_toleradas: int = 2
     enfriamiento_objeto_s: float = 4.0
     tiempo_busqueda_s: float = 60.0
-    # Franja central del frame que se considera "en medio del camino".
-    # La camara mira hacia adelante: un obstaculo cuyo centro cae
-    # entre estos limites (fraccion del ancho del frame) puede
-    # cruzarse en la ruta y se anuncia con mas enfasis; los de los
-    # lados se nombra con su lado.
-    obstaculo_centro_min: float = 0.30
-    obstaculo_centro_max: float = 0.70
+    # La imagen se divide en TRES fragmentos iguales (izquierda,
+    # centro, derecha).  Estos dos limites marcan donde empieza y
+    # termina el fragmento central (fraccion del ancho del frame); con
+    # los valores por defecto es exactamente un tercio: de 1/3 a 2/3.
+    # Un obstaculo cuyo centro cae ahi se considera EN MEDIO del
+    # camino: la camara mira hacia adelante, asi que ese fragmento es
+    # por donde pasa la persona.
+    obstaculo_centro_min: float = 1.0 / 3.0
+    obstaculo_centro_max: float = 2.0 / 3.0
+    # Durante la NAVEGACION (dando pasos) solo se tienen en cuenta
+    # los objetos del fragmento central: los de los otros dos
+    # fragmentos se descartan por completo, porque avisar de lo que
+    # esta a un lado solo genera confusion (no estan en la direccion
+    # que se recorre).  Fuera de la navegacion (giro inicial, busqueda
+    # y encarada de la senal, media vuelta...) la camara NO anuncia
+    # obstaculo alguno: la persona gira sobre su propio eje.  La
+    # senal orientadora NUNCA se recorta: se sigue leyendo con los 3
+    # fragmentos en todo momento.
+    mirar_solo_centro_en_marcha: bool = True
     # Franja mas estrecha para guiarse con la senal de la ruta: solo
     # si la imagen esta casi al centro se dice "camina hacia ella".
     # Una senal a un lado es una puerta que se pasa de largo, no un
@@ -43,6 +55,26 @@ class Configuracion:
     guia_senal_centro_min: float = 0.40
     guia_senal_centro_max: float = 0.60
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
+
+    # ------------------------------------------------------------------
+    # Voz: que manda y que espera
+    # ------------------------------------------------------------------
+    # La voz es UN solo canal y la navegacion tiene prioridad: los
+    # obstaculos solo se anuncian cuando la guia lleva este tiempo sin
+    # hablar.  Asi una indicacion (giro, pasos, llegada, encarada) jamas
+    # se atrasa ni se pisa por un aviso de objeto: el aviso espera su
+    # turno.  El silencio se cuenta desde que TERMINA la frase anterior.
+    silencio_para_obstaculos_s: float = 4.0
+    # Que si se anuncia por voz: solo objetos estaticos que pueden
+    # estar EN MEDIO del camino.  "persona" queda fuera: se mueve, no
+    # bloquea el paso y anunciarla daba un aviso cada vez que alguien
+    # pasaba (los pitidos del ultrasonido ya avisan de algo enfrente).
+    obstaculos_en_voz: tuple[str, ...] = ("silla", "mesa", "maceta")
+    # Los lados del camino se RECONOCEN pero no se anuncian: no estan
+    # en la direccion que se recorre y llenaban la voz de avisos que
+    # hacian detenerse sin motivo.  En ``True`` vuelven a decirse (una
+    # sola frase, sin "Alto", sin frenar el paso).
+    anunciar_lados: bool = False
 
     # ------------------------------------------------------------------
     # Audio (Piper + Vosk)
@@ -121,7 +153,20 @@ class Configuracion:
     # como mucho UN paso y no todos los que siguen.  En 0 se
     # desactiva.  Se comprueba contra la linea PASO de la consola
     # (imprime "PASO DESCARTADO" cuando corta uno).
-    intervalo_paso_max_s: float = 1.0
+    #
+    # Ojo: es un PISO, no un tope fijo.  Si la persona camina lenta
+    # (un paso cada segundo), con un tope duro se le descartaban pasos
+    # reales ("algunos pasos no me los cuenta"), asi que ademas el
+    # limite crece con el ritmo de cada persona: ver
+    # ``intervalo_paso_factor_ritmo``.
+    intervalo_paso_max_s: float = 1.5
+    # El limite real es max(intervalo_paso_max_s, factor x ritmo), y
+    # el ritmo es la mediana de los ultimos pasos contados.  Con un
+    # paso cada 0,4 s da 1,5 s (el piso manda); con un paso cada 1,2 s
+    # da 3,0 s, suficiente para no cortarle los pasos a quien camina
+    # despacio.  Las pausas de verdad (a escuchar, a esquivar) siguen
+    # descartandose: duran mas que eso.
+    intervalo_paso_factor_ritmo: float = 2.5
 
     # ------------------------------------------------------------------
     # Deteccion de caidas (acelerometro)

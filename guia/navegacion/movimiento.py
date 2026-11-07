@@ -320,7 +320,10 @@ class ContadorPasos:
     Ademas, un cruce con mas de ``intervalo_paso_max_s`` desde el
     anterior se descarta: no hay ritmo de marcha detras (la persona
     estaba parada y movio el pie), y esos pasos de mas hacian que el
-    tramo terminara antes de tiempo.
+    tramo terminara antes de tiempo.  Ese tope es un PISO: el limite
+    real tambien crece con el ritmo de la persona (2,5 veces la
+    mediana de sus ultimos pasos), para no descartarle pasos reales
+    a quien camina despacio.
     """
 
     def __init__(self, config: Configuracion):
@@ -332,6 +335,9 @@ class ContadorPasos:
         # El primer paso despues de ``reiniciar`` siempre cuenta: no
         # hay cadencia previa con la que compararlo todavia.
         self._arranque = True
+        # Intervalos de los ultimos pasos CONTADOS (los descartados no
+        # entran): de ahi sale el ritmo con el que se afloja el tope.
+        self._ritmo: deque[float] = deque(maxlen=5)
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
         """Cuenta un paso si la muestra trae una oscilacion de paso."""
@@ -364,8 +370,8 @@ class ContadorPasos:
             and ahora - self._ultimo_paso >= self._config.intervalo_paso_s
         ):
             intervalo = ahora - self._ultimo_paso
-            maximo = self._config.intervalo_paso_max_s
-            if not self._arranque and maximo > 0.0 and intervalo > maximo:
+            limite = self._limite_de_ritmo()
+            if not self._arranque and limite > 0.0 and intervalo > limite:
                 # Paso suelto: sin ritmo de marcha detras (la persona
                 # estaba parada y movio el pie, o el sensor registro
                 # un movimiento suelto).  No suma al tramo, pero el
@@ -375,10 +381,14 @@ class ContadorPasos:
                 self._en_pico = True
                 print(
                     f"PASO DESCARTADO: {intervalo:.1f} s sin marcha "
-                    f"(maximo {maximo:.1f} s)"
+                    f"(maximo {limite:.1f} s)"
                 )
             else:
                 ritmo = "" if self._arranque else f", cada {intervalo:.2f} s"
+                if not self._arranque:
+                    # Va al ritmo de la persona: con el se decide
+                    # cuanto aguanta el tope del proximo paso.
+                    self._ritmo.append(intervalo)
                 self._pasos += 1
                 self._arranque = False
                 self._ultimo_paso = ahora
@@ -392,6 +402,29 @@ class ContadorPasos:
                     f"PASO: {self._pasos} (pico {oscilacion:+.2f} g, "
                     f"umbral {delta:.2f} g{ritmo})"
                 )
+
+    def _limite_de_ritmo(self) -> float:
+        """Intervalo maximo permitido: el piso o el ritmo de la persona.
+
+        ``intervalo_paso_max_s`` es un PISO: descarta lo que no tiene
+        marcha detras (paradas para escuchar, movimientos sueltos).
+        Pero si la persona camina lenta, su propio ritmo ya se acerca
+        al piso y con un tope duro se le descartarian pasos reales
+        ("algunos pasos no me los cuenta").  Por eso el limite tambien
+        crece con la mediana de sus ultimos pasos: 2,5 veces el ritmo.
+        Con un paso cada 0,4 s manda el piso (1,5 s); con un paso
+        cada 1,2 s el limite sube a 3,0 s.  Las pausas de verdad
+        duran mas que eso y siguen descartandose.
+        """
+        piso = self._config.intervalo_paso_max_s
+        if piso <= 0.0:
+            # En 0 el descarte queda desactivado (como siempre).
+            return 0.0
+        if len(self._ritmo) < 3:
+            return piso
+        ordenados = sorted(self._ritmo)
+        mediana = ordenados[len(ordenados) // 2]
+        return max(piso, self._config.intervalo_paso_factor_ritmo * mediana)
 
     @property
     def pasos(self) -> int:

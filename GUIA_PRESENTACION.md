@@ -135,28 +135,29 @@ código se convierte en banderas globales imposibles de explicar.
 3. Destino: *"Raspi, ve a la sala"* → *"Entendido. Vamos a Sala."*
 4. **Encarada**: como las rutas se midieron mirando la señal, se pide
    ponerla enfrente: *"Para saber hacia dónde miras, primero encárate
-   con la señal de esta zona. Gira despacio a la derecha hasta que
+   con la señal de esta zona. Gira despacio a la izquierda hasta que
    te diga que la tienes frente a ti."* → al verla: `RUMBO ANCLADO`
    (rumbo = 0°) → *"La señal está frente a ti."* El lado en el que
-   gira sale del sentido de la ruta: a la derecha en el sentido
-   normal y a la izquierda al volver, porque las imágenes cambian de
-   lado. **Excepción (encarada automática)**: si la señal de la zona
+   gira sale del sentido de la ruta (`GIRO_SENAL_NORMAL` /
+   `GIRO_SENAL_INVERSO`): a la **izquierda** en el sentido normal y a
+   la derecha al volver, porque las imágenes cambian de lado.
+   **Excepción (encarada automática)**: si la señal de la zona
    se acaba de confirmar en el paso 2 y no has girado más de 20°
    desde entonces, no se pide nada: la ruta arranca directo
    (`ENCARADA AUTOMATICA` en consola). En casa no podría encontrarse
    otra señal en el mismo sitio, así que pedirla otra vez dejaría a
    la persona girando sin salida.
 5. Navegación: *"Gira a la izquierda 90 grados"* → *"Vas por la
-   mitad"* → *"Giro completo. Puedes parar."* → *"Camina 13 pasos"*
+   mitad"* → *"Giro completo. Puedes parar."* → *"Camina 14 pasos"*
    (hasta el Cuarto) → cuenta solo pasos rectos → *"Pasos
    completados. Puedes parar."* → **encarada intermedia**: como al
    terminar el tramo la persona queda de espaldas a la señal de esa
-   zona, pide *"Gira despacio a la derecha hasta encontrar la señal
+   zona, pide *"Gira despacio a la izquierda hasta encontrar la señal
    de esta zona"* → al verla (*"La señal está frente a ti."*) sigue
    el segundo tramo: otro giro a la izquierda y *"Camina 10 pasos"*
    hasta la Sala.
 6. Llegada verificada: *"Para confirmar la llegada, gira despacio a
-   la derecha hasta encontrar la señal de Sala"* → al verla:
+   la izquierda hasta encontrar la señal de Sala"* → al verla:
    *"Has llegado a Sala. ¿A dónde quieres ir?"*
 
 ---
@@ -256,15 +257,28 @@ detecciones por el catálogo (`dominio/catalogo.py`):
 
 * **Señales orientadoras** (una foto por zona por cara de puerta).
 * **Obstáculos** que se anuncian en voz alta con su nombre: silla,
-  mesa (*"dining table"*, el nombre real en COCO), maceta. Si el
-  objeto cae en la franja central del frame (0.30–0.70 del ancho) se
-  considera **en medio del camino** y se avisa en una sola frase
-  (*"Alto, en medio del camino hay un obstáculo: silla"*, o
-  *"…hay obstáculos: silla y mesa"* si hay varias); los de los lados
-  se nombra **sin "Alto"** y agrupados en una sola frase
-  (*"Hay un obstáculo a tu izquierda: maceta"*): reconocen lo que hay
-  a un lado, pero **no frenan** el paso. La posición la calcula
-  `posicion_en_frame` en `vision/detector.py`.
+  mesa (*"dining table"*, el nombre real en COCO), maceta. La imagen
+  se divide en **3 fragmentos iguales** (izquierda, centro, derecha);
+  el central va de 1/3 a 2/3 del ancho (`obstaculo_centro_min/max`).
+
+  * **Solo en la navegación**: los obstáculos se anuncian mientras
+    la persona camina la ruta; girando para buscar la señal (o
+    encarando) la cámara no anuncia nada. La señal, en cambio, se
+    lee siempre con los 3 fragmentos: no se recorta.
+  * **Dando pasos** solo se tiene en cuenta el fragmento central:
+    los de los otros dos se descartan por completo
+    (`mirar_solo_centro_en_marcha`), porque avisar de lo que está a
+    un lado solo genera confusión. Lo central se avisa en una sola
+    frase (*"Alto, en medio del camino hay un obstáculo: silla"*, o
+    *"…hay obstáculos: silla y mesa"* si hay varias).
+  * Solo se anuncia lo que está en la dirección que se recorre:
+    `obstaculos_en_voz` deja fuera a *"persona"* y `anunciar_lados`
+    (`False`) deja mudos los lados.
+
+  **La voz de la guía manda** (`silencio_para_obstaculos_s` = 4 s):
+  un aviso de objeto espera a que la instrucción quede dicha; nunca
+  al revés. La posición la calcula `posicion_en_frame` en
+  `vision/detector.py`.
 
   **Un anuncio por encuentro**: mientras el objeto siga a la vista no
   se repite (antes se repetía cada `enfriamiento_objeto_s` y la frase,
@@ -396,6 +410,13 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     nuevo sí se anuncia enseguida.
 23. **El paso sin ritmo de marcha se descarta** (no adelanta el fin
     del tramo) y el primer paso de un tramo nuevo siempre cuenta.
+24. **Prioridad de la voz**: con la guía recién hablada el obstáculo
+    espera su turno; pasado el silencio anuncia una sola vez y solo
+    lo que está en la dirección que se recorre (sin *"persona"* ni
+    lados).
+25. **Obstáculos solo en la navegación**: dando pasos solo cuenta el
+    fragmento central; girando para buscar la señal la cámara no
+    anuncia nada.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).

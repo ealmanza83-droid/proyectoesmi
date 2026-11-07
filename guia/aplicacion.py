@@ -102,6 +102,15 @@ AVISO_GIRO_S = 1.0
 # despues de oirlo; el reloj cuenta desde que termina de sonar.
 RECORDATORIO_CORRECCION_S = 15.0
 
+# Estados en que los obstaculos estan ACTIVOS: la persona camina la
+# ruta (dando pasos).  En los demas estados (giro inicial, busqueda
+# y encarada de la senal, media vuelta...) gira sobre su propio eje
+# o esta quieta, y la camara NO anuncia obstaculo alguno: solo la
+# senal orientadora se sigue leyendo, con los 3 fragmentos de la
+# imagen.  En marcha ademas solo cuenta el fragmento central (ver
+# ``mirar_solo_centro_en_marcha``).
+_ESTADOS_DE_MARCHA = frozenset({Estado.NAVEGANDO, Estado.CINCO_PASOS})
+
 
 def _unir_nombres(nombres: list[str]) -> str:
     """Une una lista de nombres en espanol: 'silla', 'silla y mesa'."""
@@ -213,6 +222,11 @@ class Aplicacion:
         # Voz
         self._fin_ventana_comando = 0.0
         self._en_pausa = False
+        # Momento en que la voz libero el canal (0.0 = nunca hablo).
+        # Los obstaculos esperan ``silencio_para_obstaculos_s`` desde
+        # ahi: la navegacion manda y un aviso jamas atrasa una
+        # indicacion de la ruta.
+        self._ultima_voz_en = 0.0
 
         self._etiqueta = ""
         self._ultimo_aviso_giro = 0.0
@@ -308,7 +322,6 @@ class Aplicacion:
 
             self._procesar_voz()
             self._vigilar_caida()
-            self._anunciar_obstaculos(resultado, distancia_cm)
 
             # Si la alarma de caida se apago sola (se acabo el tiempo),
             # el micro no puede quedarse para siempre escuchando solo
@@ -322,9 +335,20 @@ class Aplicacion:
             # Un solo punto de decision: el manejador del estado actual.
             self._manejadores[self.estado](self, resultado)
 
+            # Los obstaculos van DESPUES de la navegacion y ademas
+            # esperan el silencio de la voz: asi una instruccion (giro,
+            # pasos, llegada) nunca se atrasa ni se corta por un aviso
+            # de objeto.
+            self._anunciar_obstaculos(resultado, distancia_cm)
+
             tecla = 0
             if self._ventana.activa:
-                dibujar_detecciones(frame, resultado)
+                dibujar_detecciones(
+                    frame,
+                    resultado,
+                    centro_min=self.config.obstaculo_centro_min,
+                    centro_max=self.config.obstaculo_centro_max,
+                )
                 tecla = self._ventana.mostrar(
                     frame,
                     distancia_cm=distancia_cm,
@@ -344,11 +368,17 @@ class Aplicacion:
 
         Si no se indica ``cambiar_a``, se vuelve al modo que estaba
         activo (util para no romper la escucha de destino).
+
+        Al terminar queda registrado el momento en que quedo libre el
+        canal de voz: hasta ``silencio_para_obstaculos_s`` despues no
+        se anuncia un obstaculo (ver ``_anunciar_obstaculos``), que
+        asi nunca se come una instruccion de la ruta.
         """
         modo_anterior = self.microfono.modo
         self.microfono.cambiar_modo(ModoMicrofono.APAGADO)
         self.locutor.hablar(texto)
         self.microfono.cambiar_modo(cambiar_a if cambiar_a is not None else modo_anterior)
+        self._ultima_voz_en = time.monotonic()
 
     def _advertecer(self, clave: str, texto: str) -> None:
         """Habla un aviso solo una vez por encuentro (con enfriamiento).
@@ -864,44 +894,85 @@ class Aplicacion:
     def _anunciar_obstaculos(
         self, resultado: ResultadoVision, distancia_cm: float | None
     ) -> None:
-        """Nombra los obstaculos UNA vez por encuentro, sin frenar de mas.
+        """Nombra lo que esta EN MEDIO del camino, esperando su turno.
 
-        Los dos sensores dicen lo mismo de forma distinta (la camara
-        nombra el objeto, el ultrasonido pitia) y antes hablaban por
-        separado, lo que confundia a la persona: no sabia si los
-        pitidos eran lo mismo que acaba de oir.  Ademas el anuncio se
-        repetia cada ``enfriamiento_objeto_s`` mientras el objeto
-        siguiera a la vista, y como ``_hablar`` bloquea el bucle hasta
-        que termina de sonar, la voz repetida tapaba las indicaciones
-        de la ruta.  Ahora:
+        La voz es UN solo canal y la navegacion manda: ``_hablar``
+        bloquea el bucle hasta que termina de sonar, asi que si los
+        obstaculos hablaban antes que las instrucciones (iban en la
+        misma vuelta del bucle) las indicaciones de la ruta se
+        atrasaban o se "cortaban" a mitad de frase.  Por eso AQUI se
+        mira primero si la voz estuvo callada
+        ``silencio_para_obstaculos_s``: si no, no se dice nada y el
+        aviso se intenta en la proxima vuelta (el objeto sigue a la
+        vista, asi que no se pierde).
 
-        * lo que esta EN MEDIO del camino se anuncia al APARECER (o
-          al entrar el eco en rango), en UNA sola frase con el nombre
-          Y la distancia si la hay: los pitidos quedan explicados;
-        * los de los lados se agrupan en una frase SIN "Alto": estan
-          a un lado del camino, informan pero no cortan el paso;
-        * mientras siga a la vista NO se repite: el aviso se re-arma
-          solo cuando el frame queda limpio ``enfriamiento_objeto_s``
-          (asi un parpadeo de YOLO no lo repite y un objeto nuevo si
-          se anuncia);
+        Ademas solo se anuncia lo que puede estar en la DIRECCION que
+        se recorre:
+
+        * SOLO EN LA NAVEGACION: mientras la persona camina la ruta.
+          Girando sobre su propio eje (giro inicial, encarada, media
+          vuelta) o esperando la senal, la camara no anuncia nada:
+          estaria nombrando cosas que el giro deja a un lado y solo
+          llena la voz.  Los pitidos del ultrasonido no dependen de
+          aqui: siguen sonando por seguridad;
+        * en medio del camino Y en ``obstaculos_en_voz``: los lados no
+          se dicen (``anunciar_lados``) y "persona" tampoco, porque no
+          bloquean el paso y llenaban la voz de avisos que hacian
+          detenerse sin motivo;
+        * una sola vez por encuentro: mientras siga a la vista no se
+          repite y el aviso se re-arma cuando el frame queda limpio
+          ``enfriamiento_objeto_s`` (un parpadeo de YOLO no lo repite,
+          un objeto nuevo si se anuncia);
+        * si el eco entra en rango con el objeto ya nombrado, la frase
+          sale con la distancia (los pitidos quedan explicados);
         * solo ultrasonido (algo que la camara no nombra): al entrar
           en rango se explica una sola vez que los pitidos significan
           "hay algo enfrente".
         """
+        # SOLO EN LA NAVEGACION: fuera de ella (girando sobre su
+        # propio eje para buscar la senal, encarando, esperando) no
+        # se anuncia obstaculo alguno.  Los pitidos del ultrasonido
+        # siguen por su cuenta: esto apaga a la CAMARA.
+        if self.estado not in _ESTADOS_DE_MARCHA:
+            return
+
         ahora = time.monotonic()
 
-        # Lo que se ve AHORA en el frame, sin repetir nombres y con
-        # los lados agrupados (una sola frase por anuncio).
+        # PRIORIDAD DE LA NAVEGACION: la guia acabo de hablar (giro,
+        # pasos, llegada, encarada, caida...) -> el obstaculo espera
+        # su turno.  Nunca al reves: un aviso jamas atrasa una
+        # indicacion de la ruta.
+        if (
+            ahora - self._ultima_voz_en
+            < self.config.silencio_para_obstaculos_s
+        ):
+            return
+
+        # MARCHA: solo cuenta el fragmento central de la imagen (aqui
+        # solo se llega con la navegacion activa).  Los objetos de
+        # los otros dos fragmentos se descartan por completo: no
+        # estan en la direccion que se recorre y sus avisos solo
+        # generan confusion.
+        solo_centro = self.config.mirar_solo_centro_en_marcha
+
+        # Lo que se ve AHORA en el frame, separando lo que SI se puede
+        # anunciar (en medio y en la lista de voz) de lo que solo se
+        # reconoce (los lados).
         en_medio: list[str] = []
         lados: dict[str, list[str]] = {}
         for obstaculo in resultado.obstaculos:
+            if solo_centro and obstaculo.lado != EN_MEDIO_DEL_CAMINO:
+                # Fragmento izquierdo o derecho: fuera, sin contar
+                # para nada (ni anuncio ni re-armado de lados).
+                continue
+            nombre = obstaculo.nombre
             if obstaculo.lado == EN_MEDIO_DEL_CAMINO:
-                if obstaculo.nombre not in en_medio:
-                    en_medio.append(obstaculo.nombre)
+                if nombre in self.config.obstaculos_en_voz and nombre not in en_medio:
+                    en_medio.append(nombre)
             else:
                 nombres = lados.setdefault(obstaculo.lado, [])
-                if obstaculo.nombre not in nombres:
-                    nombres.append(obstaculo.nombre)
+                if nombre not in nombres:
+                    nombres.append(nombre)
         lados_vistos = tuple(
             f"{lado}:{nombre}"
             for lado, nombres in lados.items()
@@ -954,9 +1025,13 @@ class Aplicacion:
             self._medio_anunciado = tuple(en_medio)
             self._ultimo_anuncio_obstaculo = ahora
 
-        # Los lados: informan sin "Alto" (no se cruzan en la ruta) y
-        # en una sola frase, para no cortar la navegacion.
-        if any(clave not in self._lado_anunciado for clave in lados_vistos):
+        # Los lados: por defecto NO se anuncian (no estan en la
+        # direccion que se recorre y los avisos de al lado hacian
+        # detenerse sin motivo).  Con ``anunciar_lados`` se dicen en
+        # una sola frase SIN "Alto": informan pero no frenan el paso.
+        if self.config.anunciar_lados and any(
+            clave not in self._lado_anunciado for clave in lados_vistos
+        ):
             partes = [
                 f"a tu {lado}: {_unir_nombres(nombres)}"
                 for lado, nombres in lados.items()

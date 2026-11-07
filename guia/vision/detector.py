@@ -75,11 +75,14 @@ def posicion_en_frame(
     minimo: float,
     maximo: float,
 ) -> str:
-    """Dice si el obstaculo esta en medio del camino o a un lado.
+    """Dice en cual de los 3 fragmentos de la imagen esta el objeto.
 
-    La camara mira hacia adelante, asi que la posicion horizontal del
-    objeto en el frame indica si se cruza en la ruta (centro) o si
-    queda a la izquierda o a la derecha de la persona.
+    La imagen se divide en tres fragmentos iguales (izquierda, centro,
+    derecha): ``minimo`` y ``maximo`` marcan los limites del central
+    (por defecto 1/3 y 2/3 del ancho).  La camara mira hacia adelante,
+    asi que la posicion horizontal del objeto indica si se cruza en la
+    ruta (centro) o si queda a la izquierda o a la derecha de la
+    persona.
     """
     x1, _, x2, _ = caja
     centro = (x1 + x2) / 2 / ancho
@@ -230,8 +233,29 @@ class DetectorVisual:
         self._confirmador.reiniciar()
 
 
-def dibujar_detecciones(frame, resultado: ResultadoVision) -> None:
-    """Dibuja cajas y etiquetas sobre el frame (solo para vision humana)."""
+def dibujar_detecciones(
+    frame, resultado: ResultadoVision, *, centro_min: float, centro_max: float
+) -> None:
+    """Dibuja cajas, etiquetas y los limites del fragmento central.
+
+    Las dos lineas verticales marcan donde empieza y termina el
+    fragmento central (el tercio por donde se camina): sirven para
+    calibrar ``obstaculo_centro_min/max`` en casa, viendo en la
+    ventana si un objeto cae dentro o fuera de ese fragmento.
+    """
+    alto, ancho = frame.shape[:2]
+    for fraccion in (centro_min, centro_max):
+        x = int(round(fraccion * ancho))
+        cv2.line(frame, (x, 0), (x, alto), (90, 90, 90), 1)
+    cv2.putText(
+        frame,
+        "centro",
+        (int(round(centro_min * ancho)) + 6, 18),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (90, 90, 90),
+        1,
+    )
     for deteccion in resultado.detecciones:
         x1, y1, x2, y2 = deteccion.caja
         color = (0, 255, 0) if deteccion.es_senal else (0, 165, 255)

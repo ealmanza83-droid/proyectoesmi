@@ -166,6 +166,12 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Detecciones seguidas para confirmar una señal | `detecciones_senal_requeridas` | `3` |
 | Frames perdidos tolerados antes de reiniciar la confirmación | `perdidas_senal_toleradas` | `2` |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
+| Límite izquierdo del fragmento central (1/3 del ancho) | `obstaculo_centro_min` | `1/3` (0.333) |
+| Límite derecho del fragmento central (2/3 del ancho) | `obstaculo_centro_max` | `2/3` (0.667) |
+| Obstáculos solo en la navegación y en el fragmento central | `mirar_solo_centro_en_marcha` | `True` (fuera de la navegación la cámara no anuncia nada) |
+| Silencio de la voz antes de que hable un obstáculo | `silencio_para_obstaculos_s` | `4.0` s |
+| Objetos que sí se anuncian por voz | `obstaculos_en_voz` | `("silla", "mesa", "maceta")` |
+| Anunciar también los fragmentos laterales | `anunciar_lados` | `False` |
 | Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
 | Velocidad mínima para contar giro (zona muerta y gate de rumbo) | `velocidad_minima_giro_dps` | `5.0` |
 | Suavizado del giro sostenido que alimenta el rumbo | `tau_sostenida_giro_s` | `0.5` s |
@@ -176,7 +182,8 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Delta de aceleración que vale como paso | `delta_paso_g` | `0.09` g sobre la media local |
 | Suavizado previo de la señal de pasos | `tau_media_paso_s` | `0.7` s |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
-| Intervalo máximo entre picos (sin ritmo de marcha) | `intervalo_paso_max_s` | `1.0` s (el cruce se descarta; en `0` se desactiva) |
+| Intervalo máximo entre picos (sin ritmo de marcha) | `intervalo_paso_max_s` | `1.5` s (piso; el límite crece con el ritmo propio, ver fila siguiente; en `0` se desactiva) |
+| Factor que afloja el tope según el ritmo propio | `intervalo_paso_factor_ritmo` | `2.5` (el límite es 2.5 × la mediana de sus últimos intervalos) |
 | Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` |
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
@@ -204,27 +211,30 @@ OBJETOS_PERMITIDOS   = {"chair": "silla", "table": "mesa",
 ### Mapa de la casa (`guia/dominio/rutas.py`)
 
 La casa es una cadena: **Inicio → Cuarto → Sala → Baño**. Las señales
-van impresas del lado **derecho** del pasillo, así que caminando hacia
-adelante la persona gira a la **izquierda** para encarar la imagen de
-cada puerta; al volver, las imágenes quedan a su izquierda y el
-sistema invierte el giro solo (derecha).
+van impresas del lado **izquierdo** del pasillo, así que caminando
+hacia adelante la persona gira a la **izquierda** para encarar la
+imagen de cada puerta; al volver, las imágenes quedan a su derecha y
+el sistema invierte el giro solo (derecha). Ese lado no está
+hardcodeado: sale de `GIRO_SENAL_NORMAL` / `GIRO_SENAL_INVERSO` en
+`guia/dominio/rutas.py`.
 
 ```python
 TRAMOS_DEMO = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=13, giros=("izquierda",)),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=14, giros=("izquierda",)),
     ("Cuarto", "Sala"):   TramoRuta(pasos=10, giros=("izquierda",)),
-    ("Sala", "Baño"):     TramoRuta(pasos=43, giros=("izquierda",)),
+    ("Sala", "Baño"):     TramoRuta(pasos=45, giros=("izquierda",)),
 }
 ```
 
 Los pasos salen de dividir la distancia del tramo entre la zancada de
-la persona (0.46 m):
+la persona (0.46 m de referencia); los valores del mapa (14, 10 y 45)
+son los **calibrados en casa**:
 
-| Tramo | Distancia | Pasos |
-|-------|-----------|-------|
-| Inicio → Cuarto | 6.1 m | 6.1 / 0.46 = 13 |
-| Cuarto → Sala | 10.5 - 6.1 = 4.4 m | 4.4 / 0.46 = 10 |
-| Sala → Baño | 30.2 - 10.5 = 19.7 m | 19.7 / 0.46 = 43 |
+| Tramo | Distancia | 0.46 m/paso | En el mapa |
+|-------|-----------|-------------|------------|
+| Inicio → Cuarto | 6.1 m | 13.3 | 14 |
+| Cuarto → Sala | 10.5 - 6.1 = 4.4 m | 9.6 | 10 |
+| Sala → Baño | 30.2 - 10.5 = 19.7 m | 42.8 | 45 |
 
 (las distancias se midieron desde Inicio; el tramo intermedio es la
 diferencia entre una medida y la siguiente).
@@ -306,7 +316,7 @@ Por eso, al pedir un destino el sistema **no arranca a ciegas**:
   ancla el rumbo y se dan las instrucciones, que así se miden desde
   una orientación conocida. **El lado en el que hay que girar sale
   del sentido de la ruta** (`PlanificadorRutas.lado_encarada`): a la
-  derecha en el sentido normal y a la izquierda al volver, porque las
+  izquierda en el sentido normal y a la derecha al volver, porque las
   imágenes cambian de lado (ver *Mapa de la casa*). Lo mismo vale
   para confirmar la llegada a la puerta del destino.
 * **Encarada intermedia**: al terminar los pasos de un tramo (quedan
@@ -357,22 +367,58 @@ más menos 25°), los pasos vuelven a contar y el tramo sigue.
   (lineal entre 1.2 s de intervalo a 2 m y 0.1 s rozando el objeto).
   Si hay una alarma de caída en marcha, los pitidos se callan.
 * **Obstáculos vistos con la cámara**: además de los pitidos, la
-  cámara **nombra** lo que tiene delante. Lo que cae **en medio del
-  camino** se anuncia primero y en una sola frase — *"Alto, en medio
-  del camino hay un obstáculo: silla"* / *"…hay obstáculos: silla y
-  mesa"* — y lo de los lados se nombra **sin "Alto"** y agrupado en
-  una sola frase: *"Hay un obstáculo a tu izquierda: maceta"*.
-  Reconocen lo que hay a un lado **pero no frenan** el paso. Qué es
-  "en medio" lo decide la franja central del frame
-  (`obstaculo_centro_min/max`, de 0.30 a 0.70 del ancho).
+  cámara **nombra** lo que tiene delante. La imagen se divide en **3
+  fragmentos iguales** (izquierda, centro, derecha); el central va de
+  1/3 a 2/3 del ancho (`obstaculo_centro_min/max`) y es por donde se
+  camina.
+
+  * **Los obstáculos solo existen en la navegación**: mientras la
+    persona camina la ruta. Girando sobre su propio eje para buscar
+    la señal (o encarando, esperando) la cámara **no anuncia nada**;
+    los pitidos del ultrasonido siguen por seguridad. Eso sí, la
+    **señal orientadora nunca se recorta**: se lee siempre con los 3
+    fragmentos de la imagen.
+  * **Dando pasos** solo se tiene en cuenta el fragmento central:
+    los objetos de los otros dos fragmentos se descartan por
+    completo (`mirar_solo_centro_en_marcha`), porque avisar de lo que
+    está a un lado solo genera confusión. Lo central se anuncia en
+    una sola frase — *"Alto, en medio del camino hay un obstáculo:
+    silla"* / *"…hay obstáculos: silla y mesa"*.
+  * Solo se anuncia lo que puede estar en la **dirección que se
+    recorre**: `obstaculos_en_voz` deja fuera a *"persona"* (se
+    mueve, no bloquea el paso) y `anunciar_lados` = `False` deja
+    mudos los lados (póntelo en `True` si quieres que se digan, en
+    una sola frase y sin *"Alto"*).
+
+  **La voz de la guía tiene prioridad** (`silencio_para_obstaculos_s`
+  = 4 s): una instrucción (giro, pasos, llegada) jamás se atrasa ni
+  se corta por un aviso de objeto; el aviso espera a que la voz
+  quede callada ese tiempo.
 
   El anuncio es **una sola vez por encuentro**: mientras el objeto
-  siga a la vista no se repite (antes se repetía cada 4 s y la frase,
-  que bloquea el bucle, tapaba las indicaciones de la ruta). Se
-  re-arma cuando el frame queda limpio `enfriamiento_objeto_s` (4 s),
-  de modo que un parpadeo de la cámara no lo dispara otra vez y un
-  objeto **nuevo** sí se anuncia enseguida. El detector ya no aplica
-  enfriamiento: reporta lo que se ve en el frame.
+  siga a la vista no se repite. Se re-arma cuando el frame queda
+  limpio `enfriamiento_objeto_s` (4 s), de modo que un parpadeo de
+  la cámara no lo dispara otra vez y un objeto **nuevo** sí se
+  anuncia enseguida. El detector ya no aplica enfriamiento: reporta
+  lo que se ve en el frame.
+
+### Si algo falla con la posición en la imagen
+
+Todo lo que depende de *dónde* cae un objeto o una señal en el frame
+se ajusta en `guia/configuracion.py`, sin tocar código:
+
+| Síntoma | Qué tocar |
+|---------|-----------|
+| Anuncia *"en medio del camino"* algo que claramente está a un lado | Estrecha `obstaculo_centro_min` / `obstaculo_centro_max` (p. ej. 0.38 / 0.62) |
+| No anuncia algo que sí bloquea el paso | Amplía esos mismos dos valores (p. ej. 0.25 / 0.75) |
+| Dice *"camina hacia ella"* con la señal todavía a un lado | Estrecha `guia_senal_centro_min` / `guia_senal_centro_max` (por defecto 0.40 / 0.60) |
+| No ve la señal ni de cerca | Baja `confianza_minima` (0.60 → 0.50) o baja `detecciones_senal_requeridas` (3 → 2) |
+| Ve la señal pero no la confirma (parpadea) | Sube `perdidas_senal_toleradas` (2 → 3) |
+
+En la ventana de diagnóstico se dibujan **dos líneas verticales**
+marcando el fragmento central (con la etiqueta *centro*): sirven para
+ver de un vistazo si un objeto cae dentro o fuera. La posición se
+mide con el **centro de la caja** del objeto, no con su borde.
 
 ### Diagnóstico por consola
 
@@ -390,16 +436,17 @@ Los pasos dejan su propia traza, útil para calibrar el umbral y para
 ver si un tramo se cierra antes de tiempo::
 
     PASO: 12 (pico +0.33 g, umbral 0.09 g, cada 0.20 s)
-    PASO DESCARTADO: 1.8 s sin marcha (maximo 1.0 s)
+    PASO DESCARTADO: 1.8 s sin marcha (maximo 1.5 s)
     TRAMO: 45 pasos acreditados de 50 crudos
 
 El `cada … s` es el intervalo desde el paso anterior: si sale muy
-pegado al anterior hay doble conteo, y si un cruce llega con más de
-`intervalo_paso_max_s` (1 s) se **descarta** —no había ritmo de
-marcha detrás: la persona estaba parada y movió el pie— y en la
-consola aparece `PASO DESCARTADO`. Al cerrar un tramo, `TRAMO` deja
-los pasos **acreditados** (los que pide la ruta) junto a los
-**crudos** que senso el contador.
+pegado al anterior hay doble conteo, y si un cruce llega con más del
+límite (`intervalo_paso_max_s` = 1.5 s, o el ritmo propio si es más
+lento: 2.5 × la mediana de sus últimos intervalos) se **descarta**
+—no había ritmo de marcha detrás: la persona estaba parada y movió
+el pie— y en la consola aparece `PASO DESCARTADO`. Al cerrar un
+tramo, `TRAMO` deja los pasos **acreditados** (los que pide la ruta)
+junto a los **crudos** que senso el contador.
 
 La medición del HC-SR04 se hace con **gpiozero** (`DistanceSensor` con
 `LGPIOFactory`), exactamente igual que el script verificado en esta
