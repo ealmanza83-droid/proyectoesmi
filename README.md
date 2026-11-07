@@ -224,6 +224,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Giro máximo desde el anclaje para dar la encarada por hecha | `encarada_max_giro_grados` | `20` |
 | Adelanto del corte de giro (absorbe el giro de la frase) | `grados_compensacion_giro` | `8` grados |
 | Banda de frecuencia del paso (pasa-banda de `ContadorPasos`) | `frecuencia_paso_min_hz` / `frecuencia_paso_max_hz` | `0.5` / `5.0` Hz (más abajo está el balanceo y la postura, más arriba el temblor) |
+| Variación mínima de muestreo para rediseñar el filtro de pasos | `variacion_recalculo_filtro_paso_pct` | `0.05` (5 %; tolera el jitter normal de las lecturas I²C sin reiniciar el filtro) |
 | Piso del umbral de paso (sobre la señal YA filtrada) | `umbral_paso_min_g` | `0.09` g |
 | Umbral adaptativo | `factor_umbral_paso` | `0.45` (el umbral es `máx(0.09 g; 0.45 × media de los últimos picos contados)`) |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |

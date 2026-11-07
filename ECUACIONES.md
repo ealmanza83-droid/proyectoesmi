@@ -205,8 +205,13 @@ temblor) queda fuera de banda y se anula solo:
 H(z) = pasa-banda de ganancia pico 0 dB, centro = √(f_baja · f_alta) ≈ 1,58 Hz
 f_baja = frecuencia_paso_min_hz = 0,5 Hz     f_alta = frecuencia_paso_max_hz = 5,0 Hz
 alpha = sin(w₀) · sinh(ln2/2 · log₂(f_alta/f_baja))      (Q del cookbook RBJ)
-coeficientes recalculados si cambia fs (en la Pi dt ≈ 0,01 s; en pruebas dt = 0,1 s)
+rediseñar coeficientes solo si |fs_nueva - fs_anterior| / fs_anterior >= 0,05
 ```
+
+Las variaciones pequeñas de `dt` por la latencia de I²C no deben rediseñar
+el filtro ni reiniciar su estado: hacerlo en cada muestra impide que la
+señal acumule la oscilación necesaria para detectar pasos. El 5 % es
+configurable con `variacion_recalculo_filtro_paso_pct`.
 
 El filtro **no tiene entrada en continua**: una postura que sube 0,10 g
 de golpe no produce ningún pico, así que no hace falta perseguir una

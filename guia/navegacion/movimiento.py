@@ -310,8 +310,9 @@ class FiltroPaso:
     Diseno del "cookbook" de Robert Bristow-Johnson (pasa-banda de
     ganancia pico 0 dB), sin scipy: solo ``sin``, ``cos`` y ``sinh``.
     Los coeficientes dependen de la frecuencia de muestreo, asi que se
-    recalculan si ``dt`` cambia (en la Pi dt ~ 0,01 s; en las pruebas
-    dt = 0,1 s).
+    se recalculan si la frecuencia de muestreo cambia de forma
+    significativa. El jitter normal de I2C no debe reiniciar el filtro
+    ni alterar sus coeficientes muestra a muestra.
 
     Ojo: el pasa-banda tiene ceros en DC y en Nyquist, asi que una
     oscilacion justo a la mitad de la frecuencia de muestreo no
@@ -319,9 +320,15 @@ class FiltroPaso:
     = 2,5 Hz, y no de 2).
     """
 
-    def __init__(self, frecuencia_baja_hz: float, frecuencia_alta_hz: float) -> None:
+    def __init__(
+        self,
+        frecuencia_baja_hz: float,
+        frecuencia_alta_hz: float,
+        variacion_recalculo_pct: float,
+    ) -> None:
         self._frecuencia_baja = frecuencia_baja_hz
         self._frecuencia_alta = frecuencia_alta_hz
+        self._variacion_recalculo_pct = variacion_recalculo_pct
         self._fs: float | None = None
         self._b0 = self._b2 = 0.0
         self._a1 = self._a2 = 0.0
@@ -355,10 +362,14 @@ class FiltroPaso:
         """Devuelve la muestra filtrada (sin continua ni ruido de paso)."""
         if fs <= 0:
             return 0.0
-        if self._fs is None or abs(fs - self._fs) > 1e-6:
+        variacion_fs = (
+            1.0
+            if self._fs is None
+            else abs(fs - self._fs) / self._fs
+        )
+        if self._fs is None or variacion_fs >= self._variacion_recalculo_pct:
             self._disenar(fs)
             self._fs = fs
-            self._sembrado = False
 
         if not self._sembrado:
             # Arranque en continuo: la entrada actual ya es el estado
@@ -424,7 +435,9 @@ class ContadorPasos:
         self._tiempo = 0.0
         self._ultimo_paso: float | None = None
         self._filtro = FiltroPaso(
-            config.frecuencia_paso_min_hz, config.frecuencia_paso_max_hz
+            config.frecuencia_paso_min_hz,
+            config.frecuencia_paso_max_hz,
+            config.variacion_recalculo_filtro_paso_pct,
         )
         # Pico en curso: hasta que no baja del umbral no se sabe su
         # altura (es la que entra en la media de picos).

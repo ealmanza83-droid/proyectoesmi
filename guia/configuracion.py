@@ -151,6 +151,9 @@ class Configuracion:
     # que no hace falta perseguir una media local.
     frecuencia_paso_min_hz: float = 0.5
     frecuencia_paso_max_hz: float = 5.0
+    # Las lecturas I2C tienen jitter; no redisenar el filtro por cambios
+    # pequeños de fs, porque eso hace inestable el detector de pasos.
+    variacion_recalculo_filtro_paso_pct: float = 0.05
     # Piso del umbral: por debajo de esto no hay pico que valga como
     # paso (ruido del sensor).  Se mide sobre la senal YA FILTRADA.
     # Si faltan pasos en casa, bajalo; si cuenta pasos al balancear,

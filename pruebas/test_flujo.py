@@ -2880,6 +2880,24 @@ def test_detector_de_pasos() -> None:
         suave.en_muestra(mpu.leer(), dt=0.01)
     comprobar(suave.pasos >= 8, f"la marcha suave (0,12 g) cuenta ({suave.pasos})")
 
+    # --- 29.3b El filtro tolera jitter real de muestreo ------------
+    # La lectura I2C hace que los intervalos reales no sean idénticos.
+    # Alternar 11,8/12,2 ms simula la tasa de ~84 Hz de la Raspberry Pi.
+    variable = movimiento.ContadorPasos(config)
+    mpu = MPUFalso()
+    tiempo = 0.0
+    indice = 0
+    while tiempo < 8.0:
+        dt = 0.0118 if indice % 2 == 0 else 0.0122
+        tiempo += dt
+        mpu.az = 1.0 + 0.18 * math.sin(2.0 * math.pi * 2.0 * tiempo)
+        variable.en_muestra(mpu.leer(), dt=dt)
+        indice += 1
+    comprobar(
+        variable.pasos >= 10,
+        f"la marcha a 2 Hz con jitter de muestreo cuenta ({variable.pasos})",
+    )
+
     # --- 29.4 Ruido fuera de banda no cuenta -----------------------
     # Tres muestras de 20 Hz (periodo de 5): muy por encima de los
     # 5 Hz de la banda, el pasa-banda las atenua y no hay cruce.

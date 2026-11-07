@@ -652,6 +652,7 @@ Todo umbral vive en `guia/configuracion.py`:
 | Histéresis de liberación del aviso | `liberacion_desvio_factor = 0.6` |
 | Delta de aceleración que vale como paso | `umbral_paso_min_g = 0.09` (piso) / `factor_umbral_paso = 0.45` (adaptativo) |
 | Banda del paso (pasa-banda) | `frecuencia_paso_min_hz = 0.5` / `frecuencia_paso_max_hz = 5.0` |
+| Jitter permitido antes de rediseñar el filtro | `variacion_recalculo_filtro_paso_pct = 0.05` (5 %, evita reinicios por variaciones de I²C) |
 | Cadencia: tolerancia y mínimos para juzgar | `cadencia_tolerancia = 0.40` / `cadencia_intervalos_minimos = 3` |
 | Re-basado del ritmo tras descartes seguidos | `rechazos_rebasar = 3` |
 | Enfriamiento del aviso de desvío | `enfriamiento_desvio_s = 12` |
