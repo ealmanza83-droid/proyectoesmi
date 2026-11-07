@@ -1148,9 +1148,15 @@ class Aplicacion:
             # objetivo (antes se giraba de mas esperando el aviso).
             angulo = self.giro.avanzar(derecha=True)
 
-        if angulo >= objetivo:
+        # El corte se adelanta ``grados_compensacion_giro``: mientras
+        # suena la frase final la persona sigue girando (y luego
+        # viene "Buscando la señal...", que tambien bloquea), asi que
+        # cortar en el objetivo exacto dejaba el giro ~10 grados
+        # pasado.  "Puedes parar" va PRIMERO en la frase: es la orden
+        # y cuanto antes se oiga, antes se deja de girar.
+        if angulo >= objetivo - self.config.grados_compensacion_giro:
             self._avances_anunciados.clear()
-            self._hablar(f"Ya giraste {objetivo:.0f} grados. Puedes parar.")
+            self._hablar(f"Puedes parar. Ya giraste {objetivo:.0f} grados.")
             self._iniciar_busqueda(intento=1)
 
     def _en_buscar_senal(self, resultado: ResultadoVision) -> None:
@@ -1212,9 +1218,11 @@ class Aplicacion:
         if self._mostrar_giro("izquierda", angulo, objetivo):
             angulo = self.giro.avanzar(derecha=False)
 
-        if angulo >= objetivo:
+        # Igual que en el giro inicial: el corte se adelanta para
+        # absorber el giro que se da mientras suena la frase.
+        if angulo >= objetivo - self.config.grados_compensacion_giro:
             self._avances_anunciados.clear()
-            self._hablar(f"Ya giraste {objetivo:.0f} grados. Puedes parar.")
+            self._hablar(f"Puedes parar. Ya giraste {objetivo:.0f} grados.")
             self._iniciar_busqueda(intento=2)
 
     def _en_cinco_pasos(self, resultado: ResultadoVision) -> None:
@@ -1296,9 +1304,16 @@ class Aplicacion:
             angulo = self.giro.avanzar(derecha=derecha)
             if self._mostrar_giro(sentido, angulo, float(instruccion.cantidad)):
                 angulo = self.giro.avanzar(derecha=derecha)
-            if angulo >= instruccion.cantidad:
+            # Mismo adelanto que en los giros de la busqueda: la
+            # persona sigue girando mientras suena la frase y la
+            # instruccion siguiente, asi que el corte va antes del
+            # objetivo y "Puedes parar" sale primero.
+            if angulo >= (
+                float(instruccion.cantidad)
+                - self.config.grados_compensacion_giro
+            ):
                 self._avances_anunciados.clear()
-                self._hablar("Giro completo. Puedes parar.")
+                self._hablar("Puedes parar. Giro completo.")
                 self._instruccion_actual = None
 
         elif instruccion.es_pasos:

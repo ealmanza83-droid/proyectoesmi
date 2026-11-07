@@ -168,10 +168,10 @@ class MPUFalso:
 
 class SensorFalso:
     def __init__(self, distancia_cm: float | None = 150.0) -> None:
-        # Por defecto en rango de alerta (200 cm): los avisos de
-        # obstaculo se prueban con el eco presente.
+        # Por defecto en rango de alerta (distancia_alerta_cm): los
+        # avisos de obstaculo se prueban con el eco presente.
         self.distancia_cm = distancia_cm
-        self.distancia_alerta_cm = 200.0
+        self.distancia_alerta_cm = Configuracion().distancia_alerta_cm
 
 
 class AlarmaFalsa:
@@ -402,7 +402,7 @@ def test_flujo_completo() -> None:
         paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.BUSCAR_SENAL, "giro de 90 grados completado")
     comprobar(
-        "Ya giraste 90 grados. Puedes parar." in locutor.frases,
+        "Puedes parar. Ya giraste 90 grados." in locutor.frases,
         "avisa cuando parar el giro de 90",
     )
     comprobar(
@@ -1300,6 +1300,21 @@ def test_obstaculos_en_medio() -> None:
     comprobar(
         donde((560, 80, 630, 240)) == "derecha",
         "el de la derecha se queda a la derecha",
+    )
+    # La caja COMPLETA tiene que caber en el fragmento central: un
+    # objeto ancho que se sale de un lado (aunque su centro caiga
+    # dentro) NO es "en medio del camino" y no debe frenar.
+    comprobar(
+        donde((150, 80, 350, 240)) == "izquierda",
+        "un objeto que se sale por la izquierda NO es del centro",
+    )
+    comprobar(
+        donde((300, 80, 500, 240)) == "derecha",
+        "un objeto que se sale por la derecha NO es del centro",
+    )
+    comprobar(
+        donde((100, 80, 550, 240)) == EN_MEDIO_DEL_CAMINO,
+        "uno frontal y ancho que ocupa el central entero si es del centro",
     )
 
     movimiento.time = RelojFalso()
@@ -2237,6 +2252,69 @@ def test_fragmentos_de_la_imagen() -> None:
         )
 
 
+def test_giro_compensado() -> None:
+    """El corte del giro se adelanta: no hay desfase de mas.
+
+    Al llegar al objetivo suena la frase final y luego la instruccion
+    siguiente (ambas bloquean el bucle): mientras eso pasa la persona
+    SIGUE GIRANDO, y eso dejaba el giro ~10 grados pasado del objetivo
+    (90 cortaba en ~100).  Ahora el corte va ``grados_compensacion_giro``
+    antes (90 - 8 = 82) y "Puedes parar" sale PRIMERO en la frase,
+    que es la orden que hay que oir antes.
+    """
+    print("\n[26] Giro: el corte se adelanta (sin desfase de mas)")
+    config = Configuracion()
+    mpu = MPUFalso()
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+    microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
+    aplicacion.giro.reiniciar()
+    mpu.gz = -100.0  # giro a derecha sostenido (~5 grados por paso)
+
+    # 16 pasos de 0.05 s = ~80 grados: TODAVIA no corta (el corte
+    # compensado va en 90 - 8 = 82).
+    for _ in range(16):
+        paso(aplicacion, detector, mpu, dt=0.05)
+    comprobar(
+        aplicacion.estado is Estado.GIRO_INICIAL,
+        "a ~80 grados el giro sigue en curso (el corte es en 82)",
+    )
+
+    # Un paso mas cruza el corte: corta ANTES de los 90 grados.
+    paso(aplicacion, detector, mpu, dt=0.05)
+    comprobar(
+        aplicacion.estado is Estado.BUSCAR_SENAL,
+        "al cruzar el corte compensado termina el giro",
+    )
+    grados = aplicacion.giro.avanzar(derecha=True)
+    comprobar(
+        grados < 90.0,
+        f"el corte ocurre antes de los 90 (corto en {grados:.1f})",
+    )
+    comprobar(
+        "Puedes parar. Ya giraste 90 grados." in locutor.frases,
+        "'Puedes parar' es la frase del corte, primero la orden",
+    )
+    comprobar(
+        locutor.frases.index("Puedes parar. Ya giraste 90 grados.")
+        < locutor.frases.index("Buscando la señal durante un minuto."),
+        "la orden de parar sale antes que la instruccion siguiente",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2272,6 +2350,7 @@ def main() -> int:
         test_pasos_sin_ritmo_se_descartan()
         test_obstaculos_esperan_su_turno()
         test_fragmentos_de_la_imagen()
+        test_giro_compensado()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

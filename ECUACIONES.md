@@ -131,8 +131,11 @@ Equivalente a `θ = ∫ ω dt ≈ Σ ωₖ·Δt`.
 
 La **zona muerta** (`velocidad_minima_giro_dps = 5 °/s`) filtra el temblor de
 la mano: por debajo no es un giro. Luego en `aplicacion.py` se compara
-`ángulo ≥ objetivo` (90°, 180° o los 90° de cada tramo) para dar por
-completado el giro.
+`ángulo ≥ objetivo − grados_compensacion_giro` (90°, 180° o los 90° de cada
+tramo, con 8° de adelanto) para dar por completado el giro. El adelanto
+absorbe el giro que se da mientras suena la frase final y la instrucción
+siguiente (ambas bloquean el bucle): era el desfase de ~10° que se notaba
+al girar.
 
 **Ángulo neto del giro pedido** (`MedidorGiro.avanzar`) — el giro hecho al
 lado **contrario se resta**, no se ignora:
@@ -140,7 +143,7 @@ lado **contrario se resta**, no se ignora:
 ```
 θ_neto = θ_derecha   − θ_izquierda      (si se pide girar a la derecha)
 θ_neto = θ_izquierda − θ_derecha        (si se pide girar a la izquierda)
-completado si θ_neto ≥ objetivo
+completado si θ_neto ≥ objetivo − grados_compensacion_giro (8°)
 ```
 
 *Por qué:* la instrucción es "gira 90° a la izquierda" y lo que importa es
@@ -269,11 +272,11 @@ vuelta de 1 cm = `2·0,01/343 s ≈ 58 µs`. El pulso de TRIG dura ≥ 10 µs
 **interpolación lineal con recorte (clamp)**:
 
 ```
-fracción = clip(d / d_alerta, 0, 1)        d_alerta = 200 cm
+fracción = clip(d / d_alerta, 0, 1)        d_alerta = 300 cm
 intervalo = 0,10 s + fracción · (1,20 s − 0,10 s)
 ```
 
-O sea: `intervalo(d) = 0,10 + (d/200)·1,10` segundos. A 2 m suena cada 1,2 s;
+O sea: `intervalo(d) = 0,10 + (d/300)·1,10` segundos. A 3 m suena cada 1,2 s;
 rozando el obstáculo, cada 0,1 s; más lejos = silencio (`None`). Es una
 **relación lineal inversa entre cercanía y frecuencia de pitido**.
 
@@ -313,10 +316,14 @@ No hay ecuación clásica, pero sí **umbral estadístico y lógica de conteo**:
   anuncia enseguida.
 - **Tres fragmentos de la imagen**: el frame se divide en 3 partes iguales
   (izquierda, centro, derecha); el fragmento central va de `1/3` a `2/3`
-  del ancho (`obstaculo_centro_min/max`) y la clasificación usa el **centro
-  de la caja** del objeto: `x_c = (x₁+x₂)/2 / ancho` → izquierda si
-  `x_c < 1/3`, derecha si `x_c > 2/3`, centro en el resto. Dando pasos
-  (`NAVEGANDO`, `CINCO_PASOS`) solo se considera ese fragmento
+  del ancho (`obstaculo_centro_min/max`) y la clasificación usa la
+  **caja completa** del objeto (`posicion_en_frame`): para ser *centro*
+  la caja tiene que **caber entera** en el fragmento (`x₁ ≥ ⅓·ancho` y
+  `x₂ ≤ ⅔·ancho`); si se sale de un solo lado es de ese lado —aunque el
+  centro `(x₁+x₂)/2` caiga dentro, que era el obstáculo "no totalmente
+  en medio" contado como central—; si se sale de los dos lados (un
+  frontal muy cerca que ocupa el central entero) sí es centro. Dando
+  pasos (`NAVEGANDO`, `CINCO_PASOS`) solo se considera ese fragmento
   (`mirar_solo_centro_en_marcha` = True); fuera de esos estados la
   cámara no anuncia **obstáculo alguno** (la persona gira sobre su
   propio eje para buscar la señal). La señal orientadora no se
@@ -349,7 +356,9 @@ No hay ecuación clásica, pero sí **umbral estadístico y lógica de conteo**:
 ```
 si ángulo ≥ objetivo · 0,50  → "Vas por la mitad"
 si ángulo ≥ objetivo · 0,75  → "Ya casi listo"
-si ángulo ≥ objetivo          → "Giro completo"   (90°, 180° o 90° del tramo)
+si ángulo ≥ objetivo − 8     → "Puedes parar. …"  (orden primero; el corte
+                                se adelanta grados_compensacion_giro = 8°
+                                para absorber el giro de la frase siguiente)
 ```
 
 ---
@@ -367,7 +376,7 @@ si ángulo ≥ objetivo          → "Giro completo"   (90°, 180° o 90° del t
 | Pasos | media local `τ=0,7 s` + umbrales `media+0,09` / `media+0,045` (histéresis) | `movimiento.py` (`ContadorPasos`) |
 | Caída | `\|\|a\|−1g\| ≥ 2,5g` o salto `≥ 1,5g` | `navegacion/caida.py:78-84` |
 | Distancia ultrasónica | `d = t[µs]/58` (`d = v·t/2`, v=343 m/s) | `hardware/ultrasonido.py:348` |
-| Ritmo de pitidos | `0,10 + (d/200)·1,10` s (lineal) | `ultrasonido.py:53-54` |
+| Ritmo de pitidos | `0,10 + (d/300)·1,10` s (lineal) | `ultrasonido.py:53-54` |
 | Audio | `s[i] = A·sin(2π f i/fs)` | `audio/alarma.py:62` |
 | Confirmación de señal | racha ≥ 3, tolera 2 fallos, conf ≥ 0,60 | `vision/detector.py` |
 | Desvío en línea recta | `\|θ−θ₀\| ≥ 25°` durante 1 s → corregir; libera a 0,6·25° | `aplicacion.py` (`_vigilar_desvio`) |

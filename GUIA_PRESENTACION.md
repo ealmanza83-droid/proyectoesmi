@@ -127,8 +127,8 @@ código se convierte en banderas globales imposibles de explicar.
 **Historia completa de un recorrido** (el guion de la demo, sección 10):
 
 1. Arranque: *"Gira 90 grados a la derecha suavemente para buscar la
-   señal orientadora"* → avanza a mitad → *"Ya giraste 90 grados.
-   Puedes parar."*
+   señal orientadora"* → avanza a mitad → *"Puedes parar. Ya giraste
+   90 grados."*
 2. Búsqueda: *"Buscando la señal durante un minuto"* → la cámara ve la
    vaca (cara interior de Inicio) → *"Estás en Inicio. ¿A dónde
    quieres ir?"*
@@ -148,7 +148,7 @@ código se convierte en banderas globales imposibles de explicar.
    otra señal en el mismo sitio, así que pedirla otra vez dejaría a
    la persona girando sin salida.
 5. Navegación: *"Gira a la izquierda 90 grados"* → *"Vas por la
-   mitad"* → *"Giro completo. Puedes parar."* → *"Camina 14 pasos"*
+   mitad"* → *"Puedes parar. Giro completo."* → *"Camina 14 pasos"*
    (hasta el Cuarto) → cuenta solo pasos rectos → *"Pasos
    completados. Puedes parar."* → **encarada intermedia**: como al
    terminar el tramo la persona queda de espaldas a la señal de esa
@@ -417,6 +417,8 @@ sensor), y verifican el comportamiento completo. Ejemplos:
 25. **Obstáculos solo en la navegación**: dando pasos solo cuenta el
     fragmento central; girando para buscar la señal la cámara no
     anuncia nada.
+26. **Giro sin desfase**: el corte se adelanta `grados_compensacion_giro`
+    y *"Puedes parar"* sale primero en la frase.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
@@ -428,12 +430,13 @@ es esta suite (más la prueba física en la casa).
 1. Encender y arrancar `python main.py` — mencionar los hilos y que el
    banner muestra el commit en ejecución.
 2. Hacer el giro inicial en voz alta: mostrar avances *"Vas por la
-   mitad"* y *"Ya giraste 90 grados. Puedes parar."*
+   mitad"* y *"Puedes parar. Ya giraste 90 grados."* (el corte se
+   adelanta 8°: la orden sale primero mientras sigues girando)
 3. Dejar que encuentre la señal: *"Estás en Inicio. ¿A dónde quieres
    ir?"*
 4. Pedir *"Raspi, ve a la sala"* → encarar la señal → ruta.
-5. Mostrar el giro de la ruta con avances y *"Giro completo. Puedes
-   parar."*
+5. Mostrar el giro de la ruta con avances y *"Puedes parar. Giro
+   completo."*
 6. **Demostración del desvío**: caminar curvando a propósito → aviso,
    corrección guiada con avances, *"Ya enderezaste. Los pasos vuelven a
    contar."*
@@ -497,7 +500,8 @@ Todo umbral vive en `guia/configuracion.py`:
 | Recordatorio durante la corrección | `RECORDATORIO_CORRECCION_S = 15` (en `aplicacion.py`) |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s = 60` |
 | Umbral de caída | `umbral_caida_g = 2.5` |
-| Distancia de alerta | `distancia_alerta_cm = 200` |
+| Distancia de alerta | `distancia_alerta_cm = 300` |
+| Adelanto del corte de giro | `grados_compensacion_giro = 8` |
 | Pasos del tramo de re-búsqueda | `pasos_objetivo = 5` |
 
 La casa (mapa) se define en `guia/dominio/rutas.py` (`TRAMOS_DEMO`):

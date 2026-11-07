@@ -179,6 +179,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Fracción del umbral a la que se libera el aviso de desvío | `liberacion_desvio_factor` | `0.6` |
 | Validez de la señal recién confirmada para arrancar sin encarar | `encarada_validez_s` | `30` s |
 | Giro máximo desde el anclaje para dar la encarada por hecha | `encarada_max_giro_grados` | `20` |
+| Adelanto del corte de giro (absorbe el giro de la frase) | `grados_compensacion_giro` | `8` grados |
 | Delta de aceleración que vale como paso | `delta_paso_g` | `0.09` g sobre la media local |
 | Suavizado previo de la señal de pasos | `tau_media_paso_s` | `0.7` s |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
@@ -195,6 +196,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Duración máxima del beep continuo de caída | `duracion_alarma_caida_s` | `60` |
 | Pines HC-SR04 | `pin_echo` / `pin_trigger` | `23` / `18` (BCM) |
 | Chip gpiozero del HC-SR04 (`/dev/gpiochipN`) | `chip_lgpio` | `15` |
+| Rango de los pitidos (obstáculo **frontal**) | `distancia_alerta_cm` | `300` cm |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
@@ -271,9 +273,14 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
   persona sigue girando (tras cualquier aviso el sistema **vuelve a
   medir** el ángulo antes de decidir, para no pedir giros de más).
 * **Al completar el giro** (el inicial de 90°, la media vuelta de 180°
-  o el giro de una ruta): *"Ya giraste 90 grados. Puedes parar."* /
-  *"Giro completo. Puedes parar."* — después pasa a la siguiente
-  indicación (buscar señal, caminar, etc.).
+  o el giro de una ruta): *"Puedes parar. Ya giraste 90 grados."* /
+  *"Puedes parar. Giro completo."* — la **orden va primero** (es lo
+  que hay que oir antes) y el corte se **adelanta** 8°
+  (`grados_compensacion_giro`): mientras suena la frase y la
+  instruccion siguiente la persona sigue girando, y sin ese adelanto
+  el giro acababa ~10° pasado del objetivo (el desfase que se notaba
+  al girar). Después pasa a la siguiente indicación (buscar señal,
+  caminar, etc.).
 * **Si te giras al lado equivocado**: esos grados **se descuentan** del
   giro pedido (el contador pasa a negativo y la etiqueta de la cámara
   lo marca con *"al lado contrario"*), así la instrucción no se da por
@@ -364,7 +371,8 @@ más menos 25°), los pasos vuelven a contar y el tramo sigue.
   manipula el equipo.
 * **Proximidad**: el ritmo de los pitidos del HC-SR04 **se acelera de
   forma continua** a medida que la persona se acerca al obstáculo
-  (lineal entre 1.2 s de intervalo a 2 m y 0.1 s rozando el objeto).
+  (lineal entre 1.2 s de intervalo a 3 m —donde empiezan, a
+  `distancia_alerta_cm`— y 0.1 s rozando el objeto).
   Si hay una alarma de caída en marcha, los pitidos se callan.
 * **Obstáculos vistos con la cámara**: además de los pitidos, la
   cámara **nombra** lo que tiene delante. La imagen se divide en **3
@@ -381,7 +389,10 @@ más menos 25°), los pasos vuelven a contar y el tramo sigue.
   * **Dando pasos** solo se tiene en cuenta el fragmento central:
     los objetos de los otros dos fragmentos se descartan por
     completo (`mirar_solo_centro_en_marcha`), porque avisar de lo que
-    está a un lado solo genera confusión. Lo central se anuncia en
+    está a un lado solo genera confusión. Y *en medio* solo cuenta
+    lo que **cabe entero** en ese fragmento (un objeto ancho que se
+    sale de un lado es de ese lado, aunque su centro caiga dentro).
+    Lo central se anuncia en
     una sola frase — *"Alto, en medio del camino hay un obstáculo:
     silla"* / *"…hay obstáculos: silla y mesa"*.
   * Solo se anuncia lo que puede estar en la **dirección que se
@@ -418,7 +429,11 @@ se ajusta en `guia/configuracion.py`, sin tocar código:
 En la ventana de diagnóstico se dibujan **dos líneas verticales**
 marcando el fragmento central (con la etiqueta *centro*): sirven para
 ver de un vistazo si un objeto cae dentro o fuera. La posición se
-mide con el **centro de la caja** del objeto, no con su borde.
+decide con la **caja completa** del objeto: para ser *en medio del
+camino* tiene que **caber entera** en el fragmento central; si se sale
+de un solo lado es de ese lado (aunque su centro caiga dentro), y si
+se sale de los dos lados —un frontal muy cerca que ocupa el central
+entero— sí es del centro.
 
 ### Diagnóstico por consola
 

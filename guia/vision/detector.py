@@ -79,12 +79,32 @@ def posicion_en_frame(
 
     La imagen se divide en tres fragmentos iguales (izquierda, centro,
     derecha): ``minimo`` y ``maximo`` marcan los limites del central
-    (por defecto 1/3 y 2/3 del ancho).  La camara mira hacia adelante,
-    asi que la posicion horizontal del objeto indica si se cruza en la
-    ruta (centro) o si queda a la izquierda o a la derecha de la
-    persona.
+    (por defecto 1/3 y 2/3 del ancho).
+
+    La caja COMPLETA tiene que caber en el fragmento central para que
+    el objeto este "en medio del camino": con mirar solo el centro de
+    la caja, un objeto ancho que se salia de un lado (pero cuyo
+    centro caia dentro) se contaba como central y frenaba sin motivo.
+    Reglas:
+
+    * cabe entera en el central -> centro;
+    * se sale de UN solo lado -> ese lado;
+    * se sale de los dos lados (objeto frontal muy cerca, que ocupa
+      el fragmento central entero) -> centro, porque esta de frente
+      en la direccion que se recorre;
     """
     x1, _, x2, _ = caja
+    limite_izq = minimo * ancho
+    limite_der = maximo * ancho
+    sale_izquierda = x1 < limite_izq
+    sale_derecha = x2 > limite_der
+    if not sale_izquierda and not sale_derecha:
+        return EN_MEDIO_DEL_CAMINO
+    if not sale_derecha:
+        return "izquierda"
+    if not sale_izquierda:
+        return "derecha"
+    # Se sale de los dos lados: ocupa el fragmento central entero.
     centro = (x1 + x2) / 2 / ancho
     if centro < minimo:
         return "izquierda"

@@ -184,6 +184,14 @@ class Configuracion:
     # ------------------------------------------------------------------
     grados_giro_inicial: int = 90
     grados_media_vuelta: int = 180
+    # Compensacion del desfase al girar: al llegar al objetivo suena
+    # la frase final ("Puedes parar.") y luego la instruccion
+    # siguiente; mientras las dos se dicen (y hasta que la persona
+    # reacciona) SIGUE GIRANDO, y eso dejaba el giro ~10 grados
+    # pasado del objetivo.  Por eso el corte se adelanta estos
+    # grados: el giro total aterriza en el objetivo.
+    # Subelo si aun se pasa; bajalo si se queda corto.
+    grados_compensacion_giro: float = 8.0
     pasos_objetivo: int = 5
     # Marcha de la persona (medidas reales): de aqui salen los pasos de
     # cada tramo de la ruta (distancia / zancada, ver dominio/rutas.py)
@@ -247,7 +255,13 @@ class Configuracion:
     pin_echo: int = 23
     pin_trigger: int = 18
     distancia_maxima_m: float = 4.0
-    distancia_alerta_cm: float = 200.0
+    # Rango en el que empiezan los pitidos y el aviso de proximidad
+    # (el obstaculo FRONTAL, el unico que mide el HC-SR04).  A 200 cm
+    # se quedaba corto: lo frontal se avisaba tarde mientras la
+    # camara ya nombraba lo lateral.  Con 300 cm da tiempo de
+    # reaccion sin llenar de pitidos todo el pasillo; el intervalo se
+    # re-escala solo (ver ``intervalo_de_beep``).
+    distancia_alerta_cm: float = 300.0
 
     def preparar(self) -> None:
         """Crea las carpetas que el sistema necesita para funcionar."""
