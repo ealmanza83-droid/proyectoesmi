@@ -241,7 +241,7 @@ no suma pasos. Tras tres picos demasiado cercanos se re-basela el ritmo.
 Los pasos del mapa se midieron en línea recta. Un paso dado mientras la
 persona va curvando **no la acerca al sitio medido** (la curva alarga el
 recorrido), así que no se acredita: el rumbo compara contra el rumbo del
-primer paso (`_rumbo_al_caminar`). Si la desviación supera 25°, los
+primer paso (`_rumbo_al_caminar`). Si la desviación supera 35°, los
 pasos se congelan hasta enderezar. El rumbo solo se mueve con **giro
 sostenido** (EMA de 0.5 s, gate de 5 °/s), así que el balanceo al
 caminar no lo deforma.
@@ -252,9 +252,9 @@ Cuando el sistema detecta que vas curvando, **no manda un número fijo
 de grados** ("gira 30°") porque ese número se queda viejo mientras la
 voz habla y tú sigues caminando. En su lugar guía el giro **en vivo**:
 
-1. El aviso solo sale si el desvío pasa de 25° **y se mantiene un
-   segundo** (`confirmacion_desvio_s`): un paso torcido o un balanceo
-   puntual no lo disparan.
+1. El aviso solo sale si el desvío pasa de 35° **y se mantiene 1,5
+   segundos** (`confirmacion_desvio_s`): un giro pequeño o transitorio
+   no lo dispara.
 2. *"Alto un momento. Te estás desviando de la línea recta, unos 30
    grados. Gira despacio a la izquierda hasta que te diga que ya
    enderezaste."*
@@ -658,8 +658,9 @@ Todo umbral vive en `guia/configuracion.py`:
 
 | Ajuste | Parámetro |
 |---|---|
-| Cuánto giro cuenta como desvío | `desvio_maximo_grados = 25` |
-| Confirmación que debe durar el desvío antes de avisar | `confirmacion_desvio_s = 1.0` |
+| Frecuencia de cámara | `fps_camara = 15` |
+| Cuánto giro cuenta como desvío | `desvio_maximo_grados = 35` |
+| Confirmación que debe durar el desvío antes de avisar | `confirmacion_desvio_s = 1.5` |
 | Histéresis de liberación del aviso | `liberacion_desvio_factor = 0.6` |
 | Delta de aceleración que vale como paso | `umbral_paso_min_g = 0.09` (piso) / `factor_umbral_paso = 0.45` (adaptativo) |
 | Banda del paso (pasa-banda) | `frecuencia_paso_min_hz = 0.5` / `frecuencia_paso_max_hz = 5.0` |

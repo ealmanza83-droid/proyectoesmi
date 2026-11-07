@@ -127,6 +127,7 @@ from guia.dominio.rutas import (  # noqa: E402
 from guia.dominio.zancada import Zancada  # noqa: E402
 from pruebas.evaluar_pasos import evaluar_csv  # noqa: E402
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
+from guia.hardware import camara as camara_mod  # noqa: E402
 from guia.hardware.ultrasonido import (  # noqa: E402
     SensorUltrasonico,
     intervalo_de_beep,
@@ -349,6 +350,51 @@ def preparar_distancia_puerta(
 # ----------------------------------------------------------------------
 # Pruebas
 # ----------------------------------------------------------------------
+def test_fps_camara() -> None:
+    """La captura Picamera2 se limita al FPS configurado."""
+    print("\n[0] Cámara: límite de 15 FPS")
+
+    class PicameraFalsa:
+        def __init__(self) -> None:
+            self.configuracion = None
+
+        def create_video_configuration(self, **kwargs):
+            return kwargs
+
+        def configure(self, configuracion) -> None:
+            self.configuracion = configuracion
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+    falsa = PicameraFalsa()
+    picamera_original = camara_mod.Picamera2
+    camara_mod.Picamera2 = lambda: falsa
+    try:
+        camara_mod.Camara(Configuracion(), espera_arranque_s=0)
+    finally:
+        camara_mod.Picamera2 = picamera_original
+
+    comprobar(
+        falsa.configuracion["controls"]["FrameDurationLimits"]
+        == (66_667, 66_667),
+        "Picamera2 limita el sensor a 15 FPS",
+    )
+    comprobar(
+        camara_mod.limites_duracion_fotograma(30.0) == (33_333, 33_333),
+        "convierte correctamente otro FPS configurado",
+    )
+    fallo = False
+    try:
+        camara_mod.limites_duracion_fotograma(0.0)
+    except ValueError:
+        fallo = True
+    comprobar(fallo, "rechaza una frecuencia de cámara inválida")
+
+
 def test_comandos_de_voz() -> None:
     print("\n[1] Comandos de voz")
     comprobar(extraer_destino("quiero ir al baño") == "Baño", "destino 'baño'")
@@ -2088,7 +2134,7 @@ def test_senal_centrada_prevalece_sobre_deriva_inercial() -> None:
 
 
 def test_desvio_requiere_confirmacion() -> None:
-    """El aviso de desvio espera la confirmacion y libera con histéresis.
+    """Ignora desvíos pequeños y confirma los grandes de forma sostenida.
 
     La confirmacion usa el reloj REAL de la aplicacion (guia.aplicacion),
     asi que este ensayo duerme un poco de verdad: asi queda comprobado
@@ -2102,7 +2148,7 @@ def test_desvio_requiere_confirmacion() -> None:
     mpu = MPUFalso()
 
     aplicacion = Aplicacion(
-        config=Configuracion(),  # confirmacion_desvio_s = 1.0 (defecto)
+        config=Configuracion(),
         camara=CamaraFalsa(),
         mpu=mpu,
         sensor=SensorFalso(),
@@ -2130,13 +2176,21 @@ def test_desvio_requiere_confirmacion() -> None:
         mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
 
-    # Se va curvando a la derecha: el umbral se cruza a las pocas
-    # muestras, pero el aviso NO sale hasta que el desvio se sostenga
-    # ``confirmacion_desvio_s`` segundos de reloj real.
-    mpu.gz = -60.0
-    for i in range(7):
-        mpu.az = 1.6 if i % 4 < 2 else 1.0
-        paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.config.desvio_maximo_grados == 35.0
+        and aplicacion.config.confirmacion_desvio_s == 1.5,
+        "usa umbral de 35 grados y confirmación de 1,5 s",
+    )
+    aplicacion.rumbo.girar(30.0)
+    aplicacion._vigilar_desvio()
+    comprobar(
+        aplicacion._inicio_desvio is None
+        and not any("desviando" in frase for frase in locutor.frases),
+        "ignora un cambio pequeño de 30 grados",
+    )
+
+    aplicacion.rumbo.girar(6.0)
+    aplicacion._vigilar_desvio()
     comprobar(
         aplicacion._inicio_desvio is not None,
         "el desvio cruza el umbral y empieza la espera de confirmacion",
@@ -2146,10 +2200,9 @@ def test_desvio_requiere_confirmacion() -> None:
         "sin cumplirse la confirmacion todavia no avisa",
     )
 
-    # Sigue desviado: al pasar el segundo, ahi si sale el aviso.
+    # Sigue desviado: al pasar 1,5 segundos, ahi si sale el aviso.
     time.sleep(aplicacion.config.confirmacion_desvio_s + 0.1)
-    mpu.az = 1.6
-    paso(aplicacion, detector, mpu)
+    aplicacion._vigilar_desvio()
     comprobar(
         any("desviando" in frase for frase in locutor.frases),
         "confirmado el desvio, avisa con los grados y como corregir",
@@ -2159,14 +2212,11 @@ def test_desvio_requiere_confirmacion() -> None:
         "a partir de ahi queda en modo correccion",
     )
 
-    # Endereza girando al contrario.  En la zona de histéresis (entre
-    # liberacion_desvio_factor * umbral y el umbral) NO anuncia nada:
-    # sin eso parpadearia entre "te desviando" y "ya enderezaste".
+    # En la zona de histéresis (entre liberacion * umbral y el umbral)
+    # no anuncia ni que sigue desviado ni que ya enderezó.
     locutor.frases.clear()
-    mpu.gz = 60.0
-    for _ in range(4):
-        mpu.az = 1.6
-        paso(aplicacion, detector, mpu)
+    aplicacion.rumbo.girar(-10.0)
+    aplicacion._vigilar_desvio()
     comprobar(
         not any("enderezaste" in frase for frase in locutor.frases),
         "dentro de la zona de histéresis no anuncia que enderezo",
@@ -2174,9 +2224,8 @@ def test_desvio_requiere_confirmacion() -> None:
 
     # Baja del umbral de liberacion: ahi si avisa que ya enderezo y
     # que los pasos vuelven a contar.
-    for _ in range(4):
-        mpu.az = 1.6
-        paso(aplicacion, detector, mpu)
+    aplicacion.rumbo.girar(-6.0)
+    aplicacion._vigilar_desvio()
     comprobar(
         any("enderezaste" in frase for frase in locutor.frases),
         "bajando del umbral de liberacion si anuncia que enderezo",
@@ -3582,6 +3631,7 @@ def main() -> int:
     print("PRUEBA DEL ASISTENTE DE ORIENTACION")
     print("=" * 60)
     try:
+        test_fps_camara()
         test_comandos_de_voz()
         test_planificacion_de_rutas()
         test_flujo_completo()

@@ -219,6 +219,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Qué | Parámetro | Valor por defecto |
 |-----|-----------|-------------------|
 | Confianza mínima de YOLO | `confianza_minima` | `0.60` |
+| Frecuencia máxima de la cámara | `fps_camara` | `15` FPS |
 | Detecciones seguidas para confirmar una señal | `detecciones_senal_requeridas` | `3` |
 | Frames perdidos tolerados antes de reiniciar la confirmación | `perdidas_senal_toleradas` | `2` |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s` | `60` |
@@ -231,7 +232,8 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Frecuencia de muestreo del MPU6050 | `intervalo_muestreo_mpu_s` | `0.01` (100 Hz) |
 | Velocidad mínima para contar giro (zona muerta y gate de rumbo) | `velocidad_minima_giro_dps` | `5.0` |
 | Suavizado del giro sostenido que alimenta el rumbo | `tau_sostenida_giro_s` | `0.5` s |
-| Confirmación que debe durar un desvío antes de avisar | `confirmacion_desvio_s` | `1.0` s |
+| Ángulo mínimo antes de considerar un desvío | `desvio_maximo_grados` | `35`° |
+| Confirmación que debe durar un desvío antes de avisar | `confirmacion_desvio_s` | `1.5` s |
 | Fracción del umbral a la que se libera el aviso de desvío | `liberacion_desvio_factor` | `0.6` |
 | Validez de la señal recién confirmada para arrancar sin encarar | `encarada_validez_s` | `30` s |
 | Giro máximo desde el anclaje para dar la encarada por hecha | `encarada_max_giro_grados` | `20` |
@@ -488,7 +490,7 @@ minutos; por eso se vuelve a anclar en cada señal encontrada.
 ### Línea recta: ¿camina derecho mientras cuenta pasos?
 
 Mientras la persona camina un tramo, el sistema vigila el rumbo: si
-acumula más giro que `desvio_maximo_grados` (25° por defecto) respecto
+acumula más giro que `desvio_maximo_grados` (35° por defecto) respecto
 del punto donde empezó a caminar, va curvando y los pasos no
 llegarían al sitio medido. En ese caso la corrección se guía **en
 vivo**: *"Alto un momento. Te estás desviando de la línea recta, unos

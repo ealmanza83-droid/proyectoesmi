@@ -24,6 +24,7 @@ class Configuracion:
     # ------------------------------------------------------------------
     ancho: int = 640
     alto: int = 480
+    fps_camara: float = 15.0
     confianza_minima: float = 0.60
     detecciones_senal_requeridas: int = 3
     perdidas_senal_toleradas: int = 2
@@ -285,12 +286,12 @@ class Configuracion:
     # El rumbo integra el giroscopio desde la ultima senal vista.  Si
     # mientras la persona camina acumula mas giro que este umbral, va
     # curvando la ruta y se le avisa que enderece.
-    desvio_maximo_grados: float = 25.0
+    desvio_maximo_grados: float = 35.0
     # El sensor esta en la cintura: un giro repentino del torso o un
     # balanceo fuerte no son un cambio de ruta.  El aviso solo sale si
     # el desvio SE SOSTIENE durante este tiempo desde que cruzo el
     # umbral (y si baja del umbral, la espera empieza de cero).
-    confirmacion_desvio_s: float = 1.0
+    confirmacion_desvio_s: float = 1.5
     # Histesis al liberar: tras el aviso hay que bajar hasta este
     # fraccion del umbral para decir "ya enderezaste".  Sin esto, en
     # el limite del umbral el sistema parpadearia entre "te estas

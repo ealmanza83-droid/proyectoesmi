@@ -10,6 +10,14 @@ from picamera2 import Picamera2
 from ..configuracion import Configuracion
 
 
+def limites_duracion_fotograma(fps: float) -> tuple[int, int]:
+    """Convierte FPS a límites de duración de cuadro en microsegundos."""
+    if fps <= 0:
+        raise ValueError("fps_camara debe ser mayor que cero")
+    duracion_us = round(1_000_000 / fps)
+    return duracion_us, duracion_us
+
+
 class Camara:
     """Captura frames en formato BGR listos para OpenCV/YOLO."""
 
@@ -20,7 +28,12 @@ class Camara:
                 main={
                     "format": "YUYV",
                     "size": (config.ancho, config.alto),
-                }
+                },
+                controls={
+                    "FrameDurationLimits": limites_duracion_fotograma(
+                        config.fps_camara
+                    )
+                },
             )
         )
         self._camara.start()

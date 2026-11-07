@@ -205,8 +205,8 @@ se contamina con la aceleración lateral de los pasos.
 
 ```
 desvío = |rumbo_actual − rumbo_al_empezar_a_caminar|
-si desvío ≥ 25° (desvio_maximo_grados) durante ≥ 1,0 s (confirmacion_desvio_s) → aviso
-al volver por debajo de 0,6·25° (liberacion_desvio_factor) → "enderezaste"
+si desvío ≥ 35° (desvio_maximo_grados) durante ≥ 1,5 s (confirmacion_desvio_s) → aviso
+al volver por debajo de 0,6·35° (liberacion_desvio_factor) → "enderezaste"
 ```
 
 **Referencia visual prioritaria**: si la cámara confirma la señal interior
@@ -225,7 +225,7 @@ comprobaciones de distancia y posición.
 
 La **confirmación temporal** evita avisos falsos por un paso torcido o un
 balanceo puntual; la **histéresis de liberación** evita el efecto
-aviso/contraviso en el umbral. Los pasos con `desvío ≥ 25°` no se acreditan
+aviso/contraviso en el umbral. Los pasos con `desvío ≥ 35°` no se acreditan
 salvo que la cámara confirme centrada la señal esperada y el camino frontal
 esté libre.
 
@@ -685,7 +685,7 @@ al arrancar.
 | Ritmo de pitidos | `0,10 + (d/300)·1,10` s (lineal) | `ultrasonido.py:53-54` |
 | Audio | `s[i] = A·sin(2π f i/fs)` | `audio/alarma.py:62` |
 | Confirmación de señal | racha ≥ 3, tolera 2 fallos, conf ≥ 0,60 | `vision/detector.py` |
-| Desvío en línea recta | `\|θ−θ₀\| ≥ 25°` durante 1 s → corregir; libera a 0,6·25° | `aplicacion.py` (`_vigilar_desvio`) |
+| Desvío en línea recta | `\|θ−θ₀\| ≥ 35°` durante 1,5 s → corregir; libera a 0,6·35° | `aplicacion.py` (`_vigilar_desvio`) |
 | Ventana de llegada del tramo | `0,70·N ≤ ventana ≤ 1,30·N`; cierra la cámara con la señal de cierre | `aplicacion.py` (`_valorar_llegada_del_tramo`) |
 | Zancada adaptativa | `z_k = α·(D/N) + (1−α)·z_{k−1}` con recorte 0,30…0,90; pasos `= round(D/z)` | `dominio/zancada.py` |
 | Distancia visual | `d=f·H/h`; focal `f=d·h/H`; mediana por clase | `vision/detector.py` |
