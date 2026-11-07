@@ -32,8 +32,8 @@ class Rumbo:
         self._grados = 0.0
 
     def girar(self, grados: float) -> None:
-        """Acumula una rotacion pequena (positiva = derecha)."""
-        self._grados += grados
+        """Acumula y normaliza la orientacion a [-180, 180)."""
+        self._grados = self.diferencia(self._grados + grados, 0.0)
 
     def anclar(self) -> None:
         """Fija el rumbo a cero: la referencia esta enfrente."""
@@ -41,5 +41,10 @@ class Rumbo:
 
     @property
     def grados(self) -> float:
-        """Rotacion acumulada desde el ultimo anclaje (derecha +)."""
+        """Rotacion desde el anclaje, normalizada a [-180, 180)."""
         return self._grados
+
+    @staticmethod
+    def diferencia(angulo: float, referencia: float) -> float:
+        """Diferencia angular corta, positiva hacia la derecha."""
+        return (angulo - referencia + 180.0) % 360.0 - 180.0

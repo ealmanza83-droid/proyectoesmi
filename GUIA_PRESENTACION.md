@@ -515,6 +515,8 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     anuncia nada.
 26. **Giro sin desfase**: el corte se adelanta `grados_compensacion_giro`
     y *"Puedes parar"* sale primero en la frase.
+    El rumbo se normaliza a ±180° para que una vuelta acumulada no
+    invierta la dirección de la corrección.
 27. **Llegada por ventana**: al 70 % avisa *"Reduce el paso, ya casi
     llegas"*; entre 70 % y 130 % **la cámara** cierra el tramo viendo
     la señal de cierre; pasado el 130 % sin señal avisa y el flujo
@@ -586,7 +588,7 @@ hacia la pared o puerta de fin de tramo.
 2. Hacer el giro inicial en voz alta: el giro transcurre en silencio
    (antes se anunciaba *"Vas por la mitad"*) y al final *"Puedes
    parar. Ya giraste 90 grados."* (el corte se
-   adelanta 8°: la orden sale primero mientras sigues girando)
+   adelanta 12°: la orden sale primero mientras sigues girando)
 3. Dejar que encuentre la señal: *"Estás en Inicio. ¿A dónde quieres
    ir?"*
 4. Pedir *"Raspi, ve a la sala"* → encarar la señal → ruta.
@@ -662,7 +664,7 @@ Todo umbral vive en `guia/configuracion.py`:
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s = 60` |
 | Umbral de caída | `umbral_caida_g = 2.5` |
 | Distancia de alerta | `distancia_alerta_cm = 300` |
-| Adelanto del corte de giro | `grados_compensacion_giro = 8` |
+| Adelanto del corte de giro | `grados_compensacion_giro = 12` |
 | Pasos del tramo de re-búsqueda | `pasos_objetivo = 5` |
 | Ventana de llegada del tramo | `ventana_llegada_inicio = 0.70` / `ventana_llegada_fin = 1.30` |
 | Zancada: peso de la última medida (EMA) | `zancada_ema_alfa = 0.30` |

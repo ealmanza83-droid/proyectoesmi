@@ -1915,7 +1915,9 @@ class Aplicacion:
             # sigue su rumbo.  El primer paso la bloquea.
             self._rumbo_al_caminar = self.rumbo.grados
         else:
-            desvio = abs(self.rumbo.grados - self._rumbo_al_caminar)
+            desvio = abs(
+                self.rumbo.diferencia(self.rumbo.grados, self._rumbo_al_caminar)
+            )
             if desvio < self.config.desvio_maximo_grados:
                 self._pasos_acreditados += nuevos
             elif nuevos:
@@ -2010,7 +2012,9 @@ class Aplicacion:
         cuando terminaba la frase, el giro quedaba pasado y se
         deshacia.
         """
-        desvio = self.rumbo.grados - self._rumbo_al_caminar
+        desvio = self.rumbo.diferencia(
+            self.rumbo.grados, self._rumbo_al_caminar
+        )
         umbral = self.config.desvio_maximo_grados
         liberacion = umbral * self.config.liberacion_desvio_factor
         ahora = time.monotonic()

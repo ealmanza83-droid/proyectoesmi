@@ -127,7 +127,10 @@ from guia.dominio.rutas import (  # noqa: E402
 from guia.dominio.zancada import Zancada  # noqa: E402
 from pruebas.evaluar_pasos import evaluar_csv  # noqa: E402
 from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
-from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
+from guia.hardware.ultrasonido import (  # noqa: E402
+    SensorUltrasonico,
+    intervalo_de_beep,
+)
 from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
 from guia.navegacion.odometro import OdometroUltrasonico  # noqa: E402
@@ -808,6 +811,20 @@ def test_proximidad_se_acelera() -> None:
     comprobar(
         lejos > medio > cerca > 0.0,
         "el intervalo baja a medida que la persona se acerca",
+    )
+    sensor = SensorUltrasonico.__new__(SensorUltrasonico)
+    sensor._config = Configuracion()
+    sensor._distancia_cm = None
+    sensor._ultima_distancia_valida_cm = 72.0
+    sensor._ultima_lectura_valida_en = time.monotonic()
+    comprobar(
+        sensor.distancia_para_pitido_cm == 72.0,
+        "un eco perdido brevemente no interrumpe el aviso de proximidad",
+    )
+    sensor._ultima_lectura_valida_en -= 1.0
+    comprobar(
+        sensor.distancia_para_pitido_cm is None,
+        "un eco antiguo no se conserva indefinidamente",
     )
 
 
@@ -1907,6 +1924,17 @@ def test_rumbo_ignora_balanceo() -> None:
         giro.en_muestra(mpu.leer(), dt)
     comprobar(rumbo.grados >= 60.0, "un giro sostenido de 1 s si se mide")
 
+    rumbo.anclar()
+    rumbo.girar(457.0)
+    comprobar(
+        abs(rumbo.grados - 97.0) < 1e-9,
+        "el rumbo se normaliza y nunca acumula mas de una vuelta",
+    )
+    comprobar(
+        abs(rumbo.diferencia(-179.0, 179.0) - 2.0) < 1e-9,
+        "la diferencia angular cruza correctamente el limite de 180 grados",
+    )
+
 
 def test_sesgo_corregido_en_marcha() -> None:
     """El sesgo aprendido con la envolvente frena la deriva del rumbo.
@@ -2409,8 +2437,8 @@ def test_giro_compensado() -> None:
     Al llegar al objetivo suena la frase final y luego la instruccion
     siguiente (ambas bloquean el bucle): mientras eso pasa la persona
     SIGUE GIRANDO, y eso dejaba el giro ~10 grados pasado del objetivo
-    (90 cortaba en ~100).  Ahora el corte va ``grados_compensacion_giro``
-    antes (90 - 8 = 82) y "Puedes parar" sale PRIMERO en la frase,
+    (90 cortaba en ~100). Ahora el corte va ``grados_compensacion_giro``
+    antes (90 - 12 = 78) y "Puedes parar" sale PRIMERO en la frase,
     que es la orden que hay que oir antes.
     """
     print("\n[26] Giro: el corte se adelanta (sin desfase de mas)")
@@ -2435,13 +2463,13 @@ def test_giro_compensado() -> None:
     aplicacion.giro.reiniciar()
     mpu.gz = -100.0  # giro a derecha sostenido (~5 grados por paso)
 
-    # 16 pasos de 0.05 s = ~80 grados: TODAVIA no corta (el corte
-    # compensado va en 90 - 8 = 82).
-    for _ in range(16):
+    # 15 pasos de 0.05 s = ~75 grados: TODAVIA no corta (el corte
+    # compensado va en 90 - 12 = 78).
+    for _ in range(15):
         paso(aplicacion, detector, mpu, dt=0.05)
     comprobar(
         aplicacion.estado is Estado.GIRO_INICIAL,
-        "a ~80 grados el giro sigue en curso (el corte es en 82)",
+        "a ~75 grados el giro sigue en curso (el corte es en 78)",
     )
 
     # Un paso mas cruza el corte: corta ANTES de los 90 grados.
@@ -3034,6 +3062,21 @@ def test_odometro_ultrasonico_estable() -> None:
     comprobar(
         odometro.observar(194.0) == 196.0,
         "continúa con lecturas válidas tras el salto",
+    )
+    odometro.reiniciar()
+    for distancia in (200.0, 198.0, 201.0):
+        odometro.observar(distancia)
+    comprobar(
+        odometro.observar(75.0) is None,
+        "un cambio de rango brusco no se acepta con una sola lectura",
+    )
+    comprobar(
+        odometro.observar(77.0) is None,
+        "confirma el nuevo rango con lecturas repetidas",
+    )
+    comprobar(
+        odometro.observar(74.0) == 75.0,
+        "la mediana se recupera al cambiar de distancia real",
     )
     odometro.reiniciar()
     comprobar(

@@ -67,6 +67,7 @@ class Configuracion:
     frames_puerta_perdida: int = 4
     muestras_ultrasonido_puerta: int = 3
     salto_maximo_ultrasonido_puerta_cm: float = 60.0
+    retencion_eco_ultrasonido_s: float = 0.35
     distancia_puerta_min_cm: float = 70.0
     distancia_puerta_max_cm: float = 80.0
     espera_llegada_tras_obstaculo_s: float = 4.0
@@ -213,7 +214,7 @@ class Configuracion:
     # pasado del objetivo.  Por eso el corte se adelanta estos
     # grados: el giro total aterriza en el objetivo.
     # Subelo si aun se pasa; bajalo si se queda corto.
-    grados_compensacion_giro: float = 8.0
+    grados_compensacion_giro: float = 12.0
     pasos_objetivo: int = 5
     # Marcha de la persona (medidas reales): de aqui salen los pasos de
     # cada tramo de la ruta (distancia / zancada, ver dominio/rutas.py)

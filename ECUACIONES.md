@@ -132,7 +132,7 @@ Equivalente a `θ = ∫ ω dt ≈ Σ ωₖ·Δt`.
 La **zona muerta** (`velocidad_minima_giro_dps = 5 °/s`) filtra el temblor de
 la mano: por debajo no es un giro. Luego en `aplicacion.py` se compara
 `ángulo ≥ objetivo − grados_compensacion_giro` (90°, 180° o los 90° de cada
-tramo, con 8° de adelanto) para dar por completado el giro. El adelanto
+tramo, con 12° de adelanto) para dar por completado el giro. El adelanto
 absorbe el giro que se da mientras suena la frase final y la instrucción
 siguiente (ambas bloquean el bucle): era el desfase de ~10° que se notaba
 al girar.
@@ -143,8 +143,19 @@ lado **contrario se resta**, no se ignora:
 ```
 θ_neto = θ_derecha   − θ_izquierda      (si se pide girar a la derecha)
 θ_neto = θ_izquierda − θ_derecha        (si se pide girar a la izquierda)
-completado si θ_neto ≥ objetivo − grados_compensacion_giro (8°)
+completado si θ_neto ≥ objetivo − grados_compensacion_giro (12°)
 ```
+
+El rumbo acumulado se normaliza al rango `[-180°, 180°)` y las
+diferencias se calculan por el arco angular más corto:
+
+```
+Δθ = ((θ_actual − θ_referencia + 180°) mod 360°) − 180°
+```
+
+Así una deriva o varias vueltas no convierten una corrección de, por
+ejemplo, `+217°` a la izquierda en una orden de seguir girando en el
+mismo sentido cuando la persona ya cruzó el rumbo de referencia.
 
 *Por qué:* la instrucción es "gira 90° a la izquierda" y lo que importa es
 la **rotación real pendiente** respecto de la orientación en la que se
@@ -399,8 +410,8 @@ cuando terminaba ya había girado más de lo pedido y el giro se
 deshacía. Queda un solo anuncio:
 
 ```
-si ángulo ≥ objetivo − 8     → "Puedes parar. …"  (orden primero; el corte
-                                se adelanta grados_compensacion_giro = 8°
+si ángulo ≥ objetivo − 12    → "Puedes parar. …"  (orden primero; el corte
+                                se adelanta grados_compensacion_giro = 12°
                                 para absorber el giro de la frase siguiente)
 ```
 
@@ -582,6 +593,19 @@ La llegada a una señal interior esperada exige además distancia frontal
 estable en el rango configurado de 70–80 cm. Se usa la mediana de
 `muestras_ultrasonido_puerta` lecturas nuevas; la señal debe estar
 centrada y no puede haber un obstáculo visual en el centro del camino:
+
+Si una medida salta más de `salto_maximo_ultrasonido_puerta_cm`, se
+mantiene como candidata y solo se adopta el nuevo rango después de
+varias lecturas consistentes. El pitido conserva la última distancia
+válida durante `retencion_eco_ultrasonido_s` ante una pérdida breve de
+eco; esa retención solo mantiene la alerta sonora y nunca valida una
+llegada.
+
+Una lectura aislada que salta más de `salto_maximo_ultrasonido_puerta_cm`
+se retiene como candidata; el nuevo rango se adopta solo si varias
+lecturas consecutivas lo confirman. Las pérdidas breves de eco mantienen
+el pitido por `retencion_eco_ultrasonido_s`, pero nunca se usan para
+confirmar una llegada.
 
 ```
 d_ultra = mediana(d_1, ..., d_M)

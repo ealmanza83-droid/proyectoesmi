@@ -30,6 +30,9 @@ class OdometroUltrasonico:
             else salto_maximo_cm
         )
         self._muestras: deque[float] = deque(maxlen=self._muestras_requeridas)
+        self._candidatas_salto: deque[float] = deque(
+            maxlen=self._muestras_requeridas
+        )
 
     def observar(self, distancia_cm: float | None) -> float | None:
         """Entrega la mediana tras N medidas válidas y estables."""
@@ -40,8 +43,19 @@ class OdometroUltrasonico:
         if self._muestras:
             centro = float(median(self._muestras))
             if abs(distancia_cm - centro) > self._salto_maximo_cm:
-                return None
+                if self._candidatas_salto:
+                    candidata = float(median(self._candidatas_salto))
+                    if abs(distancia_cm - candidata) > self._salto_maximo_cm:
+                        self._candidatas_salto.clear()
+                self._candidatas_salto.append(distancia_cm)
+                if len(self._candidatas_salto) < self._muestras_requeridas:
+                    return None
+                self._muestras.clear()
+                self._muestras.extend(self._candidatas_salto)
+                self._candidatas_salto.clear()
+                return float(median(self._muestras))
 
+        self._candidatas_salto.clear()
         self._muestras.append(distancia_cm)
         if len(self._muestras) < self._muestras_requeridas:
             return None
@@ -49,3 +63,4 @@ class OdometroUltrasonico:
 
     def reiniciar(self) -> None:
         self._muestras.clear()
+        self._candidatas_salto.clear()

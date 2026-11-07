@@ -222,7 +222,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Fracción del umbral a la que se libera el aviso de desvío | `liberacion_desvio_factor` | `0.6` |
 | Validez de la señal recién confirmada para arrancar sin encarar | `encarada_validez_s` | `30` s |
 | Giro máximo desde el anclaje para dar la encarada por hecha | `encarada_max_giro_grados` | `20` |
-| Adelanto del corte de giro (absorbe el giro de la frase) | `grados_compensacion_giro` | `8` grados |
+| Adelanto del corte de giro (absorbe el giro de la frase) | `grados_compensacion_giro` | `12` grados |
 | Banda de frecuencia del paso (pasa-banda de `ContadorPasos`) | `frecuencia_paso_min_hz` / `frecuencia_paso_max_hz` | `0.5` / `5.0` Hz (más abajo está el balanceo y la postura, más arriba el temblor) |
 | Variación mínima de muestreo para rediseñar el filtro de pasos | `variacion_recalculo_filtro_paso_pct` | `0.05` (5 %; tolera el jitter normal de las lecturas I²C sin reiniciar el filtro) |
 | Piso del umbral de paso (sobre la señal YA filtrada) | `umbral_paso_min_g` | `0.09` g |
@@ -256,9 +256,10 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Salto horizontal máximo al seguir una puerta | `salto_maximo_puerta_px` | `160` px |
 | Rango de aproximación a la señal | `distancia_puerta_min_cm` / `distancia_puerta_max_cm` | `70`–`80` cm |
 | Muestras ultrasónicas estables para aproximación | `muestras_ultrasonido_puerta` | `3` |
+| Retención de pitido ante una pérdida breve de eco | `retencion_eco_ultrasonido_s` | `0.35` s (solo para el pitido; nunca para confirmar llegada) |
 | Espera tras un aviso de obstáculo antes de confirmar llegada | `espera_llegada_tras_obstaculo_s` | `4` s |
 | Muestras estables del odómetro ultrasónico | `muestras_ultrasonido_odometro` | `5` |
-| Salto máximo entre lecturas estables | `salto_maximo_ultrasonido_cm` | `60` cm |
+| Salto máximo entre lecturas estables | `salto_maximo_ultrasonido_cm` | `60` cm; cambios mayores se aceptan al repetirse consistentemente |
 | Incertidumbre inicial de posición | `sigma_inicial_posicion_m` | `0.5` m |
 | Ruido de predicción por paso | `varianza_proceso_paso_m2` | `0.0025` m² |
 | Peso de mediciones visuales/ultrasónicas | `varianza_medicion_senal_m2` / `varianza_medicion_ultrasonido_m2` | `0.16` / `0.09` m² |
@@ -390,7 +391,7 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
 * **Al completar el giro** (el inicial de 90°, la media vuelta de 180°
   o el giro de una ruta): *"Puedes parar. Ya giraste 90 grados."* /
   *"Puedes parar. Giro completo."* — la **orden va primero** (es lo
-  que hay que oir antes) y el corte se **adelanta** 8°
+  que hay que oir antes) y el corte se **adelanta** 12°
   (`grados_compensacion_giro`): mientras suena la frase y la
   instruccion siguiente la persona sigue girando, y sin ese adelanto
   el giro acababa ~10° pasado del objetivo (el desfase que se notaba

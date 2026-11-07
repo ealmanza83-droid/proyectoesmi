@@ -73,6 +73,8 @@ class SensorUltrasonico:
     def __init__(self, config: Configuracion):
         self._config = config
         self._distancia_cm: float | None = None
+        self._ultima_distancia_valida_cm: float | None = None
+        self._ultima_lectura_valida_en = 0.0
         self._secuencia_medicion = 0
         self._distancia_alerta_cm = config.distancia_alerta_cm
         self._sensor = None
@@ -194,6 +196,8 @@ class SensorUltrasonico:
                 continue
 
             self._distancia_cm = round(metros * 100.0, 1)
+            self._ultima_distancia_valida_cm = self._distancia_cm
+            self._ultima_lectura_valida_en = time.monotonic()
             self._secuencia_medicion += 1
             if self._aviso_pendiente or recuperado:
                 self._aviso_pendiente = False
@@ -213,6 +217,19 @@ class SensorUltrasonico:
     @property
     def distancia_alerta_cm(self) -> float:
         return self._distancia_alerta_cm
+
+    @property
+    def distancia_para_pitido_cm(self) -> float | None:
+        """Mantiene el aviso sonoro ante una pérdida breve de eco."""
+        if self._distancia_cm is not None:
+            return self._distancia_cm
+        if (
+            self._ultima_distancia_valida_cm is not None
+            and time.monotonic() - self._ultima_lectura_valida_en
+            <= self._config.retencion_eco_ultrasonido_s
+        ):
+            return self._ultima_distancia_valida_cm
+        return None
 
     @property
     def secuencia_medicion(self) -> int:
@@ -268,7 +285,11 @@ class AlertaProximidad(threading.Thread):
             try:
                 ahora = time.monotonic()
                 # Solo la ultima medida ya hecha: leer nunca bloquea.
-                distancia = self._sensor.distancia_cm
+                distancia = getattr(
+                    self._sensor,
+                    "distancia_para_pitido_cm",
+                    self._sensor.distancia_cm,
+                )
                 intervalo = intervalo_de_beep(
                     distancia, self._sensor.distancia_alerta_cm
                 )
