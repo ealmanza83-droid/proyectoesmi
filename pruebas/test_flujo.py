@@ -355,7 +355,8 @@ def test_fps_camara() -> None:
     print("\n[0] Cámara: límite de 15 FPS")
 
     class PicameraFalsa:
-        def __init__(self) -> None:
+        def __init__(self, controles_disponibles) -> None:
+            self.camera_controls = controles_disponibles
             self.configuracion = None
 
         def create_video_configuration(self, **kwargs):
@@ -370,10 +371,14 @@ def test_fps_camara() -> None:
         def stop(self) -> None:
             pass
 
-    falsa = PicameraFalsa()
     picamera_original = camara_mod.Picamera2
-    camara_mod.Picamera2 = lambda: falsa
     try:
+        falsa = PicameraFalsa({"FrameDurationLimits": None})
+        camara_mod.Picamera2 = lambda: falsa
+        camara_mod.Camara(Configuracion(), espera_arranque_s=0)
+
+        sin_limite_fps = PicameraFalsa({})
+        camara_mod.Picamera2 = lambda: sin_limite_fps
         camara_mod.Camara(Configuracion(), espera_arranque_s=0)
     finally:
         camara_mod.Picamera2 = picamera_original
@@ -381,7 +386,11 @@ def test_fps_camara() -> None:
     comprobar(
         falsa.configuracion["controls"]["FrameDurationLimits"]
         == (66_667, 66_667),
-        "Picamera2 limita el sensor a 15 FPS",
+        "aplica el límite de 15 FPS cuando la cámara lo anuncia",
+    )
+    comprobar(
+        sin_limite_fps.configuracion["controls"] == {},
+        "configura cámaras que no anuncian FrameDurationLimits",
     )
     comprobar(
         camara_mod.limites_duracion_fotograma(30.0) == (33_333, 33_333),

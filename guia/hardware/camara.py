@@ -23,17 +23,23 @@ class Camara:
 
     def __init__(self, config: Configuracion, espera_arranque_s: float = 2.0):
         self._camara = Picamera2()
+        controles = {}
+        if "FrameDurationLimits" in self._camara.camera_controls:
+            controles["FrameDurationLimits"] = limites_duracion_fotograma(
+                config.fps_camara
+            )
+        else:
+            print(
+                "AVISO CAMARA: no admite FrameDurationLimits; "
+                "se usará la frecuencia predeterminada del dispositivo."
+            )
         self._camara.configure(
             self._camara.create_video_configuration(
                 main={
                     "format": "YUYV",
                     "size": (config.ancho, config.alto),
                 },
-                controls={
-                    "FrameDurationLimits": limites_duracion_fotograma(
-                        config.fps_camara
-                    )
-                },
+                controls=controles,
             )
         )
         self._camara.start()
