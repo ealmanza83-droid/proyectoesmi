@@ -2152,14 +2152,12 @@ def test_obstaculos_un_aviso_por_encuentro() -> None:
 
 
 def test_pasos_sin_ritmo_se_descartan() -> None:
-    """Un paso suelto no adelanta el fin del tramo.
+    """Una pausa no cuenta un movimiento suelto ni pierde la reanudacion.
 
-    La persona se para a escuchar un aviso, mueve el pie y ese cruce
-    sumaba: el tramo terminaba antes de tiempo (llegada anunciada con
-    pasos todavia faltando).  Ahora un pico con mas de
-    ``intervalo_paso_max_s`` desde el anterior se descarta, y el ritmo
-    se reinicia para no perder tambien el primer paso real de
-    despues de la pausa.
+    El primer pico despues de una pausa se guarda pendiente: si aparece
+    otro pico de marcha, se acreditan ambos; si no, no se cuenta como
+    paso. Asi se conserva el primer paso al reanudar tras esquivar un
+    obstaculo sin adelantar el final del tramo por mover el pie parado.
     """
     print("\n[23] Pasos: el paso sin ritmo de marcha se descarta")
     movimiento.time = RelojFalso()  # reloj acelerado para el ensayo
@@ -2202,19 +2200,24 @@ def test_pasos_sin_ritmo_se_descartan() -> None:
         pasos.en_muestra(mpu.leer(), dt=0.01)
     comprobar(pasos.pasos == contados, "en la parada no inventa pasos")
 
-    # Un solo movimiento del pie despues de la parada: NO cuenta.
+    # Un pico aislado queda pendiente: no se acredita sin confirmar
+    # que la marcha realmente se reanudo.
     un_paso()
     comprobar(
         pasos.pasos == contados,
-        "un paso suelto sin ritmo de marcha se descarta",
+        "un movimiento aislado tras la pausa queda pendiente, sin contar",
     )
 
-    # Y al volver a caminar el primer paso real SI cuenta: el ritmo
-    # se reinicio con el descarte, no se pierde una tanda entera.
+    # Sigue la pausa: el candidato aislado no debe contaminar la nueva
+    # marcha. Al detectar el segundo paso de la reanudacion, se acreditan
+    # tanto el primero como el segundo.
+    mpu.az = 1.0
+    for _ in range(300):
+        pasos.en_muestra(mpu.leer(), dt=0.01)
     marchar(150)
     comprobar(
-        pasos.pasos >= contados + 1,
-        "tras la pausa el primer paso de la marcha si cuenta",
+        pasos.pasos >= contados + 2,
+        "al reanudar, confirma y acredita el primer paso junto al segundo",
     )
 
     # El primer paso de un tramo nuevo siempre cuenta, aunque desde
@@ -2828,12 +2831,12 @@ def test_detector_de_pasos() -> None:
 
     El detector no compara contra una media que se escapa de la
     postura: filtra en banda (0,5 - 5 Hz), pone el umbral en la mitad
-    de los picos REALES de la marcha y valida la cadencia contra el
-    ritmo medido.  Con senales sinteticas se comprueba que las tres
+    de los picos REALES de la marcha y solo descarta picos demasiado
+    cercanos al ritmo medido. Con senales sinteticas se comprueba que las tres
     marchas tipicas cuentan (un paso cada 1 s, cada 0,25 s y un
     balanceo suave de 0,12 g), que el ruido fuera de banda no cuenta,
-    que el umbral sube con la marcha vigorosa y que tres cruces
-    seguidos fuera de cadencia re-baselan el ritmo.
+    que el umbral sube con la marcha vigorosa, que los cambios de ritmo
+    no pierden pasos y que una pausa larga no cuenta un movimiento suelto.
     """
     print("\n[29] Pasos: banda del paso, umbral adaptativo y ritmo rebasado")
     config = Configuracion()
@@ -2908,7 +2911,7 @@ def test_detector_de_pasos() -> None:
         fuera.en_muestra(mpu.leer(), dt=0.01)
     comprobar(fuera.pasos == 0, "el temblor a 20 Hz (fuera de banda) no cuenta")
 
-    # --- 29.5 Tres cruces fuera de cadencia re-baselan el ritmo ---
+    # --- 29.5 La cadencia admite cambios de ritmo -----------------
     pasos = movimiento.ContadorPasos(config)
     mpu = MPUFalso()
     for i in range(350):  # marcha a 0,5 s: el ritmo queda medido
@@ -2917,38 +2920,34 @@ def test_detector_de_pasos() -> None:
     contados = pasos.pasos
     comprobar(contados >= 5, f"la marcha a 0,5 s cuenta ({contados})")
 
-    def cruce_lento() -> None:
-        # Un cruce cada segundo (100 muestras): muy lejos del ritmo
-        # medido (0,5 s +-40 %), se descarta.
-        for i in range(100):
-            mpu.az = 1.6 if i < 25 else 1.0
-            pasos.en_muestra(mpu.leer(), dt=0.01)
-
-    mpu.az = 1.0
-    for _ in range(100):  # silencio: el primer cruce ya llega tarde
-        pasos.en_muestra(mpu.leer(), dt=0.01)
-    for _ in range(3):
-        cruce_lento()
-    comprobar(
-        pasos.pasos == contados,
-        "los tres cruces de 1 s se descartan contra el ritmo de 0,5 s",
-    )
-    comprobar(
-        not pasos._ritmo,
-        "tres descartes seguidos re-baselan el ritmo (se olvida)",
-    )
-
-    # Con el ritmo olvidado, la cadencia de 1 s cuenta desde el
-    # primer paso: si el ritmo viejo siguiera, el primer cruce de 1 s
-    # se volveria a descartar.
-    previos = pasos.pasos
-    for i in range(300):  # tres ciclos de 100 muestras a 1 Hz
+    for i in range(500):  # cambio a paso lento: 1 s por paso
         mpu.az = 1.6 if i % 100 < 50 else 1.0
         pasos.en_muestra(mpu.leer(), dt=0.01)
     comprobar(
-        pasos.pasos - previos >= 3,
-        f"re-baselado, la cadencia de 1 s cuenta desde el primer paso "
-        f"({pasos.pasos - previos})",
+        pasos.pasos >= contados + 4,
+        f"el cambio a marcha lenta no pierde pasos ({pasos.pasos - contados})",
+    )
+
+    contados = pasos.pasos
+    for i in range(240):  # acelera a 0,4 s por paso
+        mpu.az = 1.6 if i % 40 < 20 else 1.0
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        pasos.pasos >= contados + 5,
+        f"el cambio a marcha rapida no pierde pasos ({pasos.pasos - contados})",
+    )
+
+    # Una pausa larga sigue descartando el primer movimiento suelto.
+    contados = pasos.pasos
+    mpu.az = 1.0
+    for _ in range(200):
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    for i in range(100):
+        mpu.az = 1.6 if i < 25 else 1.0
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        pasos.pasos == contados,
+        "un movimiento suelto tras una pausa larga no cuenta",
     )
 
 

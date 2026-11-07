@@ -228,9 +228,9 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Piso del umbral de paso (sobre la señal YA filtrada) | `umbral_paso_min_g` | `0.09` g |
 | Umbral adaptativo | `factor_umbral_paso` | `0.45` (el umbral es `máx(0.09 g; 0.45 × media de los últimos picos contados)`) |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
-| Piso duro del intervalo máximo (sin ritmo de marcha) | `intervalo_paso_max_s` | `1.5` s (en `0` se desactiva) |
-| Tolerancia de cadencia contra el ritmo medido | `cadencia_tolerancia` / `cadencia_intervalos_minimos` | `0.40` (±40 % de la mediana) / `3` intervalos antes de poder juzgar |
-| Descartes seguidos que re-baselan el ritmo | `rechazos_rebasar` | `3` (tras ellos se olvida la cadencia y el siguiente pico arranca un ritmo nuevo) |
+| Ventana máxima para confirmar el primer paso tras una pausa | `intervalo_paso_max_s` | `1.5` s; el primer pico queda pendiente y se acredita con el siguiente (en `0` se desactiva) |
+| Tolerancia de cadencia: solo descarta intervalos muy cortos | `cadencia_tolerancia` / `cadencia_intervalos_minimos` | `0.70` (descarta intervalos menores al 30 % de la mediana) / `3` intervalos antes de juzgar |
+| Picos demasiado cercanos seguidos que re-baselan el ritmo | `rechazos_rebasar` | `3` (tras ellos se olvida la cadencia y el siguiente pico arranca un ritmo nuevo) |
 | Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` (semilla: hasta que no se mide la primera, el plan usa los pasos del mapa) |
 | Peso de la última zancada medida (EMA) | `zancada_ema_alfa` | `0.30` |
 | Recorte mínimo/máximo de la zancada medida | `zancada_min_m` / `zancada_max_m` | `0.30` / `0.90` m por paso |
@@ -581,17 +581,17 @@ Los pasos dejan su propia traza, útil para calibrar el umbral y para
 ver si un tramo se cierra antes de tiempo::
 
     PASO: 12 (pico +0.33 g, umbral 0.09 g, cada 0.20 s)
-    PASO DESCARTADO: 1.8 s sin marcha (maximo 1.5 s)
+    PASO PENDIENTE: reanudacion; se confirmara con el siguiente paso
     TRAMO: 45 pasos acreditados de 50 crudos
 
 El `cada … s` es el intervalo desde el paso anterior: si sale muy
 pegado al anterior hay doble conteo, y si un cruce llega con más del
-límite (`intervalo_paso_max_s` = 1.5 s, o el ritmo propio si es más
-lento: 2.5 × la mediana de sus últimos intervalos) se **descarta**
-—no había ritmo de marcha detrás: la persona estaba parada y movió
-el pie— y en la consola aparece `PASO DESCARTADO`. Al cerrar un
-tramo, `TRAMO` deja los pasos **acreditados** (los que pide la ruta)
-junto a los **crudos** que senso el contador.
+límite (`intervalo_paso_max_s` = 1.5 s), el primer pico queda pendiente
+hasta que otro pico confirme la reanudación. Un movimiento aislado
+durante la pausa no cuenta; al reanudar se acreditan los dos primeros
+pasos detectados. Al cerrar un tramo, `TRAMO` deja los pasos
+**acreditados** (los que pide la ruta) junto a los **crudos** que sensó
+el contador.
 
 La medición del HC-SR04 se hace con **gpiozero** (`DistanceSensor` con
 `LGPIOFactory`), exactamente igual que el script verificado en esta

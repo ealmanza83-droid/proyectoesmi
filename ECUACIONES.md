@@ -240,25 +240,30 @@ una aceleración sostenida no genera "pasos fantasma". Añade un
 **tiempo refractario** de 0,18 s (`intervalo_paso_s`), por debajo del
 mínimo fisiológico entre pasos.
 
-**Validación de cadencia**: el intervalo del pico tiene que caer dentro
-del ritmo medido o del piso duro; si no, el pico se **descarta**:
+**Validación de cadencia**: se tolera que el ritmo cambie. La cadencia
+solo rechaza un pico demasiado cercano al anterior (probable doble
+conteo); los intervalos más lentos se aceptan mientras no excedan el
+límite de pausa:
 
 ```
-si intervalo > intervalo_paso_max_s (1,5 s)         → descarte "sin_marcha"
-si |intervalo − mediana| > cadencia_tolerancia · mediana (±40 %)
+si intervalo > intervalo_paso_max_s (1,5 s)         → guardar pico pendiente
+si intervalo < (1 − cadencia_tolerancia) · mediana
   con ≥ cadencia_intervalos_minimos (3) intervalos   → descarte "cadencia"
+cadencia_tolerancia = 0,70: se descartan intervalos < 30 % de la mediana
 ```
 
-Así un paso lento (cada 1 s) no se le descarta ("algunos pasos no me
-los cuenta"), mientras que una parada real (a escuchar, a esquivar)
-dura más que el piso y sigue descartándose. Esos pasos de más
-adelantaban el fin del tramo. El cruce descartado **reinicia** el
-ritmo (`t_último ← t_ahora`), así que tras una pausa se pierde como
-mucho **un** paso, no la tanda entera; el primer paso de un tramo nuevo
-(`reiniciar`) siempre cuenta, todavia sin cadencia con que juzgarlo.
+Así los cambios de paso no pierden pisadas: por ejemplo, intervalos de
+0,44 s tras un ritmo previo de 0,82 s cuentan. Si el intervalo supera
+1,5 s, el primer pico queda **pendiente** y reinicia la referencia del
+ritmo; el siguiente pico de marcha dentro de la ventana acredita ambos.
+Si no aparece otro pico dentro de esa ventana, el candidato pendiente
+se descarta. Así, mover el pie mientras se escucha o esquiva un
+obstáculo no suma un paso, y el primer paso al reanudar no se pierde.
+El primer paso de un tramo nuevo (`reiniciar`) siempre cuenta,
+todavía sin cadencia con que juzgarlo.
 
-**Rebasado del ritmo**: tras `rechazos_rebasar` = 3 descartes seguidos
-la cadencia ya no describe a la persona (paro, aviso, cuesta, cambio de
+**Rebasado del ritmo**: tras `rechazos_rebasar` = 3 picos demasiado
+cercanos seguidos, la cadencia ya no describe a la persona (cambio de
 paso): se olvida (`_ritmo.clear()`) y el siguiente pico arranca un
 ritmo nuevo.
 

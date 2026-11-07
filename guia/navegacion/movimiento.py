@@ -412,15 +412,12 @@ class ContadorPasos:
     que el umbral se mantiene en la mitad de lo que de verdad produce
     la marcha de esa persona.
 
-    Ademas hay que ir a **cadencia**: el intervalo del pico tiene que
-    caer dentro de +-``cadencia_tolerancia`` de la mediana de los
-    ultimos intervalos (hace falta ``cadencia_intervalos_minimos``
-    intervalos para poder juzgar) o de ``intervalo_paso_max_s`` (piso
-    duro, para descartar un paso suelto aunque aun no haya ritmo).
-    Un descarte reinicia el ritmo medido desde ese instante; tras
-    ``rechazos_rebasar`` descartes seguidos la cadencia se REBASELA
-    (la persona cambio de paso: paro, aviso, cuesta) y el siguiente
-    pico empieza un ritmo nuevo.
+    La cadencia solo descarta picos demasiado cercanos al anterior
+    (probable doble conteo), segun ``cadencia_tolerancia`` y la mediana
+    de los intervalos recientes. Los cambios de ritmo mas lentos o mas
+    rapidos se aceptan; las pausas se filtran con
+    ``intervalo_paso_max_s``. Tras varios picos demasiado cercanos se
+    rebasela la cadencia para adaptarse a un nuevo ritmo.
 
     El reloj del contador es la suma de los ``dt`` recibidos (no
     ``time.monotonic``): asi la deteccion es reproducible en las
@@ -434,6 +431,7 @@ class ContadorPasos:
         # para intervalos y cadencia.
         self._tiempo = 0.0
         self._ultimo_paso: float | None = None
+        self._paso_pendiente: tuple[float, float, float] | None = None
         self._filtro = FiltroPaso(
             config.frecuencia_paso_min_hz,
             config.frecuencia_paso_max_hz,
@@ -504,6 +502,24 @@ class ContadorPasos:
             # conteo de un mismo pico no debe tocar la cadencia).
             return
 
+        if self._paso_pendiente is not None:
+            if (
+                self._config.intervalo_paso_max_s <= 0.0
+                or intervalo <= self._config.intervalo_paso_max_s
+            ):
+                pico_pendiente, _, _ = self._paso_pendiente
+                self._paso_pendiente = None
+                self._picos.append(pico_pendiente)
+                self._media_picos = sum(self._picos) / len(self._picos)
+                self._pasos += 1
+                print(
+                    f"PASO: {self._pasos} "
+                    "(reanudacion confirmada por el siguiente paso)"
+                )
+            else:
+                print("PASO PENDIENTE DESCARTADO: no se reanudo la marcha")
+                self._paso_pendiente = None
+
         motivo = self._descarte(intervalo)
         if motivo is None:
             self._contar(pico, umbral, intervalo)
@@ -520,8 +536,8 @@ class ContadorPasos:
         mediana = self._mediana(self._ritmo)
         if mediana <= 0.0:
             return None
-        tolerancia = self._config.cadencia_tolerancia * mediana
-        if abs(intervalo - mediana) > tolerancia:
+        intervalo_minimo = (1.0 - self._config.cadencia_tolerancia) * mediana
+        if intervalo < intervalo_minimo:
             return "cadencia"
         return None
 
@@ -550,26 +566,30 @@ class ContadorPasos:
         self, pico: float, umbral: float, intervalo: float, motivo: str
     ) -> None:
         self._rechazos += 1
-        # El ritmo se reinicia AQUI: el proximo pico se mide desde
-        # este y no arrastra el hueco de la parada.
         self._ultimo_paso = self._tiempo
         if motivo == "sin_marcha":
+            # Se retiene provisionalmente el primer pico al reanudar.
+            # Solo se acredita si aparece otro dentro de la ventana de
+            # marcha; un movimiento aislado durante la pausa no cuenta.
+            self._paso_pendiente = (pico, umbral, self._tiempo)
+            self._ritmo.clear()
+            self._rechazos = 0
             print(
-                f"PASO DESCARTADO: {intervalo:.1f} s sin marcha "
-                f"(maximo {self._config.intervalo_paso_max_s:.1f} s)"
+                "PASO PENDIENTE: reanudacion; se confirmara con el "
+                "siguiente paso"
             )
         else:
             mediana = self._mediana(self._ritmo)
             print(
-                f"PASO DESCARTADO: cadencia {intervalo:.2f} s fuera de "
-                f"+-{self._config.cadencia_tolerancia * 100:.0f} % "
-                f"del ritmo {mediana:.2f} s"
+                f"PASO DESCARTADO: cadencia {intervalo:.2f} s; "
+                f"separacion minima "
+                f"{(1.0 - self._config.cadencia_tolerancia) * mediana:.2f} s "
+                f"(ritmo {mediana:.2f} s)"
             )
 
         if self._rechazos >= self._config.rechazos_rebasar:
-            # La cadencia ya no describe a la persona (paro, aviso,
-            # cuesta, cambio de paso): se olvida y el siguiente pico
-            # arranca un ritmo nuevo.
+            # La cadencia ya no describe la señal: se olvida y el
+            # siguiente pico arranca un ritmo nuevo.
             self._ritmo.clear()
             self._rechazos = 0
             print("RITMO REBASELADO: los ultimos pasos no encajaban")
@@ -592,6 +612,7 @@ class ContadorPasos:
         """
         self._pasos = 0
         self._ultimo_paso = None
+        self._paso_pendiente = None
         self._en_pico = False
         self._pico_contado = False
         self._rechazos = 0

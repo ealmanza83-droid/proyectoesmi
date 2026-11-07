@@ -229,11 +229,12 @@ genera ningún pico. Sobre esa señal se cruza un **umbral adaptativo**,
 histéresis (hay que bajar a la mitad para rearmar) y un tiempo
 refractario de 0.18 s para no contar dos veces el mismo pisón. El
 umbral se mantiene solo, a la mitad de lo que de verdad produce la
-marcha de esa persona: si camina suave baja, si va vigoroso sube. Además
-cada pico tiene que encajar en el **ritmo medido** (±40 % de la mediana
-de los últimos intervalos, o el piso de 1.5 s sin marcha); tres
-descartes seguidos re-baselan el ritmo para no arrastrar una cadencia
-que ya no describe a la persona.
+marcha de esa persona: si camina suave baja, si va vigoroso sube. La
+cadencia solo descarta picos demasiado cercanos entre sí (menos del 30 %
+del intervalo mediano); los cambios de ritmo se aceptan. Tras una pausa
+superior a 1.5 s, el primer pico queda pendiente: se acredita junto con
+el siguiente si confirma que la marcha se reanudó; un movimiento aislado
+no suma pasos. Tras tres picos demasiado cercanos se re-basela el ritmo.
 
 ### 5.4 Línea recta: solo cuentan los pasos rectos
 
@@ -502,8 +503,9 @@ sensor), y verifican el comportamiento completo. Ejemplos:
 22. **Un solo aviso por encuentro** de obstáculo: no repite mientras
     siga a la vista, se re-arma con el frame limpio y un objeto
     nuevo sí se anuncia enseguida.
-23. **El paso sin ritmo de marcha se descarta** (no adelanta el fin
-    del tramo) y el primer paso de un tramo nuevo siempre cuenta.
+23. **Pausas por obstáculos**: un movimiento aislado no suma pasos; al
+    reanudar, el siguiente paso confirma y acredita el primer paso
+    pendiente. El primer paso de un tramo nuevo siempre cuenta.
 24. **Prioridad de la voz**: con la guía recién hablada el obstáculo
     espera su turno; pasado el silencio anuncia una sola vez y solo
     lo que está en la dirección que se recorre (sin *"persona"* ni
@@ -521,11 +523,11 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     haya medida; la EMA se actualiza solo con el cierre verificado por
     la cámara (el de 130 % no mide nada) y el plan siguiente calcula
     `distancia / zancada`.
-29. **Banda del paso y ritmo re-baselado**: marcha lenta (1 s/paso),
+29. **Banda del paso y cadencia adaptable**: marcha lenta (1 s/paso),
     rápida (0,25 s) y suave (0,12 g) cuentan sin tocar la
-    configuración; el temblor de 20 Hz (fuera de banda) no cuenta; y
-    tres cruces seguidos fuera de cadencia olvidan el ritmo para
-    arrancar otro nuevo.
+    configuración; los cambios de ritmo se aceptan, el temblor de
+    20 Hz (fuera de banda) no cuenta y los picos demasiado cercanos se
+    descartan para evitar dobles conteos.
 30. **Evaluación offline**: un CSV registrado con la aplicación cerrada
     se reproduce con el mismo `ContadorPasos`; la prueba verifica que
     cuenta y calcula el error porcentual frente al conteo manual.
@@ -653,8 +655,8 @@ Todo umbral vive en `guia/configuracion.py`:
 | Delta de aceleración que vale como paso | `umbral_paso_min_g = 0.09` (piso) / `factor_umbral_paso = 0.45` (adaptativo) |
 | Banda del paso (pasa-banda) | `frecuencia_paso_min_hz = 0.5` / `frecuencia_paso_max_hz = 5.0` |
 | Jitter permitido antes de rediseñar el filtro | `variacion_recalculo_filtro_paso_pct = 0.05` (5 %, evita reinicios por variaciones de I²C) |
-| Cadencia: tolerancia y mínimos para juzgar | `cadencia_tolerancia = 0.40` / `cadencia_intervalos_minimos = 3` |
-| Re-basado del ritmo tras descartes seguidos | `rechazos_rebasar = 3` |
+| Cadencia: intervalo mínimo como fracción de la mediana / mínimos para juzgar | `1 - cadencia_tolerancia = 0.30` / `cadencia_intervalos_minimos = 3` |
+| Re-basado tras picos demasiado cercanos seguidos | `rechazos_rebasar = 3` |
 | Enfriamiento del aviso de desvío | `enfriamiento_desvio_s = 12` |
 | Recordatorio durante la corrección | `RECORDATORIO_CORRECCION_S = 15` (en `aplicacion.py`) |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s = 60` |

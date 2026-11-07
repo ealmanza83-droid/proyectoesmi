@@ -174,22 +174,20 @@ class Configuracion:
     # nunca se completaban.
     intervalo_paso_s: float = 0.18
     # Piso duro del intervalo MAXIMO: mas que esto desde el ultimo paso
-    # no es marcha (la persona estaba parada a escuchar un aviso o a
-    # esquivar algo y movio el pie).  Esos pasos de mas adelantaban el
-    # final del tramo.  El descarte reinicia el ritmo, asi que tras
-    # una pausa se pierde como mucho UN paso.  En 0 se desactiva.
+    # Si el intervalo supera este maximo, el pico queda pendiente y
+    # solo se acredita junto con el siguiente pico de marcha. Evita
+    # contar movimientos aislados al esquivar, sin perder el primer
+    # paso al reanudar. En 0 se desactiva.
     intervalo_paso_max_s: float = 1.5
-    # Cadencia: el intervalo del pico tiene que caer dentro de este
-    # porcentaje de la mediana de los ultimos intervalos CONTADOS (hace
-    # falta ``cadencia_intervalos_minimos`` intervalos para poder
-    # juzgar).  Con eso se descartan los picos sueltos (demasiado
-    # tarde) y el doble conteo (demasiado pronto) sin un tope fijo que
-    # habria cortado los pasos de quien camina despacio.
-    cadencia_tolerancia: float = 0.40
+    # Cadencia: solo se descarta un pico demasiado cercano al anterior
+    # respecto al ritmo medido (probable doble conteo). Las variaciones
+    # mas lentas o mas rapidas son pasos validos; las pausas largas se
+    # filtran con intervalo_paso_max_s. La tolerancia deja pasar
+    # intervalos hasta un 70 % mas cortos que la mediana.
+    cadencia_tolerancia: float = 0.70
     cadencia_intervalos_minimos: int = 3
-    # Tras N descartes seguidos la cadencia ya no describe a la
-    # persona (paro, aviso, cuesta, cambio de paso): se olvida y el
-    # siguiente pico arranca un ritmo nuevo.
+    # Tras N descartes seguidos de picos demasiado cercanos se olvida
+    # la cadencia y el siguiente pico arranca un ritmo nuevo.
     rechazos_rebasar: int = 3
 
     # ------------------------------------------------------------------
