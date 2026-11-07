@@ -3009,6 +3009,58 @@ def test_evaluacion_offline_pasos() -> None:
     )
 
 
+def test_registro_sensores_con_aplicacion() -> None:
+    """El registro en vivo conserva el formato que usa el evaluador."""
+    print("\n[30.1] Registro en vivo: MPU y ultrasonido en CSV")
+    sensor = SensorFalso(distancia_cm=None)
+    with tempfile.TemporaryDirectory() as carpeta:
+        ruta = Path(carpeta) / "subcarpeta" / "caminata.csv"
+        mpu = MPUFalso()
+        aplicacion = Aplicacion(
+            config=Configuracion(),
+            camara=CamaraFalsa(),
+            mpu=mpu,
+            sensor=sensor,
+            alarma=AlarmaFalsa(),
+            locutor=LocutorFalso(),
+            microfono=MicrofonoFalso(),
+            detector=DetectorFalso(),
+            ventana=VentanaFalsa(),
+            registro_caminata=ruta,
+        )
+        aplicacion.muestreador.muestrear(
+            LecturaMPU(0.1, -0.2, 0.95, 1.0, 2.0, -3.0), 0.01
+        )
+        sensor.distancia_cm = 73.5
+        aplicacion.muestreador.muestrear(
+            LecturaMPU(0.1, -0.2, 0.95, 1.0, 2.0, -3.0), 0.01
+        )
+        aplicacion.cerrar()
+
+        with ruta.open(newline="", encoding="utf-8") as archivo:
+            filas = list(csv.DictReader(archivo))
+    comprobar(
+        len(filas) == 2
+        and tuple(filas[0]) == (
+            "t",
+            "ax",
+            "ay",
+            "az",
+            "gx",
+            "gy",
+            "gz",
+            "distancia_ultrasonido",
+        ),
+        "guarda todas las columnas esperadas por evaluar_pasos.py",
+    )
+    comprobar(
+        float(filas[0]["az"]) == 0.95
+        and filas[0]["distancia_ultrasonido"] == ""
+        and filas[1]["distancia_ultrasonido"] == "73.5",
+        "registra el MPU y la distancia vigente sin abrir otro sensor",
+    )
+
+
 def test_distancia_visual_y_mediana() -> None:
     """La distancia por tamaño se calcula y suaviza por clase."""
     print("\n[31] Distancia visual: tamaño de caja y mediana de frames")
@@ -3407,6 +3459,7 @@ def main() -> int:
         test_zancada_adaptativa()
         test_detector_de_pasos()
         test_evaluacion_offline_pasos()
+        test_registro_sensores_con_aplicacion()
         test_distancia_visual_y_mediana()
         test_odometro_ultrasonico_estable()
         test_estimador_posicion_tramo()

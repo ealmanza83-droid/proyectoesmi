@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import queue
 import time
+from pathlib import Path
 from typing import Callable
 
 from .audio.alarma import ReproductorBeep
@@ -87,6 +88,7 @@ from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
 from .navegacion.odometro import OdometroUltrasonico
 from .navegacion.posicion import EstimadorPosicionTramo
 from .navegacion.puertas import ContadorPuertas
+from .navegacion.registro import RegistroCaminata
 from .navegacion.rumbo import Rumbo
 from .version import obtener_version
 from .vision.detector import (
@@ -144,6 +146,7 @@ class Aplicacion:
         detector: DetectorVisual,
         planificador: PlanificadorRutas | None = None,
         ventana: VentanaDiagnostico | None = None,
+        registro_caminata: Path | None = None,
     ):
         self.config = config
         self.camara = camara
@@ -204,10 +207,22 @@ class Aplicacion:
             maximo=config.zancada_max_m,
         )
         self.caida = DetectorCaida(config)
+        self._registro_caminata = (
+            RegistroCaminata(registro_caminata, sensor)
+            if registro_caminata is not None
+            else None
+        )
+        oyentes_mpu = [
+            self.giro.en_muestra,
+            self.pasos.en_muestra,
+            self.caida.en_muestra,
+        ]
+        if self._registro_caminata is not None:
+            oyentes_mpu.append(self._registro_caminata.en_muestra)
         self.muestreador = MuestreadorMPU(
             mpu,
             config,
-            (self.giro.en_muestra, self.pasos.en_muestra, self.caida.en_muestra),
+            oyentes_mpu,
         )
 
         # Navegacion
@@ -320,12 +335,12 @@ class Aplicacion:
         print(f"Version del codigo: {version}")
         print("======================================")
 
-        self.muestreador.start()
-        self.alerta.start()
-        self.microfono.iniciar()
-        time.sleep(2)
-
         try:
+            self.muestreador.start()
+            self.alerta.start()
+            self.microfono.iniciar()
+            time.sleep(2)
+
             self.microfono.cambiar_modo(ModoMicrofono.DESPERTADOR)
             self.giro.reiniciar()
             self._hablar(
@@ -346,9 +361,13 @@ class Aplicacion:
         """Detiene hilos y libera los recursos que usa la aplicacion."""
         print()
         print("Cerrando sistema...")
-        self.muestreador.detener()
-        self.alerta.detener()
-        self.microfono.detener()
+        try:
+            self.muestreador.detener()
+            self.alerta.detener()
+            self.microfono.detener()
+        finally:
+            if self._registro_caminata is not None:
+                self._registro_caminata.cerrar()
         self.alarma.esperar()
         self._ventana.cerrar()
         self.locutor.limpiar_cache()

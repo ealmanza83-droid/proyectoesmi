@@ -162,9 +162,22 @@ integración, caídas, proximidad y el flujo completo
 
 ### Registrar y evaluar una caminata
 
-Con la aplicación principal **cerrada**, registra el MPU6050 y el
-HC-SR04 directamente en la Pi. La captura termina con `Ctrl+C`; también
-se puede limitar con `--duracion-s`:
+Para grabar mientras sigues las instrucciones de navegación, inicia la
+aplicación con el registro opcional. Se usan las lecturas del MPU6050 y
+la última distancia del HC-SR04 que ya utiliza la aplicación; no se
+abren conexiones adicionales a los sensores:
+
+```bash
+python main.py --registrar-caminata pruebas/caminata.csv
+```
+
+Realiza el recorrido normal y pulsa `Ctrl+C` al terminar. El CSV conserva
+las pausas y cambios de rumbo, por lo que podrás contar después los pasos
+reales que diste durante ese recorrido.
+
+Como alternativa, con la aplicación principal **cerrada**, registra el
+MPU6050 y el HC-SR04 directamente en la Pi. La captura termina con
+`Ctrl+C`; también se puede limitar con `--duracion-s`:
 
 ```bash
 python pruebas/registrar_caminata.py --salida pruebas/caminata.csv

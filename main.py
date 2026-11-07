@@ -10,6 +10,9 @@ orientadoras, MPU6050, HC-SR04, microfono y altavoz conectados.
 
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
+
 from guia.aplicacion import Aplicacion
 from guia.audio.alarma import ReproductorBeep
 from guia.audio.locutor import Locutor
@@ -22,7 +25,9 @@ from guia.version import obtener_version
 from guia.vision.detector import DetectorVisual
 
 
-def construir_aplicacion(config: Configuracion) -> Aplicacion:
+def construir_aplicacion(
+    config: Configuracion, registro_caminata: Path | None = None
+) -> Aplicacion:
     """Monta el equipo completo y lo entrega a la aplicacion."""
     camara = Camara(config)
     mpu = MPU6050(config)
@@ -42,10 +47,20 @@ def construir_aplicacion(config: Configuracion) -> Aplicacion:
         locutor=locutor,
         microfono=microfono,
         detector=detector,
+        registro_caminata=registro_caminata,
     )
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--registrar-caminata",
+        type=Path,
+        metavar="CSV",
+        help="guardar muestras MPU6050 y HC-SR04 durante la navegación",
+    )
+    args = parser.parse_args()
+
     config = Configuracion()
     config.preparar()
 
@@ -57,7 +72,9 @@ def main() -> int:
 
     aplicacion: Aplicacion | None = None
     try:
-        aplicacion = construir_aplicacion(config)
+        aplicacion = construir_aplicacion(
+            config, registro_caminata=args.registrar_caminata
+        )
         aplicacion.ejecutar()
     finally:
         # Los recursos de hardware se liberan aunque algo falle

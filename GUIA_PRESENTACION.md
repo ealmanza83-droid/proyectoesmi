@@ -553,17 +553,21 @@ es esta suite (más la prueba física en la casa).
 
 ### Registro de una caminata real
 
-En la Raspberry Pi, cierra `main.py` y ejecuta
-`python pruebas/registrar_caminata.py --salida pruebas/caminata.csv`.
-Camina contando los pasos manualmente y pulsa `Ctrl+C` al terminar. El
-archivo conserva `t, ax, ay, az, gx, gy, gz` y la distancia del
-ultrasonido (vacía cuando no hay eco). Reproduce el registro en la Pi o
-en un PC con
+Para registrar mientras la aplicación te da indicaciones, ejecútala con
+`python main.py --registrar-caminata pruebas/caminata.csv`. Haz el
+recorrido normal y pulsa `Ctrl+C` al terminar; el registro escucha el MPU
+y toma la distancia del mismo ultrasonido que ya usa la aplicación.
+Después cuenta los pasos que realmente diste y reproduce el archivo en
+la Pi o en un PC con
 `python pruebas/evaluar_pasos.py pruebas/caminata.csv --pasos-reales 42`.
 El porcentaje es el error absoluto del conteo; úsalo para ajustar banda,
 piso y factor del umbral en `guia/configuracion.py`. Los registros son
 locales y pueden revelar patrones de movimiento: no los subas al repo
 sin revisar su contenido.
+
+También se puede usar `python pruebas/registrar_caminata.py --salida
+pruebas/caminata.csv` con la aplicación cerrada para una prueba aislada
+de sensores.
 
 Para estimar la distancia de la señal, mide su altura real y el alto de
 su caja en un frame tomado a distancia conocida. Ejecuta
