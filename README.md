@@ -501,8 +501,13 @@ Y no es solo un aviso: **los pasos dados mientras está desviado no se
 acreditan**. El sensor sigue contando la marcha a ciegas, pero el
 tramo solo avanza con pasos rectos — si no, el sistema daría por
 "completos" los pasos del tramo caminando en curva y diría que has llegado a
-un sitio que está en otro. Al enderezar (volver al rumbo de partida
-más menos 25°), los pasos vuelven a contar y el tramo sigue.
+un sitio que está en otro. Excepción basada en cámara: si YOLO confirma
+la señal interior esperada del siguiente tramo y esta queda centrada,
+esa referencia visual prevalece sobre un rumbo inercial discrepante;
+los pasos hacia la señal cuentan y no se ordena girar alejándose de ella.
+Un obstáculo frontal desactiva esta excepción. La señal centrada por sí
+sola no confirma llegada: siguen siendo necesarios el rango ultrasónico
+y las demás validaciones configuradas.
 
 ### Alertas de seguridad
 

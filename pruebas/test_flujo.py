@@ -2018,6 +2018,70 @@ def test_rumbo_resiste_aceleracion_de_pasos() -> None:
     )
 
 
+def test_senal_centrada_prevalece_sobre_deriva_inercial() -> None:
+    """Una señal esperada centrada evita una corrección falsa de rumbo."""
+    print("\n[19c] Cámara: señal de cierre centrada corrige el rumbo inercial")
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=LocutorFalso(),
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    aplicacion._camino = ["Sala", "Cuarto"]
+    aplicacion._indice_zona = 0
+    aplicacion._zona_cierre_tramo = "Cuarto"
+    aplicacion._rumbo_al_caminar = 0.0
+    aplicacion.rumbo.girar(45.0)
+    aplicacion.pasos._pasos = 1
+    aplicacion._corrigiendo = True
+    aplicacion._inicio_desvio = time.monotonic() - 3.0
+    resultado = ResultadoVision(
+        senal=Senal("Cuarto", LADO_INTERIOR),
+        detecciones=(
+            Deteccion(
+                "sheep",
+                0.9,
+                (250, 100, 390, 300),
+                True,
+                False,
+            ),
+        ),
+    )
+
+    comprobar(
+        aplicacion._deteccion_senal_cierre_centrada(resultado),
+        "reconoce centrada la señal esperada del siguiente tramo",
+    )
+    comprobar(
+        aplicacion._creditar_pasos(resultado) == 1,
+        "acredita el paso hacia la señal aunque el MPU indique desvío",
+    )
+    aplicacion._vigilar_desvio(resultado)
+    comprobar(
+        not any("desviando" in frase for frase in aplicacion.locutor.frases)
+        and not aplicacion._corrigiendo,
+        "no ordena girar alejándose de la señal que está enfrente",
+    )
+
+    aplicacion.pasos._pasos = 2
+    aplicacion._rumbo_al_caminar = 0.0
+    con_obstaculo = ResultadoVision(
+        senal=resultado.senal,
+        detecciones=resultado.detecciones,
+        obstaculos=(ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),),
+    )
+    comprobar(
+        not aplicacion._deteccion_senal_cierre_centrada(con_obstaculo)
+        and aplicacion._creditar_pasos(con_obstaculo) == 1,
+        "un obstáculo frontal impide usar la cámara para acreditar avance",
+    )
+
+
 def test_desvio_requiere_confirmacion() -> None:
     """El aviso de desvio espera la confirmacion y libera con histéresis.
 

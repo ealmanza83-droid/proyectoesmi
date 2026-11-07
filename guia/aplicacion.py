@@ -1312,10 +1312,10 @@ class Aplicacion:
 
     def _en_cinco_pasos(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.pasos_objetivo
-        dados = self._creditar_pasos()
+        dados = self._creditar_pasos(resultado)
         self._etiqueta = f"Caminando - {dados}/{objetivo} pasos"
         self._guiar_con_puerta(resultado)
-        self._vigilar_desvio()
+        self._vigilar_desvio(resultado)
         inicio = objetivo * self.config.ventana_llegada_inicio
         fin = objetivo * self.config.ventana_llegada_fin
 
@@ -1411,12 +1411,12 @@ class Aplicacion:
                 self._instruccion_actual = None
 
         elif instruccion.es_pasos:
-            dados = self._creditar_pasos()
+            dados = self._creditar_pasos(resultado)
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
             self._actualizar_odometro_ultrasonico(instruccion)
             self._actualizar_posicion_tramo(resultado, instruccion, dados)
             self._guiar_con_senal(resultado)
-            self._vigilar_desvio()
+            self._vigilar_desvio(resultado)
             self._valorar_llegada_del_tramo(
                 resultado, dados, instruccion.cantidad
             )
@@ -1917,17 +1917,61 @@ class Aplicacion:
         ):
             self._registrar_alerta_obstaculo()
 
-    def _creditar_pasos(self) -> int:
-        """Pasos que cuentan hacia el tramo: solo los dados rectos.
+    def _deteccion_senal_cierre_centrada(
+        self, resultado: ResultadoVision | None
+    ) -> bool:
+        """Indica si la cámara confirma centrada la señal de cierre del tramo."""
+        if (
+            resultado is None
+            or resultado.senal is None
+            or resultado.senal.lado != LADO_INTERIOR
+            or resultado.senal.zona != self._zona_cierre_tramo
+            or any(
+                obstaculo.lado == EN_MEDIO_DEL_CAMINO
+                for obstaculo in resultado.obstaculos
+            )
+        ):
+            return False
+
+        deteccion = next(
+            (
+                deteccion
+                for deteccion in resultado.detecciones
+                if deteccion.es_senal
+                and senal_de_clase(deteccion.nombre) == resultado.senal
+            ),
+            None,
+        )
+        if deteccion is None:
+            return False
+
+        centro = deteccion.centro_x_px / self.config.ancho
+        return (
+            self.config.guia_senal_centro_min
+            <= centro
+            <= self.config.guia_senal_centro_max
+        )
+
+    def _creditar_pasos(self, resultado: ResultadoVision | None = None) -> int:
+        """Pasos que cuentan hacia el tramo: rectos o guiados por visión.
 
         La ruta esta medida en linea recta: un paso dado mientras la
         persona esta desviada no la acerca al sitio medido (la curva
-        alarga el recorrido), asi que no se acredita.  Cuando
-        enderece, los pasos vuelven a contar.
+        alarga el recorrido), asi que no se acredita. Si la cámara ve
+        centrada la señal interior esperada, usa esa referencia visual
+        para acreditar el avance aunque el rumbo inercial derive.
         """
         crudos = self.pasos.avanzar()
         nuevos = crudos - self._pasos_previos
         self._pasos_previos = crudos
+
+        if self._deteccion_senal_cierre_centrada(resultado):
+            # La cámara confirma que el destino inmediato está delante:
+            # en este caso su dirección visual es mejor referencia que
+            # una deriva inercial y los pasos sí avanzan hacia la señal.
+            self._rumbo_al_caminar = self.rumbo.grados
+            self._pasos_acreditados += nuevos
+            return self._pasos_acreditados
 
         if crudos == 0:
             # Aun no ha pisado: mientras gira por inercia la referencia
@@ -2002,12 +2046,14 @@ class Aplicacion:
             f"La señal de {senal.zona} está frente a ti: camina hacia ella.",
         )
 
-    def _vigilar_desvio(self) -> None:
+    def _vigilar_desvio(self, resultado: ResultadoVision | None = None) -> None:
         """Guia la correccion del rumbo hasta volver a la linea recta.
 
         El rumbo integra el giroscopio desde la ultima senal anclada:
         si mientras camina acumula mas giro que ``desvio_maximo_grados``
-        va curvando, y los pasos no llegarian al sitio medido.
+        va curvando, y los pasos no llegarian al sitio medido. La señal
+        esperada centrada por la cámara es una referencia visual más
+        directa y prevalece sobre la estimación inercial.
 
         Con el sensor en la cintura hacen falta tres protecciones para
         que el aviso no salga por un balanceo o un retorcimiento del
@@ -2031,6 +2077,16 @@ class Aplicacion:
         cuando terminaba la frase, el giro quedaba pasado y se
         deshacia.
         """
+        if self._deteccion_senal_cierre_centrada(resultado):
+            # No pedir una corrección que alejaría a la persona de una
+            # señal esperada que la cámara ya ve centrada.
+            self._rumbo_al_caminar = self.rumbo.grados
+            self._inicio_desvio = None
+            self._corrigiendo = False
+            self._desvio_inicial = 0.0
+            self._ultima_alerta_desvio = None
+            return
+
         desvio = self.rumbo.diferencia(
             self.rumbo.grados, self._rumbo_al_caminar
         )

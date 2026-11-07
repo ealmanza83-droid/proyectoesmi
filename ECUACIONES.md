@@ -209,10 +209,25 @@ si desvío ≥ 25° (desvio_maximo_grados) durante ≥ 1,0 s (confirmacion_desvi
 al volver por debajo de 0,6·25° (liberacion_desvio_factor) → "enderezaste"
 ```
 
+**Referencia visual prioritaria**: si la cámara confirma la señal interior
+esperada del tramo, su centro está en el intervalo configurado y no hay
+obstáculo frontal, se toma la señal como referencia de alineación:
+
+```
+senal_centrada_esperada ∧ camino_frontal_libre
+    → rumbo_al_caminar = rumbo_actual
+    → acreditar_pasos_nuevos
+    → no emitir corrección inercial
+```
+
+La señal visible no confirma por sí sola la llegada; se mantienen las
+comprobaciones de distancia y posición.
+
 La **confirmación temporal** evita avisos falsos por un paso torcido o un
 balanceo puntual; la **histéresis de liberación** evita el efecto
-aviso/contraviso en el umbral. Y los **pasos no se acreditan** mientras
-`desvío ≥ 25°`.
+aviso/contraviso en el umbral. Los pasos con `desvío ≥ 25°` no se acreditan
+salvo que la cámara confirme centrada la señal esperada y el camino frontal
+esté libre.
 
 ---
 
