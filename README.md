@@ -180,11 +180,13 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Validez de la señal recién confirmada para arrancar sin encarar | `encarada_validez_s` | `30` s |
 | Giro máximo desde el anclaje para dar la encarada por hecha | `encarada_max_giro_grados` | `20` |
 | Adelanto del corte de giro (absorbe el giro de la frase) | `grados_compensacion_giro` | `8` grados |
-| Delta de aceleración que vale como paso | `delta_paso_g` | `0.09` g sobre la media local |
-| Suavizado previo de la señal de pasos | `tau_media_paso_s` | `0.7` s |
+| Banda de frecuencia del paso (pasa-banda de `ContadorPasos`) | `frecuencia_paso_min_hz` / `frecuencia_paso_max_hz` | `0.5` / `5.0` Hz (más abajo está el balanceo y la postura, más arriba el temblor) |
+| Piso del umbral de paso (sobre la señal YA filtrada) | `umbral_paso_min_g` | `0.09` g |
+| Umbral adaptativo | `factor_umbral_paso` | `0.45` (el umbral es `máx(0.09 g; 0.45 × media de los últimos picos contados)`) |
 | Intervalo mínimo entre picos de paso | `intervalo_paso_s` | `0.18` s (un paso cada ~0.25 s a 1.85 m/s) |
-| Intervalo máximo entre picos (sin ritmo de marcha) | `intervalo_paso_max_s` | `1.5` s (piso; el límite crece con el ritmo propio, ver fila siguiente; en `0` se desactiva) |
-| Factor que afloja el tope según el ritmo propio | `intervalo_paso_factor_ritmo` | `2.5` (el límite es 2.5 × la mediana de sus últimos intervalos) |
+| Piso duro del intervalo máximo (sin ritmo de marcha) | `intervalo_paso_max_s` | `1.5` s (en `0` se desactiva) |
+| Tolerancia de cadencia contra el ritmo medido | `cadencia_tolerancia` / `cadencia_intervalos_minimos` | `0.40` (±40 % de la mediana) / `3` intervalos antes de poder juzgar |
+| Descartes seguidos que re-baselan el ritmo | `rechazos_rebasar` | `3` (tras ellos se olvida la cadencia y el siguiente pico arranca un ritmo nuevo) |
 | Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` (semilla: hasta que no se mide la primera, el plan usa los pasos del mapa) |
 | Peso de la última zancada medida (EMA) | `zancada_ema_alfa` | `0.30` |
 | Recorte mínimo/máximo de la zancada medida | `zancada_min_m` / `zancada_max_m` | `0.30` / `0.90` m por paso |
@@ -549,7 +551,7 @@ primera corrida mientras la mesa aún se asentaba) y al final imprime
 el **resumen consolidado**: media, dispersión (mín..máx) y sigma por
 eje, con los datos listos para copiar al reporte. Siempre imprime la
 tasa real de muestreo y la comparación del ruido con los umbrales de
-`configuracion.py` (`delta_paso_g`, dead-band de giros).
+`configuracion.py` (`umbral_paso_min_g`, dead-band de giros).
 
 El driver enciende el sensor con su **filtro digital (DLPF)**
 activo: 44 Hz de ancho de banda en el acelerómetro y 42 Hz en el

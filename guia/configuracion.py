@@ -125,48 +125,53 @@ class Configuracion:
     # en cero, mientras que un giro de verdad (y tambien la deriva
     # lenta, que no llega al umbral) pasa el filtro.
     tau_sostenida_giro_s: float = 0.5
-    # Amplitud minima de la oscilacion de aceleracion que vale como
-    # paso.  El sensor va en la cintura: al caminar la magnitud OSCILA
-    # alrededor de una media que cambia con la postura, y el umbral
-    # se mide contra esa media (ver ContadorPasos), no contra un
-    # reposo congelado que la marcha iba inflando (con eso los pasos
-    # reales se quedaban bajo el umbral y no se contaban).
-    # Si faltan pasos en casa, baja un poco; si cuenta pasos al
-    # balancear, sube (pruebas/caracterizar_mpu6050.py mide el ruido
-    # en reposo para elegirlo).
-    delta_paso_g: float = 0.09
-    # Media local (pasa-largas) de la magnitud: sigue la postura en
-    # segundos pero no la oscilacion del paso (2 a 6 Hz).
-    tau_media_paso_s: float = 0.7
-    # Ritmo real de la persona: zancada de 0.46 m a 1.85 m/s da un paso
-    # cada ~0.25 s.  El intervalo minimo entre picos tiene que quedar
-    # por DEBAJO de ese lapso: con el valor viejo (0.35 s) el contador
+    # ------------------------------------------------------------------
+    # Pasos: banda del paso y umbral adaptativo (ver ContadorPasos)
+    # ------------------------------------------------------------------
+    # La oscilacion de la aceleracion al caminar esta entre estas dos
+    # frecuencias (1,5 a 3 Hz andando; por debajo esta el balanceo y la
+    # postura que cambia, por encima el temblor).  Todo lo que quede
+    # fuera de banda lo anula solo el pasa-banda de ContadorPasos, asi
+    # que no hace falta perseguir una media local.
+    frecuencia_paso_min_hz: float = 0.5
+    frecuencia_paso_max_hz: float = 5.0
+    # Piso del umbral: por debajo de esto no hay pico que valga como
+    # paso (ruido del sensor).  Se mide sobre la senal YA FILTRADA.
+    # Si faltan pasos en casa, bajalo; si cuenta pasos al balancear,
+    # subelo (pruebas/caracterizar_mpu6050.py mide el ruido en reposo).
+    umbral_paso_min_g: float = 0.09
+    # Umbral ADAPTATIVO: max(umbral_paso_min_g, factor x media de los
+    # ultimos picos CONTADOS).  El 0.45 deja el umbral a la mitad de lo
+    # que de verdad produce la marcha de esa persona: si camina suave
+    # el umbral baja solo, y si va vigoroso sube (el ruido se queda
+    # fuera).  Sin esto un umbral fijo o bien perdia los pasos suaves
+    # o bien contaba el balanceo.
+    factor_umbral_paso: float = 0.45
+    # Periodo refractario: intervalo minimo entre dos pasos contados
+    # (contra el doble conteo de un mismo pico).  El ritmo real de la
+    # persona es un paso cada ~0,25 a 0,5 s, asi que este valor tiene
+    # que quedar por DEBAJO de eso: con un tope de 0,35 s el contador
     # descartaba casi la mitad de los pasos reales y los tramos largos
-    # (p. ej. 43 pasos) nunca se completaban.
+    # nunca se completaban.
     intervalo_paso_s: float = 0.18
-    # Un paso con mas de este espacio desde el anterior NO es marcha:
-    # la persona estaba parada (se detuvo a escuchar un aviso o a
-    # esquivar algo) y movio el pie, o el sensor registro un
-    # movimiento suelto.  Esos pasos de mas adelantaban el final del
-    # tramo (llegada anunciada con pasos todavia faltando).  El paso
-    # descartado reinicia el ritmo, asi que tras una pausa se pierde
-    # como mucho UN paso y no todos los que siguen.  En 0 se
-    # desactiva.  Se comprueba contra la linea PASO de la consola
-    # (imprime "PASO DESCARTADO" cuando corta uno).
-    #
-    # Ojo: es un PISO, no un tope fijo.  Si la persona camina lenta
-    # (un paso cada segundo), con un tope duro se le descartaban pasos
-    # reales ("algunos pasos no me los cuenta"), asi que ademas el
-    # limite crece con el ritmo de cada persona: ver
-    # ``intervalo_paso_factor_ritmo``.
+    # Piso duro del intervalo MAXIMO: mas que esto desde el ultimo paso
+    # no es marcha (la persona estaba parada a escuchar un aviso o a
+    # esquivar algo y movio el pie).  Esos pasos de mas adelantaban el
+    # final del tramo.  El descarte reinicia el ritmo, asi que tras
+    # una pausa se pierde como mucho UN paso.  En 0 se desactiva.
     intervalo_paso_max_s: float = 1.5
-    # El limite real es max(intervalo_paso_max_s, factor x ritmo), y
-    # el ritmo es la mediana de los ultimos pasos contados.  Con un
-    # paso cada 0,4 s da 1,5 s (el piso manda); con un paso cada 1,2 s
-    # da 3,0 s, suficiente para no cortarle los pasos a quien camina
-    # despacio.  Las pausas de verdad (a escuchar, a esquivar) siguen
-    # descartandose: duran mas que eso.
-    intervalo_paso_factor_ritmo: float = 2.5
+    # Cadencia: el intervalo del pico tiene que caer dentro de este
+    # porcentaje de la mediana de los ultimos intervalos CONTADOS (hace
+    # falta ``cadencia_intervalos_minimos`` intervalos para poder
+    # juzgar).  Con eso se descartan los picos sueltos (demasiado
+    # tarde) y el doble conteo (demasiado pronto) sin un tope fijo que
+    # habria cortado los pasos de quien camina despacio.
+    cadencia_tolerancia: float = 0.40
+    cadencia_intervalos_minimos: int = 3
+    # Tras N descartes seguidos la cadencia ya no describe a la
+    # persona (paro, aviso, cuesta, cambio de paso): se olvida y el
+    # siguiente pico arranca un ritmo nuevo.
+    rechazos_rebasar: int = 3
 
     # ------------------------------------------------------------------
     # Deteccion de caidas (acelerometro)

@@ -196,48 +196,76 @@ aviso/contraviso en el umbral. Y los **pasos no se acreditan** mientras
 
 ## 7. Contador de pasos — `movimiento.py` (`ContadorPasos`)
 
-**Media local de la señal** (filtro paso bajo primero):
+**Pasa-banda del paso** (biquad RBJ del cookbook, sin scipy): la
+oscilación de la aceleración al caminar está entre 0,5 y 5 Hz; todo lo
+demás (la gravedad, la postura que cambia, el balanceo lento, el
+temblor) queda fuera de banda y se anula solo:
 
 ```
-α = min(dt / τ, 1)   con τ = tau_media_paso_s = 0,7 s
-media += (|a| − media) · α
+H(z) = pasa-banda de ganancia pico 0 dB, centro = √(f_baja · f_alta) ≈ 1,58 Hz
+f_baja = frecuencia_paso_min_hz = 0,5 Hz     f_alta = frecuencia_paso_max_hz = 5,0 Hz
+alpha = sin(w₀) · sinh(ln2/2 · log₂(f_alta/f_baja))      (Q del cookbook RBJ)
+coeficientes recalculados si cambia fs (en la Pi dt ≈ 0,01 s; en pruebas dt = 0,1 s)
 ```
 
-Sobre la **media** (no sobre la lectura cruda) se evalúan los umbrales:
+El filtro **no tiene entrada en continua**: una postura que sube 0,10 g
+de golpe no produce ningún pico, así que no hace falta perseguir una
+media local. Arranca "sembrado" en continuo (`x₁=x₂=muestra`,
+`y₁=y₂=0`), de modo que un sensor quieto en 1,15 g no genera
+transitorio ni pico fantasma. Ojo: el pasa-banda tiene ceros en DC y en
+Nyquist, por eso una oscilación justo a fs/2 no aparece (las pruebas
+usan ciclos de 4 muestras a 10 Hz = 2,5 Hz, y no de 2).
+
+**Umbral adaptativo** sobre la señal ya filtrada:
 
 ```
-Δ = delta_paso_g = 0,09 g
-umbral_alto = media + Δ
-umbral_bajo = media + 0,5·Δ
+umbral = max(umbral_paso_min_g ; factor_umbral_paso · media_últimos_picos)
+       = max(0,09 g ; 0,45 · media de los ≤5 últimos picos CONTADOS)
 ```
 
-**Histéresis (trigger de Schmitt) en modo borde**: un paso cuenta solo cuando
-la media **cruza** el umbral alto de abajo hacia arriba, y se rearma al bajar
-del umbral bajo — así una aceleración sostenida no genera "pasos fantasma".
-Añade un **tiempo refractario** de 0,18 s (`intervalo_paso_s`), por debajo del
+Los picos **contados** alimentan la media al cerrarse el pico (bajar a
+la mitad del umbral), así que el umbral queda a la mitad de lo que de
+verdad produce la marcha de esa persona: si camina suave baja solo —el
+piso de 0,09 g cubre el ruido del sensor—, y si va vigoroso sube, con
+lo que el balanceo y el temblor se quedan fuera.
+
+**Histéresis (borde)**: un paso cuenta cuando la señal filtrada cruza
+el umbral de abajo hacia arriba, y se rearma al bajar a la mitad — así
+una aceleración sostenida no genera "pasos fantasma". Añade un
+**tiempo refractario** de 0,18 s (`intervalo_paso_s`), por debajo del
 mínimo fisiológico entre pasos.
 
-**Tope de cadencia**: un cruce con más del límite desde el anterior se
-**descarta** (`Δt > τ_máx ⇒ no cuenta`). El límite es un **piso** que
-crece con el ritmo propio de la persona:
+**Validación de cadencia**: el intervalo del pico tiene que caer dentro
+del ritmo medido o del piso duro; si no, el pico se **descarta**:
 
 ```
-τ_máx = max(intervalo_paso_max_s ; intervalo_paso_factor_ritmo · mediana)
-       = max(1,5 s ; 2,5 · mediana de sus últimos ≤5 intervalos contados)
+si intervalo > intervalo_paso_max_s (1,5 s)         → descarte "sin_marcha"
+si |intervalo − mediana| > cadencia_tolerancia · mediana (±40 %)
+  con ≥ cadencia_intervalos_minimos (3) intervalos   → descarte "cadencia"
 ```
 
-Así un paso lento (cada 1,2 s) no se le descarta ("algunos pasos no me los
-cuenta"), mientras que una parada real (a escuchar, a esquivar) dura más que
-eso y sigue descartándose. Esos pasos de más adelantaban el fin del tramo.
-El cruce descartado **reinicia** el ritmo (`t_último ← t_ahora`), así que
-tras una pausa se pierde como mucho **un** paso, no la tanda entera; el
-primer paso de un tramo nuevo (`reiniciar`) siempre cuenta.
+Así un paso lento (cada 1 s) no se le descarta ("algunos pasos no me
+los cuenta"), mientras que una parada real (a escuchar, a esquivar)
+dura más que el piso y sigue descartándose. Esos pasos de más
+adelantaban el fin del tramo. El cruce descartado **reinicia** el
+ritmo (`t_último ← t_ahora`), así que tras una pausa se pierde como
+mucho **un** paso, no la tanda entera; el primer paso de un tramo nuevo
+(`reiniciar`) siempre cuenta, todavia sin cadencia con que juzgarlo.
 
-*Por qué media local y no línea base antigua:* la media se actualiza **en todo
-momento** (también en los picos), así que nunca se "arrastra" hacia arriba
-con cada paso; el pico del paso debe superar `media + 0,09 g` sí o sí. Antes
-la línea base subía con cada paso y los valles quedaban por debajo del
-umbral → pasos perdidos.
+**Rebasado del ritmo**: tras `rechazos_rebasar` = 3 descartes seguidos
+la cadencia ya no describe a la persona (paro, aviso, cuesta, cambio de
+paso): se olvida (`_ritmo.clear()`) y el siguiente pico arranca un
+ritmo nuevo.
+
+El reloj del contador es la **suma de los `dt`** recibidos (no
+`time.monotonic`): la detección es reproducible en las pruebas y no
+depende de la carga de la cámara.
+
+*Por qué banda + umbral adaptativo y no línea base:* la línea base
+antigua subía con cada paso y los valles quedaban por debajo del umbral
+→ pasos perdidos; la media local corrigió eso pero perseguía la
+postura. El pasa-banda bloquea la continua de raíz y el umbral se
+autoescala con los picos reales, sin ninguna línea base que mantener.
 
 ---
 
@@ -439,7 +467,7 @@ plan siguiente.
 | Filtrado de sesgo | `b += α(objetivo−b)`; objetivo = plano→`v`, oscilando→`(max+min)/2` | `movimiento.py` (`_aprender_sesgo`) |
 | Gate de rumbo | EMA `τ=0,5 s`, integra solo con `\|sostenida\| ≥ 5°/s` | `movimiento.py` (`en_muestra`) |
 | Integración de ángulo | `θ += ω·dt` con dead-band 5°/s | `movimiento.py` (`paso`) |
-| Pasos | media local `τ=0,7 s` + umbrales `media+0,09` / `media+0,045` (histéresis) | `movimiento.py` (`ContadorPasos`) |
+| Pasos | pasa-banda `0,5–5 Hz` + umbral `máx(0,09 g; 0,45·media de picos)` con histéresis, refractario 0,18 s y cadencia validada | `movimiento.py` (`ContadorPasos`) |
 | Caída | `\|\|a\|−1g\| ≥ 2,5g` o salto `≥ 1,5g` | `navegacion/caida.py:78-84` |
 | Distancia ultrasónica | `d = t[µs]/58` (`d = v·t/2`, v=343 m/s) | `hardware/ultrasonido.py:348` |
 | Ritmo de pitidos | `0,10 + (d/300)·1,10` s (lineal) | `ultrasonido.py:53-54` |

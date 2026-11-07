@@ -208,15 +208,23 @@ rumbo = 0°). Entre señales, la rotación se acumula con el giroscopio.
 Si la persona se gira y luego pide una ruta, el sistema lo sabe: por eso
 exige la **encarada** antes de arrancar.
 
-### 5.3 Pasos: picos de aceleración
+### 5.3 Pasos: banda del paso y umbral adaptativo
 
-Al caminar, el acelerómetro muestra picos con cada pisada. El
-`ContadorPasos` detecta picos sobre una **media local** (constante de
-tiempo de 0.7 s) con delta de 0.09 g y separación mínima de 0.18 s
-para no contar dos veces el mismo pisón. La media se actualiza en todo
-momento (también en los picos), así que nunca se arrastra hacia arriba
-con cada paso: eso es lo que evita los **pasos fantasma** y a la vez
-los pasos perdidos que tenía la línea base antigua.
+Al caminar, el acelerómetro muestra oscilación con cada pisada, pero
+también gravedad, postura que cambia y balanceo lento. El
+`ContadorPasos` pasa la señal por un **pasa-banda de 0.5 a 5 Hz**
+(biquad RBJ sin scipy): solo queda la frecuencia del paso y, como el
+filtro no tiene entrada en continua, un cambio de postura de golpe no
+genera ningún pico. Sobre esa señal se cruza un **umbral adaptativo**,
+`máx(0.09 g; 0.45 × media de los últimos picos contados)`, con
+histéresis (hay que bajar a la mitad para rearmar) y un tiempo
+refractario de 0.18 s para no contar dos veces el mismo pisón. El
+umbral se mantiene solo, a la mitad de lo que de verdad produce la
+marcha de esa persona: si camina suave baja, si va vigoroso sube. Además
+cada pico tiene que encajar en el **ritmo medido** (±40 % de la mediana
+de los últimos intervalos, o el piso de 1.5 s sin marcha); tres
+descartes seguidos re-baselan el ritmo para no arrastrar una cadencia
+que ya no describe a la persona.
 
 ### 5.4 Línea recta: solo cuentan los pasos rectos
 
@@ -443,7 +451,8 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     nombra **sin "Alto"** y en una sola frase—.
 15. Encarada intermedia al terminar un tramo.
 16. Cámara y ultrasonido hablando del mismo obstáculo.
-17. Pasos con la media local cambiando (postura).
+17. Pasos con una subida de postura de golpe (el pasa-banda la
+    bloquea y la cuenta sigue).
 18. El balanceo al caminar no desvía el rumbo.
 19. Sesgo del giroscopio aprendido en marcha.
 20. Confirmación temporal del desvío e histéresis de liberación.
@@ -470,6 +479,11 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     haya medida; la EMA se actualiza solo con el cierre verificado por
     la cámara (el de 130 % no mide nada) y el plan siguiente calcula
     `distancia / zancada`.
+29. **Banda del paso y ritmo re-baselado**: marcha lenta (1 s/paso),
+    rápida (0,25 s) y suave (0,12 g) cuentan sin tocar la
+    configuración; el temblor de 20 Hz (fuera de banda) no cuenta; y
+    tres cruces seguidos fuera de cadencia olvidan el ritmo para
+    arrancar otro nuevo.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
@@ -546,8 +560,10 @@ Todo umbral vive en `guia/configuracion.py`:
 | Cuánto giro cuenta como desvío | `desvio_maximo_grados = 25` |
 | Confirmación que debe durar el desvío antes de avisar | `confirmacion_desvio_s = 1.0` |
 | Histéresis de liberación del aviso | `liberacion_desvio_factor = 0.6` |
-| Delta de aceleración que vale como paso | `delta_paso_g = 0.09` |
-| Suavizado previo de los pasos | `tau_media_paso_s = 0.7` |
+| Delta de aceleración que vale como paso | `umbral_paso_min_g = 0.09` (piso) / `factor_umbral_paso = 0.45` (adaptativo) |
+| Banda del paso (pasa-banda) | `frecuencia_paso_min_hz = 0.5` / `frecuencia_paso_max_hz = 5.0` |
+| Cadencia: tolerancia y mínimos para juzgar | `cadencia_tolerancia = 0.40` / `cadencia_intervalos_minimos = 3` |
+| Re-basado del ritmo tras descartes seguidos | `rechazos_rebasar = 3` |
 | Enfriamiento del aviso de desvío | `enfriamiento_desvio_s = 12` |
 | Recordatorio durante la corrección | `RECORDATORIO_CORRECCION_S = 15` (en `aplicacion.py`) |
 | Tiempo de búsqueda de señal | `tiempo_busqueda_s = 60` |

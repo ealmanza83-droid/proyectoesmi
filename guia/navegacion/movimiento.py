@@ -8,7 +8,7 @@ segundo) y le pasa cada lectura a los oyentes:
 
 * :class:`MedidorGiro` integra la velocidad angular en grados.
 * :class:`ContadorPasos` detecta la oscilacion de la aceleracion al
-  caminar (contra una media local, no contra un reposo congelado).
+  caminar, filtrada en banda (0,5 a 5 Hz) y con cadencia validada.
 
 Asi un giro lento, una pausa del bucle principal o la carga de la
 camara ya no hacen perder la cuenta de grados.
@@ -298,133 +298,268 @@ class MedidorGiro:
         self._plano_girando_s = 0.0
 
 
+class FiltroPaso:
+    """Pasa-banda biquad (RBJ) para aislar la frecuencia del paso.
+
+    La oscilacion de la aceleracion al caminar esta entre ``0,5`` y
+    ``5`` Hz; todo lo demas (la gravedad, la postura que cambia, el
+    balanceo lento, el temblor) queda fuera de banda y se anula solo:
+    el filtro no tiene entrada en continua, asi que no hace falta
+    perseguir una media local.
+
+    Diseno del "cookbook" de Robert Bristow-Johnson (pasa-banda de
+    ganancia pico 0 dB), sin scipy: solo ``sin``, ``cos`` y ``sinh``.
+    Los coeficientes dependen de la frecuencia de muestreo, asi que se
+    recalculan si ``dt`` cambia (en la Pi dt ~ 0,01 s; en las pruebas
+    dt = 0,1 s).
+
+    Ojo: el pasa-banda tiene ceros en DC y en Nyquist, asi que una
+    oscilacion justo a la mitad de la frecuencia de muestreo no
+    aparece (por eso las pruebas usan periodos de 4 muestras a 10 Hz
+    = 2,5 Hz, y no de 2).
+    """
+
+    def __init__(self, frecuencia_baja_hz: float, frecuencia_alta_hz: float) -> None:
+        self._frecuencia_baja = frecuencia_baja_hz
+        self._frecuencia_alta = frecuencia_alta_hz
+        self._fs: float | None = None
+        self._b0 = self._b2 = 0.0
+        self._a1 = self._a2 = 0.0
+        self._x1 = self._x2 = 0.0
+        self._y1 = self._y2 = 0.0
+        self._sembrado = False
+
+    def _disenar(self, fs: float) -> None:
+        """Fija los coeficientes para la frecuencia de muestreo ``fs``."""
+        # Guardas contra un dt enorme (fs por debajo del banda): el
+        # extremo alto nunca puede llegar a Nyquist.
+        alta = min(self._frecuencia_alta, 0.45 * fs)
+        baja = min(self._frecuencia_baja, 0.5 * alta)
+        if baja <= 0.0 or alta <= baja:
+            baja = 0.1 * alta
+
+        centro = math.sqrt(baja * alta)
+        ancho = math.log2(alta / baja)
+        w0 = 2.0 * math.pi * centro / fs
+        # alpha = sin(w0)/(2Q) con Q = 1/(2*sinh(ln2/2*BW))  ==>
+        alpha = math.sin(w0) * math.sinh(math.log(2.0) * 0.5 * ancho)
+
+        b0, b1, b2 = alpha, 0.0, -alpha
+        a0, a1, a2 = 1.0 + alpha, -2.0 * math.cos(w0), 1.0 - alpha
+        self._b0 = b0 / a0
+        self._b2 = b2 / a0
+        self._a1 = a1 / a0
+        self._a2 = a2 / a0
+
+    def pasar(self, muestra: float, fs: float) -> float:
+        """Devuelve la muestra filtrada (sin continua ni ruido de paso)."""
+        if fs <= 0:
+            return 0.0
+        if self._fs is None or abs(fs - self._fs) > 1e-6:
+            self._disenar(fs)
+            self._fs = fs
+            self._sembrado = False
+
+        if not self._sembrado:
+            # Arranque en continuo: la entrada actual ya es el estado
+            # estacionario (el pasa-banda responde 0 a una continua),
+            # asi que un sensor quieto en 1,15 g no genera transitorio
+            # ni ningun pico fantasma.
+            self._x1 = self._x2 = muestra
+            self._y1 = self._y2 = 0.0
+            self._sembrado = True
+            return 0.0
+
+        salida = (
+            self._b0 * muestra
+            + self._b2 * self._x2
+            - self._a1 * self._y1
+            - self._a2 * self._y2
+        )
+        self._x2, self._x1 = self._x1, muestra
+        self._y2, self._y1 = self._y1, salida
+        return salida
+
+
 class ContadorPasos:
     """Detecta pasos por la oscilacion de la aceleracion al caminar.
 
     El sensor va montado en la cintura: al caminar la magnitud de la
     aceleracion OSCILA alrededor de una media que cambia con la
-    postura (apoyar un pie, girar el torso, cargar algo).  Por eso el
-    umbral no se fija contra un reposo congelado sino contra una
-    **media local** (pasa-largas con ``tau_media_paso_s``): sigue la
-    postura en segundos, pero no la oscilacion del paso (2 a 6 Hz),
-    que es justo lo que hay que detectar.  Con la linea base vieja la
-    marcha la iba inflando hasta dejar los pasos reales debajo del
-    umbral ("a veces no cuenta").
+    postura (apoyar un pie, girar el torso, cargar algo).  Por eso la
+    senal pasa antes por un **pasa-banda 0,5 - 5 Hz**
+    (:class:`FiltroPaso`): solo queda la frecuencia del paso, y la
+    gravedad, la postura y el balanceo lento se van solos.  Sin
+    continua no hay media que perseguir, asi que tampoco hay pasos
+    fantasma por una linea base inflada ("a veces no cuenta").
 
-    Un paso es un cruce de ``delta_paso_g`` por encima de esa media,
-    con histéresis (hay que volver a bajar para rearmar) y un tiempo
-    refractario (``intervalo_paso_s``) contra el doble conteo.  Una
-    magnitud ALTA SOSTENIDA no genera cruces: sin oscilacion no hay
-    pasos, asi que tampoco hay pasos fantasma.
+    Un pico es un cruce del **umbral adaptativo**
+    ``max(umbral_paso_min_g, factor_umbral_paso * media_picos)``,
+    con histéresis (hay que bajar a la mitad para rearmar) y un
+    periodo refractario (``intervalo_paso_s``) contra el doble
+    conteo.  Los picos CONTADOS alimentan la media de picos, de modo
+    que el umbral se mantiene en la mitad de lo que de verdad produce
+    la marcha de esa persona.
 
-    Ademas, un cruce con mas de ``intervalo_paso_max_s`` desde el
-    anterior se descarta: no hay ritmo de marcha detras (la persona
-    estaba parada y movio el pie), y esos pasos de mas hacian que el
-    tramo terminara antes de tiempo.  Ese tope es un PISO: el limite
-    real tambien crece con el ritmo de la persona (2,5 veces la
-    mediana de sus ultimos pasos), para no descartarle pasos reales
-    a quien camina despacio.
+    Ademas hay que ir a **cadencia**: el intervalo del pico tiene que
+    caer dentro de +-``cadencia_tolerancia`` de la mediana de los
+    ultimos intervalos (hace falta ``cadencia_intervalos_minimos``
+    intervalos para poder juzgar) o de ``intervalo_paso_max_s`` (piso
+    duro, para descartar un paso suelto aunque aun no haya ritmo).
+    Un descarte reinicia el ritmo medido desde ese instante; tras
+    ``rechazos_rebasar`` descartes seguidos la cadencia se REBASELA
+    (la persona cambio de paso: paro, aviso, cuesta) y el siguiente
+    pico empieza un ritmo nuevo.
+
+    El reloj del contador es la suma de los ``dt`` recibidos (no
+    ``time.monotonic``): asi la deteccion es reproducible en las
+    pruebas y no depende de la carga de la camara.
     """
 
     def __init__(self, config: Configuracion):
         self._config = config
         self._pasos = 0
-        self._ultimo_paso = 0.0
-        self._media: float | None = None
+        # Reloj propio (segundos acumulados): unico origen del tiempo
+        # para intervalos y cadencia.
+        self._tiempo = 0.0
+        self._ultimo_paso: float | None = None
+        self._filtro = FiltroPaso(
+            config.frecuencia_paso_min_hz, config.frecuencia_paso_max_hz
+        )
+        # Pico en curso: hasta que no baja del umbral no se sabe su
+        # altura (es la que entra en la media de picos).
         self._en_pico = False
-        # El primer paso despues de ``reiniciar`` siempre cuenta: no
-        # hay cadencia previa con la que compararlo todavia.
-        self._arranque = True
+        self._pico_actual = 0.0
+        self._pico_contado = False
+        self._picos: deque[float] = deque(maxlen=5)
+        self._media_picos = 0.0
         # Intervalos de los ultimos pasos CONTADOS (los descartados no
-        # entran): de ahi sale el ritmo con el que se afloja el tope.
+        # entran): de ahi sale la cadencia con la que se juzga el
+        # proximo paso.
         self._ritmo: deque[float] = deque(maxlen=5)
+        self._rechazos = 0
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
         """Cuenta un paso si la muestra trae una oscilacion de paso."""
-        magnitud = lectura.magnitud_aceleracion
+        dt = min(dt, DT_MAXIMO_S)
+        self._tiempo += dt
 
-        # La primera muestra fija la media inicial (evita el conteo
-        # fantasma del arranque mientras se manipula el equipo).
-        if self._media is None:
-            self._media = magnitud
-
-        # Senal de paso: cuanto se separa la magnitud de su media
-        # local.  Se mide ANTES de actualizar la media, para que el
-        # pico actual no se coma su propio umbral.
-        oscilacion = magnitud - self._media
-
-        if dt > 0:
-            alfa = min(dt / self._config.tau_media_paso_s, 1.0)
-            self._media += (magnitud - self._media) * alfa
-
-        delta = self._config.delta_paso_g
-        ahora = time.monotonic()
+        fs = 1.0 / dt if dt > 0 else 100.0
+        filtrada = self._filtro.pasar(lectura.magnitud_aceleracion, fs)
+        umbral = self._umbral(filtrada)
 
         if self._en_pico:
-            # Para volver a contar, la oscilacion tiene que bajar
-            # (histéresis a la mitad del umbral).
-            if oscilacion <= delta * 0.5:
+            if filtrada > self._pico_actual:
+                self._pico_actual = filtrada
+            if filtrada <= umbral * 0.5:
+                # Bajo la histéresis: el pico termino y se anota su
+                # altura si el paso conto.
+                if self._pico_contado:
+                    self._picos.append(self._pico_actual)
+                    self._media_picos = sum(self._picos) / len(self._picos)
                 self._en_pico = False
-        elif (
-            oscilacion >= delta
-            and ahora - self._ultimo_paso >= self._config.intervalo_paso_s
-        ):
-            intervalo = ahora - self._ultimo_paso
-            limite = self._limite_de_ritmo()
-            if not self._arranque and limite > 0.0 and intervalo > limite:
-                # Paso suelto: sin ritmo de marcha detras (la persona
-                # estaba parada y movio el pie, o el sensor registro
-                # un movimiento suelto).  No suma al tramo, pero el
-                # ritmo se reinicia para no descartar tambien el
-                # primer paso real despues de la pausa.
-                self._ultimo_paso = ahora
-                self._en_pico = True
-                print(
-                    f"PASO DESCARTADO: {intervalo:.1f} s sin marcha "
-                    f"(maximo {limite:.1f} s)"
-                )
-            else:
-                ritmo = "" if self._arranque else f", cada {intervalo:.2f} s"
-                if not self._arranque:
-                    # Va al ritmo de la persona: con el se decide
-                    # cuanto aguanta el tope del proximo paso.
-                    self._ritmo.append(intervalo)
-                self._pasos += 1
-                self._arranque = False
-                self._ultimo_paso = ahora
-                self._en_pico = True
-                # Se imprime la oscilacion junto al paso para poder
-                # calibrar el umbral (delta_paso_g) en la casa: si los
-                # pasos reales quedan por debajo del umbral, no se
-                # cuentan.  El intervalo deja ver en consola si un paso
-                # salio pegado al anterior (doble conteo).
-                print(
-                    f"PASO: {self._pasos} (pico {oscilacion:+.2f} g, "
-                    f"umbral {delta:.2f} g{ritmo})"
-                )
+                self._pico_contado = False
+            return
 
-    def _limite_de_ritmo(self) -> float:
-        """Intervalo maximo permitido: el piso o el ritmo de la persona.
+        if filtrada >= umbral:
+            self._valorar_pico(filtrada, umbral)
 
-        ``intervalo_paso_max_s`` es un PISO: descarta lo que no tiene
-        marcha detras (paradas para escuchar, movimientos sueltos).
-        Pero si la persona camina lenta, su propio ritmo ya se acerca
-        al piso y con un tope duro se le descartarian pasos reales
-        ("algunos pasos no me los cuenta").  Por eso el limite tambien
-        crece con la mediana de sus ultimos pasos: 2,5 veces el ritmo.
-        Con un paso cada 0,4 s manda el piso (1,5 s); con un paso
-        cada 1,2 s el limite sube a 3,0 s.  Las pausas de verdad
-        duran mas que eso y siguen descartandose.
-        """
+    def _umbral(self, _filtrada: float) -> float:
+        """Umbral adaptativo: el piso o la mitad de los picos reales."""
+        return max(
+            self._config.umbral_paso_min_g,
+            self._config.factor_umbral_paso * self._media_picos,
+        )
+
+    def _valorar_pico(self, pico: float, umbral: float) -> None:
+        """Decide si este pico es un paso (y lo cuenta o lo descarta)."""
+        # El pico se abre aunque no se cuente: asi un pico descartado
+        # no se re-evalua muestra a muestra hasta que baje.
+        self._en_pico = True
+        self._pico_actual = pico
+        self._pico_contado = False
+
+        if self._ultimo_paso is None:
+            # Primer paso (o el primero de un tramo nuevo): siempre
+            # cuenta, todavia no hay cadencia con la que compararlo.
+            self._contar(pico, umbral, None)
+            return
+
+        intervalo = self._tiempo - self._ultimo_paso
+        if intervalo < self._config.intervalo_paso_s:
+            # Periodo refractario: ni se cuenta ni se juzga (el doble
+            # conteo de un mismo pico no debe tocar la cadencia).
+            return
+
+        motivo = self._descarte(intervalo)
+        if motivo is None:
+            self._contar(pico, umbral, intervalo)
+        else:
+            self._descartar(pico, umbral, intervalo, motivo)
+
+    def _descarte(self, intervalo: float) -> str | None:
+        """Motivo por el que el pico no vale como paso, o ``None``."""
         piso = self._config.intervalo_paso_max_s
-        if piso <= 0.0:
-            # En 0 el descarte queda desactivado (como siempre).
-            return 0.0
-        if len(self._ritmo) < 3:
-            return piso
-        ordenados = sorted(self._ritmo)
-        mediana = ordenados[len(ordenados) // 2]
-        return max(piso, self._config.intervalo_paso_factor_ritmo * mediana)
+        if piso > 0.0 and intervalo > piso:
+            return "sin_marcha"
+        if len(self._ritmo) < self._config.cadencia_intervalos_minimos:
+            return None  # todavia no hay cadencia que juzgar
+        mediana = self._mediana(self._ritmo)
+        if mediana <= 0.0:
+            return None
+        tolerancia = self._config.cadencia_tolerancia * mediana
+        if abs(intervalo - mediana) > tolerancia:
+            return "cadencia"
+        return None
+
+    @staticmethod
+    def _mediana(valores: deque[float]) -> float:
+        ordenados = sorted(valores)
+        return ordenados[len(ordenados) // 2]
+
+    def _contar(self, pico: float, umbral: float, intervalo: float | None) -> None:
+        self._pasos += 1
+        self._pico_contado = True
+        if intervalo is not None:
+            self._ritmo.append(intervalo)
+        self._rechazos = 0
+        self._ultimo_paso = self._tiempo
+        ritmo = "" if intervalo is None else f", cada {intervalo:.2f} s"
+        # El pico y el umbral se imprimen para poder calibrarlos en la
+        # casa: si los pasos reales quedan por debajo del umbral, no se
+        # cuentan; si el umbral esta muy bajo, entra ruido.
+        print(
+            f"PASO: {self._pasos} (pico {pico:+.2f} g, "
+            f"umbral {umbral:.2f} g{ritmo})"
+        )
+
+    def _descartar(
+        self, pico: float, umbral: float, intervalo: float, motivo: str
+    ) -> None:
+        self._rechazos += 1
+        # El ritmo se reinicia AQUI: el proximo pico se mide desde
+        # este y no arrastra el hueco de la parada.
+        self._ultimo_paso = self._tiempo
+        if motivo == "sin_marcha":
+            print(
+                f"PASO DESCARTADO: {intervalo:.1f} s sin marcha "
+                f"(maximo {self._config.intervalo_paso_max_s:.1f} s)"
+            )
+        else:
+            mediana = self._mediana(self._ritmo)
+            print(
+                f"PASO DESCARTADO: cadencia {intervalo:.2f} s fuera de "
+                f"+-{self._config.cadencia_tolerancia * 100:.0f} % "
+                f"del ritmo {mediana:.2f} s"
+            )
+
+        if self._rechazos >= self._config.rechazos_rebasar:
+            # La cadencia ya no describe a la persona (paro, aviso,
+            # cuesta, cambio de paso): se olvida y el siguiente pico
+            # arranca un ritmo nuevo.
+            self._ritmo.clear()
+            self._rechazos = 0
+            print("RITMO REBASELADO: los ultimos pasos no encajaban")
 
     @property
     def pasos(self) -> int:
@@ -436,8 +571,14 @@ class ContadorPasos:
         return self._pasos
 
     def reiniciar(self) -> None:
-        """Pone el contador en cero (la media local se conserva)."""
+        """Pone el contador en cero.
+
+        Se queda con la cadencia y la media de picos (son de la
+        persona, no del tramo) y borra el ultimo paso: el primero del
+        tramo nuevo cuenta sin juzgar, como siempre.
+        """
         self._pasos = 0
-        self._ultimo_paso = 0.0
+        self._ultimo_paso = None
         self._en_pico = False
-        self._arranque = True
+        self._pico_contado = False
+        self._rechazos = 0

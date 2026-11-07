@@ -451,13 +451,16 @@ def test_flujo_completo() -> None:
     )
 
     # --- 3.5 Camina los pasos del tramo ----------------------------
-    # Al caminar la magnitud *oscila* (pico, reposo, pico...): el
-    # contador la detecta por cruce de la linea base, no por nivel.
-    # El tramo completo Sala -> Baño: cada pico vale un paso, asi
-    # que hacen falta ~2 vueltas por paso.
+    # Al caminar la magnitud *oscila* (pico, reposo, pico...) y el
+    # contador solo ve lo que queda DESPUES del pasa-banda 0,5 - 5 Hz:
+    # la oscilacion tiene que estar dentro de banda.  Con dt = 0,1 s
+    # (10 Hz) un ciclo de 4 muestras es 2,5 Hz, y cada ciclo vale un
+    # paso.  El tramo Sala -> Baño son 31 pasos del mapa y el corte
+    # sin senal esta en el 130 % (41 pasos): con 240 muestras (60
+    # ciclos) se llega con holgura.
     mpu.gz = 0.0
-    for i in range(110):
-        mpu.az = 1.6 if i % 2 else 1.0
+    for i in range(240):
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is Estado.CONFIRMANDO_LLEGADA:
             break
@@ -716,8 +719,9 @@ def test_pasos_sin_fantasmas() -> None:
     pasos = movimiento.ContadorPasos(config)
     mpu = MPUFalso()
 
-    # El acelerometro sin calibrar se sostiene en 1.15 g: quieto no
-    # debe contar un paso cada 0.35 segundos para siempre.
+    # El acelerometro sin calibrar se sostiene en 1.15 g: una
+    # continua no genera picos (el pasa-banda no tiene entrada en
+    # continua), asi que quieto no debe contar nada para siempre.
     mpu.az = 1.15
     for _ in range(400):  # 4 segundos de reposo fingido
         pasos.en_muestra(mpu.leer(), dt=0.01)
@@ -727,9 +731,11 @@ def test_pasos_sin_fantasmas() -> None:
     )
 
     # Al caminar la magnitud oscila (pico y reposo): ahi si cuenta.
+    # Periodo de 50 muestras a dt = 0,01 s = 2 Hz, dentro de la banda
+    # del paso; con el periodo de 4 (25 Hz) la senal quedaria fuera.
     pasos.reiniciar()
-    for i in range(400):
-        mpu.az = 1.6 if i % 4 < 2 else 1.0
+    for i in range(500):
+        mpu.az = 1.6 if i % 50 < 25 else 1.0
         pasos.en_muestra(mpu.leer(), dt=0.01)
     comprobar(pasos.pasos >= 5, "al caminar si cuenta los pasos")
 
@@ -860,10 +866,11 @@ def test_encarada_y_desvio() -> None:
 
     # Al caminar se va curvando a la derecha: hay que avisar que
     # corrija a la izquierda (el rumbo acumulado delata la curva).
+    # Ciclo de 4 muestras a dt = 0,1 s = 2,5 Hz: un paso por ciclo.
     locutor.frases.clear()
     mpu.gz = -60.0
     for i in range(8):
-        mpu.az = 1.6 if i % 2 else 1.0
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
     comprobar(
         any("desviando" in frase for frase in locutor.frases),
@@ -882,7 +889,7 @@ def test_encarada_y_desvio() -> None:
     # NO se acreditan (la ruta medida es en linea recta).
     locutor.frases.clear()
     for i in range(8):
-        mpu.az = 1.6 if i % 2 else 1.0
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion.pasos.avanzar() > 2,
@@ -924,9 +931,10 @@ def test_encarada_y_desvio() -> None:
         "no avisa ya casi enderezas mientras corrige",
     )
     mpu.gz = 0.0
-    # El tramo completo Sala -> Baño (dos vueltas por paso).
-    for i in range(110):
-        mpu.az = 1.6 if i % 2 else 1.0
+    # El tramo completo Sala -> Baño: un ciclo de 4 muestras (2,5 Hz)
+    # vale un paso; 41 pasos (130 % de 31) caben en 240 muestras.
+    for i in range(240):
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is Estado.CONFIRMANDO_LLEGADA:
             break
@@ -1084,7 +1092,7 @@ def test_relocalizacion_y_devolucion() -> None:
     detector.senal = None
     mpu.gz = 0.0
     for i in range(40):
-        mpu.az = 1.6 if i % 2 else 1.0
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is not Estado.NAVEGANDO:
             break
@@ -1124,8 +1132,8 @@ def test_relocalizacion_y_devolucion() -> None:
     aplicacion.lado_puerta = LADO_INTERIOR
     aplicacion.destino = "Baño"
     aplicacion._iniciar_navegacion([Instruccion(Accion.CAMINAR, 6)])
-    for i in range(10):
-        mpu.az = 1.6 if i % 2 else 1.0
+    for i in range(16):
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
     comprobar(aplicacion._pasos_acreditados > 0, "acredita algunos pasos rectos")
     detector.senal = Senal("Sala", LADO_INTERIOR)  # miro hacia atras: sigue en Sala
@@ -1553,7 +1561,7 @@ def test_encarada_intermedia_de_tramo() -> None:
     mpu.gz = 0.0
     pasos = TRAMOS_DEMO[("Inicio", "Cuarto")].pasos
     for i in range(pasos * 8):
-        mpu.az = 1.6 if i % 2 else 1.0
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is not Estado.NAVEGANDO:
             break
@@ -1622,7 +1630,7 @@ def test_encarada_intermedia_de_tramo() -> None:
     mpu.gz = 0.0
     pasos = TRAMOS_DEMO[("Cuarto", "Sala")].pasos
     for i in range(pasos * 8):
-        mpu.az = 1.6 if i % 2 else 1.0
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
         if aplicacion.estado is not Estado.NAVEGANDO:
             break
@@ -1716,30 +1724,33 @@ def test_encarada_automatica() -> None:
 
 
 def test_pasos_con_media_cambiada() -> None:
-    """La media local sigue un cambio de postura sin dejar de contar.
+    """Una subida de postura no deja de contar los pasos.
 
     Con la linea base vieja (un reposo congelado) la marcha inflaba la
     referencia y los pasos reales se hundian bajo el umbral: "a veces
     no cuenta".  Aqui toda la magnitud sube 0.10 g de golpe (la
-    persona se agacha o carga algo) y el contador tiene que seguir.
+    persona se agacha o carga algo): el pasa-banda no tiene entrada en
+    continua, asi que esa subida se va sola y la oscilacion del paso
+    sigue saliendo igual.
     """
-    print("\n[17] Pasos: la media local sigue la postura que cambia")
+    print("\n[17] Pasos: una subida de postura no corta la cuenta")
     config = Configuracion()
     pasos = movimiento.ContadorPasos(config)
     mpu = MPUFalso()
 
-    # Marcha con la cintura a la altura normal: valles 1.00, picos 1.25.
-    for i in range(200):
-        mpu.az = 1.25 if i % 4 < 2 else 1.00
+    # Marcha con la cintura a la altura normal: valles 1.00, picos
+    # 1.25.  Periodo de 50 muestras a dt = 0,01 s = 2 Hz (en banda).
+    for i in range(500):
+        mpu.az = 1.25 if i % 50 < 25 else 1.00
         pasos.en_muestra(mpu.leer(), dt=0.01)
     comprobar(pasos.pasos >= 5, "con la postura inicial cuenta los pasos")
 
-    # Toda la magnitud sube 0.10 g (valles 1.10, picos 1.35): la media
-    # local la persigue en fraccion de segundo y la oscilacion de 0.25 g
-    # sigue cruzando el umbral de delta_paso_g.
+    # Toda la magnitud sube 0.10 g de golpe (valles 1.10, picos
+    # 1.35): el continua lo bloquea el filtro y la oscilacion de
+    # 0.25 g sigue cruzando el umbral adaptativo igual que antes.
     previos = pasos.pasos
-    for i in range(200):
-        mpu.az = 1.35 if i % 4 < 2 else 1.10
+    for i in range(500):
+        mpu.az = 1.35 if i % 50 < 25 else 1.10
         pasos.en_muestra(mpu.leer(), dt=0.01)
     comprobar(
         pasos.pasos - previos >= 5,
@@ -1861,10 +1872,11 @@ def test_desvio_requiere_confirmacion() -> None:
 
     # Unos pasos rectos fijan la referencia de la linea recta (el
     # acelerometro oscila: tienen que llegar pasos crudos para que la
-    # referencia se bloquee con el primer paso).
+    # referencia se bloquee con el primer paso).  Ciclo de 4 muestras
+    # a dt = 0,1 s = 2,5 Hz, dentro de la banda del paso.
     mpu.gz = 0.0
     for i in range(4):
-        mpu.az = 1.6 if i % 2 else 1.0
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
 
     # Se va curvando a la derecha: el umbral se cruza a las pocas
@@ -1872,7 +1884,7 @@ def test_desvio_requiere_confirmacion() -> None:
     # ``confirmacion_desvio_s`` segundos de reloj real.
     mpu.gz = -60.0
     for i in range(7):
-        mpu.az = 1.6 if i % 2 else 1.0
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion._inicio_desvio is not None,
@@ -2022,7 +2034,7 @@ def test_pasos_sin_ritmo_se_descartan() -> None:
 
     La persona se para a escuchar un aviso, mueve el pie y ese cruce
     sumaba: el tramo terminaba antes de tiempo (llegada anunciada con
-    pasos todavia faltando).  Ahora un cruce con mas de
+    pasos todavia faltando).  Ahora un pico con mas de
     ``intervalo_paso_max_s`` desde el anterior se descarta, y el ritmo
     se reinicia para no perder tambien el primer paso real de
     despues de la pausa.
@@ -2034,37 +2046,42 @@ def test_pasos_sin_ritmo_se_descartan() -> None:
     mpu = MPUFalso()
 
     def marchar(muestras: int) -> None:
-        # Pico y reposo cada 4 muestras: con el reloj falso (0.1 s
-        # por muestra) eso es una cadencia de 0.4 s, de marcha normal.
+        # Pico y reposo cada 50 muestras a dt = 0,01 s: 2 Hz, una
+        # cadencia de 0,5 s, de marcha normal.
         for i in range(muestras):
-            mpu.az = 1.6 if i % 4 < 2 else 1.0
+            mpu.az = 1.6 if i % 50 < 25 else 1.0
             pasos.en_muestra(mpu.leer(), dt=0.01)
 
-    # En reposo se asienta la media local (el primer pico la tendria
-    # en 1.6 g y no habria oscilacion que detectar).
+    def un_paso() -> None:
+        # Media oscilacion de 0,25 s: tiene la forma (y la energia en
+        # banda) de un paso real, asi que el contador la VE; lo que
+        # decide despues es el ritmo, no la forma del pico.
+        for i in range(50):
+            mpu.az = 1.6 if i < 25 else 1.0
+            pasos.en_muestra(mpu.leer(), dt=0.01)
+
+    # En reposo la magnitud esta quieta: sin oscilacion no hay picos
+    # que detectar (el pasa-banda no tiene entrada en continua).
     mpu.az = 1.0
     for _ in range(150):
         pasos.en_muestra(mpu.leer(), dt=0.01)
 
     # Marcha normal: los pasos cuentan.
-    marchar(40)
+    marchar(300)
     contados = pasos.pasos
     comprobar(
         contados >= 5,
         f"al caminar con ritmo cuenta los pasos ({contados})",
     )
 
-    # Se para (a escuchar un aviso, a esquivar algo): 15 s sin marcha.
+    # Se para (a escuchar un aviso, a esquivar algo): 3 s sin marcha.
     mpu.az = 1.0
-    for _ in range(150):
+    for _ in range(300):
         pasos.en_muestra(mpu.leer(), dt=0.01)
     comprobar(pasos.pasos == contados, "en la parada no inventa pasos")
 
     # Un solo movimiento del pie despues de la parada: NO cuenta.
-    mpu.az = 1.6
-    pasos.en_muestra(mpu.leer(), dt=0.01)
-    mpu.az = 1.0
-    pasos.en_muestra(mpu.leer(), dt=0.01)
+    un_paso()
     comprobar(
         pasos.pasos == contados,
         "un paso suelto sin ritmo de marcha se descarta",
@@ -2072,7 +2089,7 @@ def test_pasos_sin_ritmo_se_descartan() -> None:
 
     # Y al volver a caminar el primer paso real SI cuenta: el ritmo
     # se reinicio con el descarte, no se pierde una tanda entera.
-    marchar(8)
+    marchar(150)
     comprobar(
         pasos.pasos >= contados + 1,
         "tras la pausa el primer paso de la marcha si cuenta",
@@ -2081,8 +2098,7 @@ def test_pasos_sin_ritmo_se_descartan() -> None:
     # El primer paso de un tramo nuevo siempre cuenta, aunque desde
     # el ultimo paso del tramo anterior haya pasado mucho.
     pasos.reiniciar()
-    mpu.az = 1.6
-    pasos.en_muestra(mpu.leer(), dt=0.01)
+    un_paso()
     comprobar(
         pasos.pasos == 1,
         "el primer paso de un tramo nuevo siempre cuenta",
@@ -2360,7 +2376,7 @@ def test_llegada_por_ventana() -> None:
     def caminar_hasta(pasos: int) -> None:
         """Da pasos rectos hasta acreditar ``pasos`` (o cambiar de estado)."""
         for i in range(400):
-            mpu.az = 1.6 if i % 2 else 1.0
+            mpu.az = 1.6 if i % 4 < 2 else 1.0
             paso(aplicacion, detector, mpu)
             if (
                 aplicacion._pasos_acreditados >= pasos
@@ -2616,7 +2632,7 @@ def test_zancada_adaptativa() -> None:
 
     def caminar_hasta(pasos: int) -> None:
         for i in range(400):
-            mpu.az = 1.6 if i % 2 else 1.0
+            mpu.az = 1.6 if i % 4 < 2 else 1.0
             paso(aplicacion, detector, mpu)
             if (
                 aplicacion._pasos_acreditados >= pasos
@@ -2677,6 +2693,117 @@ def test_zancada_adaptativa() -> None:
     )
 
 
+def test_detector_de_pasos() -> None:
+    """La banda del paso acepta marcha lenta, rapida y suave.
+
+    El detector no compara contra una media que se escapa de la
+    postura: filtra en banda (0,5 - 5 Hz), pone el umbral en la mitad
+    de los picos REALES de la marcha y valida la cadencia contra el
+    ritmo medido.  Con senales sinteticas se comprueba que las tres
+    marchas tipicas cuentan (un paso cada 1 s, cada 0,25 s y un
+    balanceo suave de 0,12 g), que el ruido fuera de banda no cuenta,
+    que el umbral sube con la marcha vigorosa y que tres cruces
+    seguidos fuera de cadencia re-baselan el ritmo.
+    """
+    print("\n[29] Pasos: banda del paso, umbral adaptativo y ritmo rebasado")
+    config = Configuracion()
+
+    def marcha(periodo: int, muestras: int):
+        """Contador nuevo con ``muestras`` a dt = 0,01 s y ciclo de ``periodo``.
+
+        El ciclo es medio periodo en alto (el pico del paso) y medio
+        en bajo (el reposo), como la oscilacion de la acelerometro
+        al apoyar un pie.
+        """
+        pasos = movimiento.ContadorPasos(config)
+        mpu = MPUFalso()
+        for i in range(muestras):
+            mpu.az = 1.6 if i % periodo < periodo // 2 else 1.0
+            pasos.en_muestra(mpu.leer(), dt=0.01)
+        return pasos
+
+    # --- 29.1 Marcha lenta: un paso cada segundo -------------------
+    # 100 muestras de periodo = 1 Hz, comodamente por encima del
+    # minimo de banda (0,5 Hz) y con el intervalo por debajo del
+    # piso de "sin marcha" (1,5 s).
+    lenta = marcha(100, 700)
+    comprobar(lenta.pasos >= 5, f"la marcha lenta (1 s/paso) cuenta ({lenta.pasos})")
+
+    # --- 29.2 Marcha rapida: un paso cada 0,25 s ------------------
+    # 25 muestras de periodo = 4 Hz: aun dentro de la banda (5 Hz) y
+    # por encima del periodo refractario (0,18 s).
+    rapida = marcha(25, 300)
+    comprobar(rapida.pasos >= 8, f"la marcha rapida (0,25 s/paso) cuenta ({rapida.pasos})")
+    comprobar(
+        rapida._umbral(0.0) > config.umbral_paso_min_g,
+        "el umbral sube con los picos reales de la marcha vigorosa",
+    )
+
+    # --- 29.3 Marcha suave: balanceo de 0,12 g --------------------
+    # Seno continuo (no un cuadrado): es el vaiven suave de la
+    # cintura.  Su pico filtrado ronda el umbral minimo, pero lo
+    # cuenta sin tocar la configuracion.
+    suave = movimiento.ContadorPasos(config)
+    mpu = MPUFalso()
+    for i in range(500):  # 2 Hz, amplitud 0,12 g
+        mpu.az = 1.0 + 0.12 * math.sin(2.0 * math.pi * i * 0.01 / 0.5)
+        suave.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(suave.pasos >= 8, f"la marcha suave (0,12 g) cuenta ({suave.pasos})")
+
+    # --- 29.4 Ruido fuera de banda no cuenta -----------------------
+    # Tres muestras de 20 Hz (periodo de 5): muy por encima de los
+    # 5 Hz de la banda, el pasa-banda las atenua y no hay cruce.
+    fuera = movimiento.ContadorPasos(config)
+    mpu = MPUFalso()
+    for i in range(300):
+        mpu.az = 1.6 if i % 5 < 1 else 1.0
+        fuera.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(fuera.pasos == 0, "el temblor a 20 Hz (fuera de banda) no cuenta")
+
+    # --- 29.5 Tres cruces fuera de cadencia re-baselan el ritmo ---
+    pasos = movimiento.ContadorPasos(config)
+    mpu = MPUFalso()
+    for i in range(350):  # marcha a 0,5 s: el ritmo queda medido
+        mpu.az = 1.6 if i % 50 < 25 else 1.0
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    contados = pasos.pasos
+    comprobar(contados >= 5, f"la marcha a 0,5 s cuenta ({contados})")
+
+    def cruce_lento() -> None:
+        # Un cruce cada segundo (100 muestras): muy lejos del ritmo
+        # medido (0,5 s +-40 %), se descarta.
+        for i in range(100):
+            mpu.az = 1.6 if i < 25 else 1.0
+            pasos.en_muestra(mpu.leer(), dt=0.01)
+
+    mpu.az = 1.0
+    for _ in range(100):  # silencio: el primer cruce ya llega tarde
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    for _ in range(3):
+        cruce_lento()
+    comprobar(
+        pasos.pasos == contados,
+        "los tres cruces de 1 s se descartan contra el ritmo de 0,5 s",
+    )
+    comprobar(
+        not pasos._ritmo,
+        "tres descartes seguidos re-baselan el ritmo (se olvida)",
+    )
+
+    # Con el ritmo olvidado, la cadencia de 1 s cuenta desde el
+    # primer paso: si el ritmo viejo siguiera, el primer cruce de 1 s
+    # se volveria a descartar.
+    previos = pasos.pasos
+    for i in range(300):  # tres ciclos de 100 muestras a 1 Hz
+        mpu.az = 1.6 if i % 100 < 50 else 1.0
+        pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        pasos.pasos - previos >= 3,
+        f"re-baselado, la cadencia de 1 s cuenta desde el primer paso "
+        f"({pasos.pasos - previos})",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2715,6 +2842,7 @@ def main() -> int:
         test_giro_compensado()
         test_llegada_por_ventana()
         test_zancada_adaptativa()
+        test_detector_de_pasos()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1
