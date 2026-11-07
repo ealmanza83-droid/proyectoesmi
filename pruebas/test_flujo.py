@@ -123,6 +123,7 @@ from guia.hardware.mpu6050 import LecturaMPU  # noqa: E402
 from guia.hardware.ultrasonido import intervalo_de_beep  # noqa: E402
 from guia.navegacion import movimiento as movimiento  # noqa: E402
 from guia.navegacion.caida import DetectorCaida  # noqa: E402
+from guia.navegacion.odometro import OdometroUltrasonico  # noqa: E402
 from guia.navegacion.rumbo import Rumbo  # noqa: E402
 from guia.vision.detector import (  # noqa: E402
     Deteccion,
@@ -180,6 +181,7 @@ class SensorFalso:
         # avisos de obstaculo se prueban con el eco presente.
         self.distancia_cm = distancia_cm
         self.distancia_alerta_cm = Configuracion().distancia_alerta_cm
+        self.secuencia_medicion = 0
 
 
 class AlarmaFalsa:
@@ -2874,6 +2876,82 @@ def test_distancia_visual_y_mediana() -> None:
     )
 
 
+def test_odometro_ultrasonico_estable() -> None:
+    """El odómetro solo acepta medianas con varias lecturas estables."""
+    print("\n[32] Odómetro ultrasónico: estabilidad y rechazo de saltos")
+    config = dataclasses.replace(
+        Configuracion(),
+        muestras_ultrasonido_odometro=3,
+        salto_maximo_ultrasonido_cm=20.0,
+    )
+    odometro = OdometroUltrasonico(config)
+    comprobar(odometro.observar(200.0) is None, "espera las primeras lecturas")
+    comprobar(odometro.observar(198.0) is None, "acumula la ventana estable")
+    comprobar(odometro.observar(196.0) == 198.0, "entrega la mediana de 3 medidas")
+    comprobar(
+        odometro.observar(350.0) is None,
+        "rechaza un salto brusco sin contaminar la ventana",
+    )
+    comprobar(
+        odometro.observar(194.0) == 196.0,
+        "continúa con lecturas válidas tras el salto",
+    )
+    odometro.reiniciar()
+    comprobar(
+        odometro.observar(None) is None,
+        "la ausencia de eco reinicia la ventana estable",
+    )
+    mapa = PlanificadorRutas(
+        {
+            ("A", "B"): TramoRuta(
+                pasos=4,
+                giros=("izquierda",),
+                distancia_m=2.0,
+                distancia_frontal_fin_cm=40.0,
+            )
+        }
+    )
+    ida = mapa.planificar("A", "B")
+    vuelta = mapa.planificar("B", "A")
+    comprobar(
+        ida is not None
+        and vuelta is not None
+        and ida[1].distancia_frontal_fin_cm == 40.0
+        and vuelta[1].distancia_frontal_fin_cm == 40.0,
+        "la distancia frontal opcional acompaña el tramo en ambos sentidos",
+    )
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(200.0),
+        alarma=AlarmaFalsa(),
+        locutor=LocutorFalso(),
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        planificador=mapa,
+        ventana=VentanaFalsa(),
+    )
+    aplicacion._distancia_tramo = 5.0
+    aplicacion._instruccion_actual = ida[1]
+    for _ in range(3):
+        aplicacion.sensor.secuencia_medicion += 1
+        aplicacion._actualizar_odometro_ultrasonico(ida[1])
+    comprobar(
+        aplicacion._distancia_frontal_inicio_cm == 200.0
+        and aplicacion._avance_ultrasonico_m == 0.0,
+        "fija el origen solo tras tres lecturas frontales estables",
+    )
+    aplicacion.sensor.distancia_cm = 180.0
+    for _ in range(2):
+        aplicacion.sensor.secuencia_medicion += 1
+        aplicacion._actualizar_odometro_ultrasonico(ida[1])
+    comprobar(
+        aplicacion._avance_ultrasonico_m == 0.2,
+        "usa d_inicio - d_actual como avance tras estabilizar la lectura",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -2915,6 +2993,7 @@ def main() -> int:
         test_detector_de_pasos()
         test_evaluacion_offline_pasos()
         test_distancia_visual_y_mediana()
+        test_odometro_ultrasonico_estable()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

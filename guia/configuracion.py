@@ -61,6 +61,8 @@ class Configuracion:
     focal_px: float = 0.0
     distancia_mediana_frames: int = 5
     distancia_mediana_perdidas: int = 3
+    altura_puerta_m: float = 2.0
+    ancho_puerta_m: float = 0.9
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
 
     # ------------------------------------------------------------------
@@ -312,6 +314,10 @@ class Configuracion:
     # reaccion sin llenar de pitidos todo el pasillo; el intervalo se
     # re-escala solo (ver ``intervalo_de_beep``).
     distancia_alerta_cm: float = 300.0
+    # Odómetro opcional de pasillo: exige varias lecturas estables y
+    # rechaza saltos bruscos antes de usarlas para corregir posición.
+    muestras_ultrasonido_odometro: int = 5
+    salto_maximo_ultrasonido_cm: float = 60.0
 
     def preparar(self) -> None:
         """Crea las carpetas que el sistema necesita para funcionar."""

@@ -500,6 +500,10 @@ sensor), y verifican el comportamiento completo. Ejemplos:
 31. **Distancia visual**: el tamaño de caja produce alto/ancho en
     píxeles y `d=f·H/h`; una mediana de cinco frames reduce saltos y
     una focal sin calibrar no produce distancia.
+32. **Odómetro opcional**: un tramo puede declarar la distancia frontal
+    conocida al final; lecturas HC-SR04 nuevas y estables estiman
+    `d_inicio - d_actual`, pero la señal de cámara sigue siendo la única
+    confirmación de llegada.
 
 Si en la presentación preguntan "¿cómo saben que funciona?": la respuesta
 es esta suite (más la prueba física en la casa).
@@ -523,6 +527,14 @@ su caja en un frame tomado a distancia conocida. Ejecuta
 `python pruebas/calibrar_focal.py --distancia-m 1.5 --altura-real-m 0.20 --alto-px 96`
 y copia la salida en `Configuracion.focal_px`; reemplaza las medidas del
 ejemplo por las reales de la casa.
+
+El HC-SR04 también puede estimar el avance en un pasillo con una pared
+frontal conocida al final. Configura
+`TramoRuta(distancia_frontal_fin_cm=...)` con esa distancia final,
+ajusta `muestras_ultrasonido_odometro` y
+`salto_maximo_ultrasonido_cm`, y valida las lecturas con el sensor. No
+uses una puerta lateral como referencia frontal: el sensor debe mirar
+hacia la pared o puerta de fin de tramo.
 
 ---
 

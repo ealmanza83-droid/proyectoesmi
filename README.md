@@ -246,6 +246,8 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Altura real de la señal impresa | `altura_senal_m` | `0.20` m (medir en la casa) |
 | Focal calibrada de la cámara | `focal_px` | `0` (desactivada hasta calibrar) |
 | Ventana de mediana para distancia visual | `distancia_mediana_frames` | `5` frames |
+| Muestras estables del odómetro ultrasónico | `muestras_ultrasonido_odometro` | `5` |
+| Salto máximo entre lecturas estables | `salto_maximo_ultrasonido_cm` | `60` cm |
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
@@ -289,6 +291,12 @@ misma realidad y no hace falta que cuadren con una zancada fija:
 
 (las distancias se midieron desde Inicio; el tramo intermedio es la
 diferencia entre una medida y la siguiente).
+
+Si un pasillo termina frente a una pared o puerta cuya distancia se
+conoce, el tramo puede activar opcionalmente el odómetro con
+`distancia_frontal_fin_cm`. El avance ultrasónico es la diferencia entre
+la primera distancia estable y la actual; se corrige con la ventana de
+llegada, pero **nunca confirma por sí solo** que se llegó.
 
 **Zancada adaptativa** (`guia/dominio/zancada.py`): mientras no haya
 ninguna medida, el plan usa `pasos` (el conteo del mapa). En cuanto la

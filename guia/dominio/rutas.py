@@ -26,6 +26,9 @@ class TramoRuta:
     # (ver Zancada y PlanificadorRutas.planificar): ``pasos`` es el
     # conteo de quien lo anduvo mientras nadie ha medido la zancada.
     distancia_m: float = 0.0
+    # Distancia frontal conocida al final del pasillo. None desactiva
+    # el odómetro ultrasónico para este tramo.
+    distancia_frontal_fin_cm: float | None = None
 
 
 class Accion(Enum):
@@ -46,6 +49,7 @@ class Instruccion:
     # Solo al caminar: metros del tramo (lo que hay que repartir entre
     # los pasos).  0.0 si el mapa no lo midio.
     distancia_m: float = 0.0
+    distancia_frontal_fin_cm: float | None = None
 
     @property
     def es_giro(self) -> bool:
@@ -171,6 +175,7 @@ class PlanificadorRutas:
                     pasos=tramo.pasos,
                     giros=tuple(_GIRO_ESPEJO[g] for g in reversed(tramo.giros)),
                     distancia_m=tramo.distancia_m,
+                    distancia_frontal_fin_cm=tramo.distancia_frontal_fin_cm,
                 ),
             )
         return completos
@@ -264,7 +269,12 @@ class PlanificadorRutas:
                 pasos = max(1, int(tramo.distancia_m / zancada_m + 0.5))
             if pasos > 0:
                 instrucciones.append(
-                    Instruccion(Accion.CAMINAR, pasos, tramo.distancia_m)
+                    Instruccion(
+                        Accion.CAMINAR,
+                        pasos,
+                        tramo.distancia_m,
+                        tramo.distancia_frontal_fin_cm,
+                    )
                 )
 
         instrucciones.append(Instruccion(Accion.LLEGADA))

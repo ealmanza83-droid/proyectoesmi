@@ -79,6 +79,7 @@ from .hardware.mpu6050 import MPU6050
 from .hardware.ultrasonido import AlertaProximidad, SensorUltrasonico
 from .navegacion.caida import DetectorCaida
 from .navegacion.movimiento import ContadorPasos, MedidorGiro, MuestreadorMPU
+from .navegacion.odometro import OdometroUltrasonico
 from .navegacion.rumbo import Rumbo
 from .version import obtener_version
 from .vision.detector import (
@@ -170,6 +171,7 @@ class Aplicacion:
         self.rumbo = Rumbo()
         self.giro = MedidorGiro(config, rumbo=self.rumbo)
         self.pasos = ContadorPasos(config)
+        self._odometro_ultrasonico = OdometroUltrasonico(config)
         # Zancada de la persona: se mide en cada tramo que cierra la
         # camara y de ella salen los pasos del plan siguiente (ver
         # dominio/zancada.py).  Arranca con la semilla del mapa.
@@ -231,6 +233,9 @@ class Aplicacion:
         # tiene): al cerrarlo con la camara es con lo que se mide la
         # zancada de la persona.
         self._distancia_tramo = 0.0
+        self._distancia_frontal_inicio_cm: float | None = None
+        self._avance_ultrasonico_m: float | None = None
+        self._ultima_secuencia_ultrasonica: int | None = None
         self._inicio_llegada = 0.0
 
         # Busqueda de senal
@@ -1341,6 +1346,7 @@ class Aplicacion:
         elif instruccion.es_pasos:
             dados = self._creditar_pasos()
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
+            self._actualizar_odometro_ultrasonico(instruccion)
             self._guiar_con_senal(resultado)
             self._vigilar_desvio()
             self._valorar_llegada_del_tramo(
@@ -1370,12 +1376,18 @@ class Aplicacion:
           colgada, y la llegada sigue sin anunciarce hasta VER la
           senal del destino.
         """
-        inicio = objetivo * self.config.ventana_llegada_inicio
-        fin = objetivo * self.config.ventana_llegada_fin
+        fraccion_avance = dados / objetivo if objetivo > 0 else 0.0
+        if self._avance_ultrasonico_m is not None and self._distancia_tramo > 0:
+            fraccion_avance = max(
+                fraccion_avance,
+                self._avance_ultrasonico_m / self._distancia_tramo,
+            )
+        inicio = self.config.ventana_llegada_inicio
+        fin = self.config.ventana_llegada_fin
         senal = resultado.senal
 
         if (
-            dados >= inicio
+            fraccion_avance >= inicio
             and senal is not None
             and senal.lado == LADO_INTERIOR
             and senal.zona == self._zona_cierre_tramo
@@ -1389,11 +1401,11 @@ class Aplicacion:
             self._cerrar_tramo(dados)
             return
 
-        if dados >= inicio and not self._aviso_ventana_dado:
+        if fraccion_avance >= inicio and not self._aviso_ventana_dado:
             self._aviso_ventana_dado = True
             self._hablar("Reduce el paso, ya casi llegas.")
 
-        if dados >= fin:
+        if fraccion_avance >= fin:
             print(
                 f"TRAMO: {dados} pasos acreditados de {objetivo} "
                 "esperados sin ver la senal de cierre"
@@ -1461,6 +1473,49 @@ class Aplicacion:
             if self._instruccion_actual is not None
             else 0.0
         )
+        self._odometro_ultrasonico.reiniciar()
+        self._distancia_frontal_inicio_cm = None
+        self._avance_ultrasonico_m = None
+        self._ultima_secuencia_ultrasonica = getattr(
+            self.sensor, "secuencia_medicion", None
+        )
+
+    def _actualizar_odometro_ultrasonico(
+        self, instruccion: Instruccion
+    ) -> None:
+        """Integra solo lecturas nuevas y estables en los tramos habilitados."""
+        distancia_fin_cm = instruccion.distancia_frontal_fin_cm
+        if distancia_fin_cm is None or distancia_fin_cm <= 0:
+            return
+
+        secuencia = getattr(self.sensor, "secuencia_medicion", None)
+        if secuencia is None or secuencia == self._ultima_secuencia_ultrasonica:
+            return
+        self._ultima_secuencia_ultrasonica = secuencia
+        estable_cm = self._odometro_ultrasonico.observar(
+            self.sensor.distancia_cm
+        )
+        if estable_cm is None:
+            return
+
+        if self._distancia_frontal_inicio_cm is None:
+            if estable_cm <= distancia_fin_cm:
+                return
+            self._distancia_frontal_inicio_cm = estable_cm
+            self._avance_ultrasonico_m = 0.0
+            print(f"ODOMETRO HC-SR04: inicio estable a {estable_cm:.1f} cm")
+            return
+
+        avance = max(
+            0.0, (self._distancia_frontal_inicio_cm - estable_cm) / 100.0
+        )
+        distancia_objetivo = max(
+            0.0,
+            (self._distancia_frontal_inicio_cm - distancia_fin_cm) / 100.0,
+        )
+        if self._distancia_tramo > 0:
+            distancia_objetivo = min(distancia_objetivo, self._distancia_tramo)
+        self._avance_ultrasonico_m = min(avance, distancia_objetivo)
 
     def _creditar_pasos(self) -> int:
         """Pasos que cuentan hacia el tramo: solo los dados rectos.

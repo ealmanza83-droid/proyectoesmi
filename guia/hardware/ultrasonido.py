@@ -73,6 +73,7 @@ class SensorUltrasonico:
     def __init__(self, config: Configuracion):
         self._config = config
         self._distancia_cm: float | None = None
+        self._secuencia_medicion = 0
         self._distancia_alerta_cm = config.distancia_alerta_cm
         self._sensor = None
         self._factoria = None
@@ -168,6 +169,8 @@ class SensorUltrasonico:
             try:
                 metros = self._sensor.distance
             except Exception as error:
+                self._distancia_cm = None
+                self._secuencia_medicion += 1
                 if not self._aviso_pendiente:
                     self._aviso_pendiente = True
                     print(
@@ -178,6 +181,8 @@ class SensorUltrasonico:
                 continue
 
             if metros is None:
+                self._distancia_cm = None
+                self._secuencia_medicion += 1
                 # gpiozero avisa que no llego eco en el tiempo esperado.
                 if not self._aviso_pendiente:
                     self._aviso_pendiente = True
@@ -189,6 +194,7 @@ class SensorUltrasonico:
                 continue
 
             self._distancia_cm = round(metros * 100.0, 1)
+            self._secuencia_medicion += 1
             if self._aviso_pendiente or recuperado:
                 self._aviso_pendiente = False
                 recuperado = True
@@ -207,6 +213,11 @@ class SensorUltrasonico:
     @property
     def distancia_alerta_cm(self) -> float:
         return self._distancia_alerta_cm
+
+    @property
+    def secuencia_medicion(self) -> int:
+        """Identificador creciente para procesar cada lectura una sola vez."""
+        return self._secuencia_medicion
 
     def _cerrar_hardware(self) -> None:
         """Cierra el sensor y su factoria (en ese orden), sin protestas."""

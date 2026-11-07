@@ -496,6 +496,26 @@ impresión usada y coincidir con `--altura-real-m` de
 
 ---
 
+## 18. Odómetro ultrasónico frontal por tramo (opcional)
+
+Para un tramo configurado con distancia de referencia al final
+`d_fin_cm`, se necesitan `N` lecturas nuevas válidas. Las lecturas que
+difieran de la mediana actual más que `salto_maximo_ultrasonido_cm` se
+rechazan antes de entrar al historial:
+
+```
+d_estable[k] = mediana(últimas N lecturas aceptadas)
+avance = clip((d_inicio − d_estable) / 100, 0, (d_inicio − d_fin) / 100)
+```
+
+`d_inicio` se fija con las primeras `N` lecturas estables del tramo. No
+se vuelve a alimentar el filtro con la misma muestra: el HC-SR04 expone
+un número de secuencia para distinguir medidas nuevas. El avance es una
+medición auxiliar de posición, no una confirmación visual ni un anuncio
+de llegada.
+
+---
+
 ## Resumen en tabla
 
 | Parte del sistema | Ecuación | Archivo |
@@ -516,4 +536,5 @@ impresión usada y coincidir con `--altura-real-m` de
 | Ventana de llegada del tramo | `0,70·N ≤ ventana ≤ 1,30·N`; cierra la cámara con la señal de cierre | `aplicacion.py` (`_valorar_llegada_del_tramo`) |
 | Zancada adaptativa | `z_k = α·(D/N) + (1−α)·z_{k−1}` con recorte 0,30…0,90; pasos `= round(D/z)` | `dominio/zancada.py` |
 | Distancia visual | `d=f·H/h`; focal `f=d·h/H`; mediana por clase | `vision/detector.py` |
+| Odómetro opcional | `avance=clip((d_inicio−d_actual)/100, 0, d_inicio−d_fin)` tras mediana estable | `navegacion/odometro.py` |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |
