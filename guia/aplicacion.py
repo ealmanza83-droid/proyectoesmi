@@ -1498,7 +1498,9 @@ class Aplicacion:
                 "Reduce el paso; te indicaré dónde detenerte."
             )
 
-        if fraccion_avance >= fin:
+        tiempo_parado = self.pasos.segundos_desde_ultimo_paso
+        detenido_en_meta = dados >= objetivo and tiempo_parado >= 2.5
+        if fraccion_avance >= fin or detenido_en_meta:
             if (
                 senal is not None
                 and senal.lado == LADO_INTERIOR

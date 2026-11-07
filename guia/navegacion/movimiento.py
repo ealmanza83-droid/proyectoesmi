@@ -104,7 +104,14 @@ class MedidorGiro:
         self._rumbo = rumbo
         self._angulo_derecha = 0.0
         self._angulo_izquierda = 0.0
-        self._sesgo = config.offset_giroscopio
+        # Sesgos triaxiales: restan el offset de cada eje antes de la proyeccion
+        # gravitatoria, garantizando deriva nula en cualquier angulo (plano o 90°).
+        self._offset_x = getattr(config, "offset_giroscopio_x", 0.0)
+        self._offset_y = getattr(config, "offset_giroscopio_y", 0.0)
+        self._offset_z = getattr(
+            config, "offset_giroscopio_z", config.offset_giroscopio
+        )
+        self._sesgo = 0.0
         self._velocidad_derecha = 0.0
         self._gravedad_filtrada: tuple[float, float, float] | None = None
         # Media (pasa-largas) de la direccion de giro: decide si hay
@@ -136,18 +143,22 @@ class MedidorGiro:
                     )
                 )
 
+        gx_neto = lectura.gx - self._offset_x
+        gy_neto = lectura.gy - self._offset_y
+        gz_neto = lectura.gz - self._offset_z
+
         if self._gravedad_filtrada is not None:
             ax, ay, az = self._gravedad_filtrada
             norma = math.sqrt(ax * ax + ay * ay + az * az)
             if norma >= MAGNITUD_MINIMA_VERTICAAL_G:
                 proyectada = (
-                    ax * lectura.gx + ay * lectura.gy + az * lectura.gz
+                    ax * gx_neto + ay * gy_neto + az * gz_neto
                 ) / norma
                 return -proyectada
 
         # Hasta obtener un vector de gravedad fiable no se conoce el
         # montaje: conservar la convencion anterior como respaldo.
-        return -lectura.gz
+        return -gz_neto
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
         """Integra una lectura del sensor (la llama el muestreador).
@@ -626,6 +637,13 @@ class ContadorPasos:
     def cadencia_s(self) -> float | None:
         """Mediana reciente de segundos por paso contado, si está disponible."""
         return self._cadencia_s
+
+    @property
+    def segundos_desde_ultimo_paso(self) -> float:
+        """Segundos acumulados desde el ultimo paso detectado (o 0.0)."""
+        if self._ultimo_paso is None:
+            return 0.0
+        return max(0.0, self._tiempo - self._ultimo_paso)
 
     def avanzar(self) -> int:
         """Devuelve los pasos contados hasta ahora."""

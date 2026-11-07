@@ -120,7 +120,12 @@ class Configuracion:
     registro_datos: int = 0x3B
     registro_filtro: int = 0x1A
     intervalo_muestreo_mpu_s: float = 0.01  # 100 muestras por segundo
-    offset_giroscopio: float = 0.445992     # sesgo inicial (calibracion)
+    offset_giroscopio: float = 0.379        # sesgo inicial de respaldo (eje Z)
+    # Sesgos triaxiales medidos del MPU6050: permiten proyectar la rotacion
+    # sobre la gravedad sin derivas artificiales aunque el sensor este a 90 grados.
+    offset_giroscopio_x: float = -0.506     # sesgo en reposo eje X (dps)
+    offset_giroscopio_y: float = 4.372      # sesgo en reposo eje Y (dps, crucial al montar a 90°)
+    offset_giroscopio_z: float = 0.379      # sesgo en reposo eje Z (dps)
     velocidad_minima_giro_dps: float = 5.0  # por debajo no es un giro (temblor)
     velocidad_reposo_dps: float = 5.0  # ventana "plana" = senal quieta
     constante_sesgo_s: float = 5.0          # lentitud del aprendizaje del sesgo
@@ -169,7 +174,7 @@ class Configuracion:
     # paso (ruido del sensor).  Se mide sobre la senal YA FILTRADA.
     # Si faltan pasos en casa, bajalo; si cuenta pasos al balancear,
     # subelo (pruebas/caracterizar_mpu6050.py mide el ruido en reposo).
-    umbral_paso_min_g: float = 0.09
+    umbral_paso_min_g: float = 0.07
     # Umbral ADAPTATIVO: max(umbral_paso_min_g, factor x media de los
     # ultimos picos CONTADOS).  El 0.45 deja el umbral a la mitad de lo
     # que de verdad produce la marcha de esa persona: si camina suave
@@ -180,22 +185,21 @@ class Configuracion:
     # Periodo refractario: intervalo minimo entre dos pasos contados
     # (contra el doble conteo de un mismo pico).  El ritmo real de la
     # persona es un paso cada ~0,25 a 0,5 s, asi que este valor tiene
-    # que quedar por DEBAJO de eso: con un tope de 0,35 s el contador
-    # descartaba casi la mitad de los pasos reales y los tramos largos
-    # nunca se completaban.
-    intervalo_paso_s: float = 0.18
+    # que quedar por DEBAJO de eso: con 0.22 s se elimina el rebote
+    # secundario del talon sin cortar la marcha rapida.
+    intervalo_paso_s: float = 0.22
     # Piso duro del intervalo MAXIMO: mas que esto desde el ultimo paso
     # Si el intervalo supera este maximo, el pico queda pendiente y
     # solo se acredita junto con el siguiente pico de marcha. Evita
     # contar movimientos aislados al esquivar, sin perder el primer
     # paso al reanudar. En 0 se desactiva.
-    intervalo_paso_max_s: float = 1.5
+    intervalo_paso_max_s: float = 1.8
     # Cadencia: solo se descarta un pico demasiado cercano al anterior
     # respecto al ritmo medido (probable doble conteo). Las variaciones
     # mas lentas o mas rapidas son pasos validos; las pausas largas se
     # filtran con intervalo_paso_max_s. La tolerancia deja pasar
-    # intervalos hasta un 70 % mas cortos que la mediana.
-    cadencia_tolerancia: float = 0.70
+    # intervalos hasta un 62 % mas cortos que la mediana.
+    cadencia_tolerancia: float = 0.62
     cadencia_intervalos_minimos: int = 3
     # Tras N descartes seguidos de picos demasiado cercanos se olvida
     # la cadencia y el siguiente pico arranca un ritmo nuevo.
@@ -232,7 +236,7 @@ class Configuracion:
     # Es la SEMILLA: hasta que la camara no cierra ningun tramo, el
     # plan usa los pasos del mapa; a partir de ahi manda la zancada
     # medida (ver zancada_ema_alfa).
-    zancada_m: float = 0.46       # metros que avanza con un paso
+    zancada_m: float = 0.44       # metros que avanza con un paso (semilla realista)
     velocidad_m_s: float = 1.85   # velocidad de desplazamiento (m/s)
     # Zancada ADAPTATIVA (ver dominio/zancada.py): en cada tramo que
     # la camara cierra se mide "distancia del mapa / pasos contados"
