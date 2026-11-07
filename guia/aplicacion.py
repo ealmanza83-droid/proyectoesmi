@@ -93,6 +93,7 @@ from .navegacion.rumbo import Rumbo
 from .version import obtener_version
 from .vision.detector import (
     EN_MEDIO_DEL_CAMINO,
+    Deteccion,
     DetectorVisual,
     ResultadoVision,
     dibujar_detecciones,
@@ -1315,7 +1316,6 @@ class Aplicacion:
         dados = self._creditar_pasos(resultado)
         self._etiqueta = f"Caminando - {dados}/{objetivo} pasos"
         self._guiar_con_puerta(resultado)
-        self._vigilar_desvio(resultado)
         inicio = objetivo * self.config.ventana_llegada_inicio
         fin = objetivo * self.config.ventana_llegada_fin
 
@@ -1335,6 +1335,9 @@ class Aplicacion:
             )
             self.giro.reiniciar()
             self.estado = Estado.GIRO_INICIAL
+            return
+
+        self._vigilar_desvio(resultado)
 
     def _en_esperando_destino(self, resultado: ResultadoVision) -> None:
         self._etiqueta = "Esperando destino"
@@ -1415,11 +1418,15 @@ class Aplicacion:
             self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
             self._actualizar_odometro_ultrasonico(instruccion)
             self._actualizar_posicion_tramo(resultado, instruccion, dados)
-            self._guiar_con_senal(resultado)
-            self._vigilar_desvio(resultado)
             self._valorar_llegada_del_tramo(
                 resultado, dados, instruccion.cantidad
             )
+            if self._instruccion_actual is None:
+                return
+            if self._deteccion_senal_cierre(resultado) is not None:
+                return
+            self._guiar_con_senal(resultado)
+            self._vigilar_desvio(resultado)
             if (
                 self._instruccion_actual is not None
                 and self._aviso_ventana_dado
@@ -1524,9 +1531,8 @@ class Aplicacion:
                 ):
                     self._advertecer(
                         f"busqueda-distancia:{self.destino}",
-                        "Aún no veo la señal. Sigue despacio hasta que el "
-                        f"ultrasonido indique entre {self._rango_puerta_texto()}; "
-                        "entonces la buscaré.",
+                        "Aún no veo la señal. Avanza despacio hacia la puerta; "
+                        "te indicaré cuándo detenerte para buscarla.",
                     )
                     return
                 if (
@@ -1541,8 +1547,7 @@ class Aplicacion:
                     self._empezar_a_confirmar_llegada()
                     return
                 self._hablar(
-                    "Detente. El ultrasonido está entre "
-                    f"{self._rango_puerta_texto()}. Buscaré la señal "
+                    "Detente. Estás cerca de la puerta. Buscaré la señal "
                     f"interior de {self.destino}."
                 )
                 self._empezar_a_confirmar_llegada()
@@ -1551,8 +1556,10 @@ class Aplicacion:
                 f"TRAMO: {dados} pasos acreditados de {objetivo} "
                 "esperados sin ver la senal de cierre"
             )
-            self._hablar("Pasos completados. Puedes parar.")
-            self._hablar("Llevas más pasos de los esperados y no veo la señal.")
+            self._hablar(
+                "Detente. Ya recorriste los pasos previstos, pero todavía "
+                "no confirmé la señal. Voy a buscarla."
+            )
             self._cerrar_tramo(dados)
 
     def _aprender_zancada(self, dados: int) -> None:
@@ -1766,19 +1773,18 @@ class Aplicacion:
             )
         elif self._distancia_puerta_estable_cm is None:
             self._hablar(
-                "La puerta está centrada. Avanza despacio; usaré el "
-                f"ultrasonido para detenerte entre {self._rango_puerta_texto()} "
-                "mientras busco la señal."
+                "La puerta está centrada. Avanza despacio; te indicaré "
+                "cuándo detenerte mientras busco la señal."
             )
         elif self._distancia_puerta_estable_cm > self.config.distancia_puerta_max_cm:
             self._hablar(
-                "La puerta está centrada. Avanza despacio hasta quedar "
-                f"entre {self._rango_puerta_texto()} para buscar la señal."
+                "La puerta está centrada. Avanza despacio hacia ella; "
+                "te indicaré cuándo detenerte para buscar la señal."
             )
         elif self._distancia_puerta_estable_cm < self.config.distancia_puerta_min_cm:
             self._hablar(
                 "Estás demasiado cerca de la puerta. Detente y aléjate "
-                f"despacio hasta quedar entre {self._rango_puerta_texto()}."
+                "un poco."
             )
         else:
             self._hablar(
@@ -1798,23 +1804,21 @@ class Aplicacion:
             self._medidor_distancia_puerta.observar(distancia_cm)
         )
 
-    def _rango_puerta_texto(self) -> str:
-        return (
-            f"{self.config.distancia_puerta_min_cm:.0f} y "
-            f"{self.config.distancia_puerta_max_cm:.0f} centímetros"
-        )
-
     def _senal_en_rango_de_llegada(
         self, resultado: ResultadoVision, senal: Senal
     ) -> bool:
-        """Valida señal centrada, camino frontal libre y rango ultrasónico."""
+        """Valida señal centrada y camino frontal libre.
+
+        El ultrasonido es una salvaguarda de proximidad, no un punto de
+        llegada preciso: puede medir una pared u obstáculo detrás de la
+        señal. La señal interior confirmada por cámara da la referencia;
+        solo se bloquea por obstáculo frontal o por distancia insegura.
+        """
         distancia = self._distancia_puerta_estable_cm
         if (
-            distancia is None
-            or not (
-                self.config.distancia_puerta_min_cm
-                <= distancia
-                <= self.config.distancia_puerta_max_cm
+            (
+                distancia is not None
+                and distancia < self.config.distancia_puerta_min_cm
             )
             or time.monotonic() - self._ultima_alerta_obstaculo_en
             < self.config.espera_llegada_tras_obstaculo_s
@@ -1855,56 +1859,69 @@ class Aplicacion:
                 return False
         return True
 
+    def _deteccion_senal_cierre(
+        self, resultado: ResultadoVision
+    ) -> Deteccion | None:
+        """Devuelve la detección de la señal interior esperada, si aparece."""
+        senal = resultado.senal
+        if (
+            senal is None
+            or senal.lado != LADO_INTERIOR
+            or senal.zona != self._zona_cierre_tramo
+        ):
+            return None
+        return next(
+            (
+                deteccion
+                for deteccion in resultado.detecciones
+                if deteccion.es_senal and senal_de_clase(deteccion.nombre) == senal
+            ),
+            None,
+        )
+
     def _pedir_acercamiento_a_senal(
         self, resultado: ResultadoVision, senal: Senal
     ) -> None:
-        """Evita cerrar un tramo desde lejos y guía a la distancia objetivo."""
+        """Explica por qué aún no puede cerrar el tramo por cámara."""
         distancia = self._distancia_puerta_estable_cm
-        if distancia is None:
-            detalle = (
-                "No tengo una lectura ultrasónica estable. "
-                "No confirmaré la llegada hasta poder medir la distancia."
-            )
-        elif distancia > self.config.distancia_puerta_max_cm:
-            detalle = (
-                "Avanza despacio hasta quedar entre "
-                f"{self._rango_puerta_texto()} "
-                "de la puerta."
-            )
-        elif distancia < self.config.distancia_puerta_min_cm:
-            detalle = (
-                "Detente y aléjate despacio hasta quedar entre "
-                f"{self._rango_puerta_texto()} de la puerta."
-            )
-        elif any(
+        obstaculo_frontal = any(
             obstaculo.lado == EN_MEDIO_DEL_CAMINO
             for obstaculo in resultado.obstaculos
+        )
+        if obstaculo_frontal:
+            detalle = "Detente; hay un obstáculo delante."
+        elif (
+            distancia is not None
+            and distancia < self.config.distancia_puerta_min_cm
+        ):
+            detalle = "Detente y aléjate un poco; estás demasiado cerca."
+        elif (
+            time.monotonic() - self._ultima_alerta_obstaculo_en
+            < self.config.espera_llegada_tras_obstaculo_s
         ):
             detalle = (
-                "Hay un obstáculo delante; no avances hasta que el camino "
-                "esté libre."
+                "Espera un momento; estoy comprobando que el camino esté libre."
             )
         else:
-            deteccion = next(
-                (
-                    deteccion
-                    for deteccion in resultado.detecciones
-                    if deteccion.es_senal
-                    and senal_de_clase(deteccion.nombre) == senal
-                ),
-                None,
-            )
+            deteccion = self._deteccion_senal_cierre(resultado)
             if deteccion is None:
                 detalle = "Mantén la señal orientadora a la vista."
             else:
                 centro = deteccion.centro_x_px / self.config.ancho
                 if centro < self.config.guia_senal_centro_min:
-                    detalle = "Alinea la señal hacia la izquierda."
+                    detalle = (
+                        "La señal está a la izquierda. Gira despacio a la "
+                        "izquierda hasta centrarla."
+                    )
                 elif centro > self.config.guia_senal_centro_max:
-                    detalle = "Alinea la señal hacia la derecha."
+                    detalle = (
+                        "La señal está a la derecha. Gira despacio a la "
+                        "derecha hasta centrarla."
+                    )
                 else:
                     detalle = (
-                        "Mantén la señal centrada y espera la confirmación."
+                        "La señal está enfrente. No hace falta buscar una "
+                        "distancia exacta; sigue despacio."
                     )
 
         self._advertecer(

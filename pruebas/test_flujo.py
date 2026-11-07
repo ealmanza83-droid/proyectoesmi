@@ -1182,36 +1182,25 @@ def test_relocalizacion_y_devolucion() -> None:
         "sin la senal no anuncia una llegada falsa",
     )
 
-    # 12.2 La senal del destino a la vista: ahi si llegada verificada.
+    # 12.2 La señal del destino centrada confirma sin exigir 70-80 cm.
     detector.senal = Senal("Baño", LADO_INTERIOR)
     preparar_distancia_puerta(aplicacion, 150.0)
     paso(aplicacion, detector, mpu)
     comprobar(
-        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA
-        and not any("Has llegado" in frase for frase in locutor.frases),
-        "la señal a más de 80 cm no confirma prematuramente la llegada",
+        aplicacion.estado is Estado.ESPERANDO_DESTINO
+        and "Has llegado a Baño." in locutor.frases,
+        "la señal centrada a 150 cm confirma sin exigir una distancia exacta",
     )
-    detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
-    preparar_distancia_puerta(aplicacion, 75.0)
-    paso(aplicacion, detector, mpu)
-    comprobar(
-        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA
-        and not any("Has llegado" in frase for frase in locutor.frases),
-        "un obstáculo frontal impide usar el eco para anunciar llegada",
-    )
-    detector.obstaculos = ()
-    aplicacion._ultima_alerta_obstaculo_en = (
-        time.monotonic() - aplicacion.config.espera_llegada_tras_obstaculo_s - 1
-    )
-    paso(aplicacion, detector, mpu)
-    comprobar(aplicacion.estado is Estado.ESPERANDO_DESTINO, "la senal confirma la llegada")
     comprobar(aplicacion.ubicacion == "Baño", "ubicacion actualizada al llegar")
-    comprobar("Has llegado a Baño." in locutor.frases, "anuncio de llegada verificada")
+    aplicacion.config = dataclasses.replace(
+        aplicacion.config, distancia_alerta_cm=100.0
+    )
 
     # 12.2b Durante la navegación, una señal vista desde lejos tampoco
-    # debe confundirse con haber llegado después de anunciar un obstáculo.
+    # debe confirmar mientras haya un obstáculo o esté vigente su espera.
     locutor.frases.clear()
     detector.senal = Senal("Baño", LADO_INTERIOR)
+    detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
     aplicacion.ubicacion = "Sala"
     aplicacion.destino = "Baño"
     aplicacion._iniciar_navegacion(
@@ -1222,15 +1211,7 @@ def test_relocalizacion_y_devolucion() -> None:
     comprobar(
         aplicacion.estado is Estado.NAVEGANDO
         and not any("Has llegado" in frase for frase in locutor.frases),
-        "la señal a 150 cm no anuncia llegada durante la marcha",
-    )
-    preparar_distancia_puerta(aplicacion, 75.0)
-    detector.obstaculos = (ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
-    paso(aplicacion, detector, mpu)
-    comprobar(
-        aplicacion.estado is Estado.NAVEGANDO
-        and not any("Has llegado" in frase for frase in locutor.frases),
-        "un obstáculo frontal no se convierte en confirmación de llegada",
+        "un obstáculo frontal bloquea la confirmación de cámara",
     )
     detector.obstaculos = ()
     aplicacion._ultima_alerta_obstaculo_en = time.monotonic()
@@ -1247,7 +1228,31 @@ def test_relocalizacion_y_devolucion() -> None:
     comprobar(
         aplicacion.estado is Estado.ESPERANDO_DESTINO
         and any("Has llegado a Baño." in frase for frase in locutor.frases),
-        "la señal centrada a 75 cm confirma la llegada",
+        "la señal centrada confirma después de terminar la espera",
+    )
+
+    # 12.2c Si el ultrasónico indica proximidad insegura, la cámara no basta.
+    locutor.frases.clear()
+    aplicacion.ubicacion = "Sala"
+    aplicacion.destino = "Baño"
+    aplicacion._iniciar_navegacion(
+        [Instruccion(Accion.CAMINAR, 5), Instruccion(Accion.LLEGADA)]
+    )
+    detector.senal = None
+    preparar_distancia_puerta(aplicacion, 150.0)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO
+        and not any("Has llegado" in frase for frase in locutor.frases),
+        "arranca el siguiente tramo sin anunciar una llegada falsa",
+    )
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    preparar_distancia_puerta(aplicacion, 30.0)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO
+        and not any("Has llegado" in frase for frase in locutor.frases),
+        "la proximidad insegura no permite confirmar la señal",
     )
 
     # 12.3 Se paso de largo: ve la senal de otra zona y lo corrige.
@@ -2692,8 +2697,31 @@ def test_llegada_por_ventana() -> None:
         aplicacion._senal_en_rango_de_llegada(
             detector.analizar(None), detector.senal
         ),
-        "la señal centrada y tres lecturas de 75 cm cumplen el umbral",
+        "la señal centrada y la distancia normal cumplen proximidad",
     )
+    resultado_senal = detector.analizar(None)
+    aplicacion._distancia_puerta_estable_cm = 90.0
+    comprobar(
+        aplicacion._senal_en_rango_de_llegada(
+            resultado_senal, detector.senal
+        ),
+        "acepta la señal centrada a más de 80 cm sin pedir acercamiento exacto",
+    )
+    aplicacion._distancia_puerta_estable_cm = None
+    comprobar(
+        aplicacion._senal_en_rango_de_llegada(
+            resultado_senal, detector.senal
+        ),
+        "la cámara puede confirmar aunque el ultrasonido no tenga eco estable",
+    )
+    aplicacion._distancia_puerta_estable_cm = 44.0
+    comprobar(
+        not aplicacion._senal_en_rango_de_llegada(
+            resultado_senal, detector.senal
+        ),
+        "mantiene el límite de seguridad cuando la persona está demasiado cerca",
+    )
+    aplicacion._distancia_puerta_estable_cm = 75.0
     locutor.frases.clear()
     paso(aplicacion, detector, mpu)
     comprobar(
@@ -2721,16 +2749,27 @@ def test_llegada_por_ventana() -> None:
 
     # --- 27.4 Pasado el 130 % sin senal: aviso y flujo de siempre --
     empezar_tramo()
+    aplicacion.config = dataclasses.replace(
+        aplicacion.config, confirmacion_desvio_s=0.0
+    )
     locutor.frases.clear()
-    caminar_hasta(14)  # el 130 % de 10 es 13: ahi se corta sin senal
+    caminar_hasta(12)
+    # Alimenta el último paso justo en la frontera, independientemente
+    # de la cadencia sintética del contador en esta prueba.
+    aplicacion.pasos._pasos = 13
+    aplicacion._pasos_acreditados = 13
+    aplicacion._pasos_previos = 13
+    aplicacion.rumbo.girar(50.0)
+    aplicacion._en_navegando(ResultadoVision())
     comprobar(
-        any("Llevas más pasos" in frase for frase in locutor.frases),
-        "al 130 % sin senal avisa que se paso de pasos",
+        any(
+            "recorriste los pasos previstos" in frase
+            and "no confirmé la señal" in frase
+            for frase in locutor.frases
+        ),
+        "al 130 % da una sola instrucción clara y explica que falta la señal",
     )
-    comprobar(
-        any("Pasos completados" in frase for frase in locutor.frases),
-        "igual da el tramo por completado (la llegada no: falta verla)",
-    )
+    aplicacion._en_navegando(ResultadoVision())
     comprobar(
         aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
         "el tramo cerrado pasa a confirmar la llegada con la camara",
@@ -2738,6 +2777,13 @@ def test_llegada_por_ventana() -> None:
     comprobar(
         not any("Has llegado" in frase for frase in locutor.frases),
         "sin la senal del destino no anuncia llegada falsa",
+    )
+    comprobar(
+        not any(
+            "desviando" in frase or "Pasos completados" in frase
+            for frase in locutor.frases
+        ),
+        "al cerrar el tramo no añade un aviso de desvío contradictorio",
     )
 
 

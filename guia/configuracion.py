@@ -68,8 +68,13 @@ class Configuracion:
     muestras_ultrasonido_puerta: int = 3
     salto_maximo_ultrasonido_puerta_cm: float = 60.0
     retencion_eco_ultrasonido_s: float = 0.35
-    distancia_puerta_min_cm: float = 70.0
-    distancia_puerta_max_cm: float = 80.0
+    # Solo se impide confirmar si una lectura estable dice que la
+    # persona está demasiado cerca; la señal centrada de cámara es la
+    # referencia de llegada, no una franja exacta de distancia.
+    distancia_puerta_min_cm: float = 45.0
+    # Sin señal visible, se usa solo para decidir cuándo dejar de
+    # acercarse a una puerta y empezar a buscarla con la cámara.
+    distancia_puerta_max_cm: float = 140.0
     espera_llegada_tras_obstaculo_s: float = 4.0
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
 
@@ -260,8 +265,9 @@ class Configuracion:
     #   verla);
     # * si se pasa del 130 % sin ver la senal, los tramos intermedios
     #   siguen el flujo existente; en el tramo final, una lectura
-    #   ultrasónica estable por encima del rango de puerta mantiene la
-    #   aproximación lenta hasta quedar entre 70 y 80 cm.
+    #   ultrasónica por encima del límite de proximidad mantiene la
+    #   aproximación lenta. Una señal centrada no exige una franja
+    #   ultrasónica exacta para cerrar el tramo.
     ventana_llegada_inicio: float = 0.70
     ventana_llegada_fin: float = 1.30
 

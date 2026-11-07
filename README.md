@@ -267,7 +267,8 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Frames perdidos que conservan la mediana visual | `distancia_mediana_perdidas` | `3` |
 | Frames perdidos antes de rearmar el aviso de puerta | `frames_puerta_perdida` | `4` |
 | Salto horizontal máximo al seguir una puerta | `salto_maximo_puerta_px` | `160` px |
-| Rango de aproximación a la señal | `distancia_puerta_min_cm` / `distancia_puerta_max_cm` | `70`–`80` cm |
+| Proximidad insegura al confirmar señal | `distancia_puerta_min_cm` | `45` cm |
+| Distancia para detener la aproximación sin señal visible | `distancia_puerta_max_cm` | `140` cm |
 | Muestras ultrasónicas estables para aproximación | `muestras_ultrasonido_puerta` | `3` |
 | Retención de pitido ante una pérdida breve de eco | `retencion_eco_ultrasonido_s` | `0.35` s (solo para el pitido; nunca para confirmar llegada) |
 | Espera tras un aviso de obstáculo antes de confirmar llegada | `espera_llegada_tras_obstaculo_s` | `4` s |
@@ -302,11 +303,12 @@ visible sin señal confirmada se anuncia una vez por encuentro; el animal
 detectado dentro de su caja tiene prioridad. El rango usa
 `altura_puerta_m` (o `ancho_puerta_m` como respaldo) y la misma
 `focal_px` calibrada. La puerta nunca cambia `ubicacion`.
-Cuando la señal interior esperada está centrada, la llegada solo se
-confirma con la señal de cámara y una mediana ultrasónica estable entre
-`distancia_puerta_min_cm` y `distancia_puerta_max_cm`; un obstáculo frontal
-bloquea esa confirmación. Sin señal, la aproximación final continúa
-despacio hasta el rango configurado y luego busca la señal.
+Cuando la cámara ve centrada la señal interior esperada, esa señal
+confirma el tramo si el camino está libre y no hay una lectura ultrasónica
+estable que indique proximidad insegura (menos de `distancia_puerta_min_cm`).
+No se exige una distancia exacta ni una lectura ultrasónica estable. Sin
+señal visible, `distancia_puerta_max_cm` solo define cuándo detener la
+aproximación final y volver a buscarla con la cámara.
 
 ### Mapa de la casa (`guia/dominio/rutas.py`)
 
@@ -427,8 +429,8 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
   avisa *"Pasos completados. Puedes parar."* + *"Llevas más pasos de
   los esperados y no veo la señal."* y sigue el flujo de siempre
   (encarada intermedia o `CONFIRMANDO_LLEGADA`). En el tramo final, si
-  el ultrasonido estable aún marca más de 80 cm, continúa despacio hasta
-  el rango configurado y luego busca la señal. La llegada al destino
+  no ve la señal, continúa despacio hasta la distancia máxima de búsqueda
+  configurada y luego vuelve a buscarla. La llegada al destino
   **nunca** se anuncia sin haber visto su señal. Además ver
   la puerta de la zona de cierre mientras se camina no se lee como
   una desviación (antes provocaba un *"Te saliste de la ruta"* falso).

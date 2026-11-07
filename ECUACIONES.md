@@ -615,10 +615,12 @@ la corrección débil es `z = D·k/(M+1)`. Ninguna de estas medidas produce
 `Senal`, avanza identidad de zona ni cierra un tramo sin confirmación de
 la señal interior.
 
-La llegada a una señal interior esperada exige además distancia frontal
-estable en el rango configurado de 70–80 cm. Se usa la mediana de
-`muestras_ultrasonido_puerta` lecturas nuevas; la señal debe estar
-centrada y no puede haber un obstáculo visual en el centro del camino:
+La llegada a una señal interior esperada se confirma con la señal de la
+cámara centrada y el camino libre. El ultrasonido no impone una distancia
+exacta ni necesita una lectura estable; solo bloquea la confirmación si
+una lectura estable indica que se está demasiado cerca (menos de
+`distancia_puerta_min_cm`). Una detección de obstáculo frontal también
+bloquea la confirmación:
 
 Si una medida salta más de `salto_maximo_ultrasonido_puerta_cm`, se
 mantiene como candidata y solo se adopta el nuevo rango después de
@@ -634,10 +636,10 @@ el pitido por `retencion_eco_ultrasonido_s`, pero nunca se usan para
 confirmar una llegada.
 
 ```
-d_ultra = mediana(d_1, ..., d_M)
+d_ultra = mediana(d_1, ..., d_M) si hay lecturas estables; ⊥ si no
 confirmar = señal_interior_esperada
             ∧ centro_señal
-            ∧ distancia_puerta_min_cm ≤ d_ultra ≤ distancia_puerta_max_cm
+            ∧ (d_ultra no disponible ∨ d_ultra ≥ distancia_puerta_min_cm)
             ∧ camino_frontal_libre
             ∧ tiempo_desde_aviso_obstáculo ≥ espera_llegada_tras_obstaculo_s
 ```
@@ -645,8 +647,8 @@ confirmar = señal_interior_esperada
 Los pasos y una advertencia de obstáculo no confirman la llegada; tras un
 aviso se espera el intervalo configurado aunque la señal aparezca en el
 frame siguiente. Si la señal aún no aparece, la aproximación final
-continúa lentamente hasta el rango ultrasónico y entonces vuelve a
-buscarla con la cámara. Los modelos incluidos deben contener
+continúa lentamente hasta `distancia_puerta_max_cm` (140 cm por defecto)
+y entonces vuelve a buscarla con la cámara. Los modelos incluidos deben contener
 explícitamente la clase `door`; de lo contrario, el detector lo advierte
 al arrancar.
 

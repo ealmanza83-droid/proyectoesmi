@@ -21,8 +21,8 @@ ultrasonico + MPU6050 + micrófono + altavoz) que:
    sistema da instrucciones habladas: *"Gira a la izquierda 90
    grados"*, *"Camina 6 pasos"*.
 3. **No miente**: nunca anuncia una llegada que no verificó; exige la
-   señal centrada, 70–80 cm estables por ultrasonido, camino frontal
-   libre y una pausa tras avisar un obstáculo.
+   señal centrada, el camino frontal libre y una pausa tras avisar un
+   obstáculo. El ultrasonido solo bloquea si detecta proximidad insegura.
 4. **Cuida la seguridad**: avisa obstáculos cercanos (pitidos que se
    aceleran) y detecta caídas (alarma continua + "di silencia").
 
@@ -328,10 +328,12 @@ señales, con caja, centro, alto, ancho y distancia suavizada con la mediana. En
 hay una puerta y todavía no se confirma una señal, se anuncia una vez
 su ubicación izquierda/centro/derecha y se guía hacia ella. El animal
 detectado dentro de la caja de puerta tiene prioridad sobre animales en
-otras zonas del frame. El ultrasonido filtra tres lecturas nuevas para
-guiar la aproximación al rango configurable de 70–80 cm; una señal solo
-confirma llegada si está centrada y no hay un obstáculo frontal. La
-puerta nunca identifica la zona: sigue siendo necesaria la señal interior.
+otras zonas del frame. El ultrasonido filtra lecturas nuevas para detectar
+proximidad insegura; no se exige estar a una distancia exacta para
+confirmar una señal centrada. Sin señal visible, la distancia máxima
+configurable indica cuándo detener la aproximación y volver a buscarla con
+la cámara. La puerta nunca identifica la zona: sigue siendo necesaria la
+señal interior.
 
 ### 5.7 Señales de las dos caras de la puerta (idea original)
 
@@ -365,12 +367,11 @@ da por terminado en "N pasos" exactos, sino en una **ventana**:
 * entre el 70 % y el **130 %** → quien cierra el tramo es **la
   cámara**, si ve la señal interior de la zona de cierre (la
   siguiente del camino): *"Ya veo la señal. Puedes parar."*
-* pasado el 130 % sin verla → *"Pasos completados. Puedes parar."* +
-  *"Llevas más pasos de los esperados y no veo la señal."*, y el
-  flujo sigue como siempre en tramos intermedios. En el tramo final,
-  con ultrasonido estable y aún por encima de 80 cm, se mantiene la
-  aproximación lenta; entre 70 y 80 cm se detiene para volver a buscar
-  la señal.
+* pasado el 130 % sin verla → avisa que se superó el recorrido previsto y
+  detiene la marcha para buscar la señal;
+  el flujo sigue como siempre en tramos intermedios. En el tramo final,
+  si no ve la señal, usa el umbral de distancia máxima para detener la
+  aproximación lenta y volver a buscarla.
 
 En ningún caso los pasos por sí solos anuncian la llegada: tras el
 tramo entra en `CONFIRMANDO_LLEGADA` y pide girar despacio hasta ver
@@ -601,9 +602,9 @@ hacia la pared o puerta de fin de tramo.
 6. **Demostración del desvío**: caminar curvando a propósito → aviso,
    corrección guiada en vivo, *"Ya enderezaste. Los pasos vuelven a
    contar."*
-7. Llegar: acercarse despacio hasta que el ultrasonido indique el rango
-   configurado de 70–80 cm; después, la cámara debe confirmar la señal
-   interior para anunciar *"Has llegado a Sala."*
+7. Llegar: la cámara debe centrar y confirmar la señal interior; el
+   ultrasonido solo impide confirmar si indica que se está demasiado
+   cerca o hay un obstáculo frontal.
 8. (Opcional) Simular una caída (golpe suave al sensor) y silenciar
    diciendo solo *"silencia"*.
 9. Cerrar con el principio: *"el sistema prefiere callar antes que
