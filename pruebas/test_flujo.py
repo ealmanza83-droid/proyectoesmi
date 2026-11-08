@@ -1810,69 +1810,44 @@ def test_encarada_intermedia_de_tramo() -> None:
     for i in range(pasos * 8):
         mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
-        if aplicacion.estado is not Estado.NAVEGANDO:
+        if aplicacion.estado is Estado.ENCARAR_SENAL:
             break
     comprobar(
-        aplicacion.estado is Estado.NAVEGANDO
-        and aplicacion._tramos_completados == 0,
-        "los pasos estiman avance pero no cierran el tramo sin señal",
+        aplicacion.estado is Estado.ENCARAR_SENAL
+        and aplicacion._tramos_completados == 0
+        and not aplicacion.pasos.habilitado,
+        "al alcanzar el límite estimado detiene la marcha sin cerrar el tramo",
     )
+    comprobar(
+        any("Detente" in frase and "90 grados" in frase for frase in locutor.frases),
+        "pide detenerse y girar hacia la señal intermedia",
+    )
+
     detector.senal = Senal("Cuarto", LADO_INTERIOR)
     preparar_distancia_puerta(aplicacion, 75.0)
     paso(aplicacion, detector, mpu)
     comprobar(
-        aplicacion._tramos_completados == 1,
-        "la señal interior de Cuarto confirma el cierre del primer tramo",
+        aplicacion._tramos_completados == 1
+        and aplicacion.estado is Estado.NAVEGANDO,
+        "la señal interior confirma el punto y permite retomar la ruta",
     )
     comprobar(
         aplicacion.ubicacion == "Cuarto",
-        "la señal interior corrige la ubicación a Cuarto",
+        "la señal interior confirma que está en el Cuarto",
     )
-    paso(aplicacion, detector, mpu)
-    comprobar(
-        aplicacion.estado is Estado.ENCARAR_SENAL,
-        "tras la señal confirmada pide encarar la zona alcanzada",
-    )
-    comprobar(aplicacion.ubicacion == "Cuarto", "ubica a la persona en el Cuarto")
     comprobar(
         aplicacion._ruta_pendiente is None,
         "no hay plan nuevo: la ruta en curso sigue intacta",
     )
 
-    # Sin verla aun, pide girar al lado donde estan las senales en el
-    # sentido de la ruta (``GIRO_SENAL_NORMAL``) y NO el giro de 90.
+    # La señal se reconoció al orientar la cámara; desde ahí ya puede
+    # ejecutar el giro de 90 grados del siguiente tramo.
     detector.senal = None
     locutor.frases.clear()
     paso(aplicacion, detector, mpu)
-    comprobar(
-        any(
-            f"Gira despacio a la {GIRO_SENAL_NORMAL}" in frase
-            for frase in locutor.frases
-        ),
-        f"pide girar a la {GIRO_SENAL_NORMAL} para ver la senal del Cuarto",
-    )
-    comprobar(
-        not any("90 grados" in frase for frase in locutor.frases),
-        "todavia no da el giro del siguiente tramo",
-    )
-
-    # --- Aparece la senal del Cuarto: ancla y retoma la ruta --------
-    detector.senal = Senal("Cuarto", LADO_INTERIOR)
-    paso(aplicacion, detector, mpu)
-    comprobar(
-        aplicacion.estado is Estado.NAVEGANDO,
-        "con la senal del Cuarto en vista retoma la ruta",
-    )
-    comprobar(
-        any("frente a ti" in frase for frase in locutor.frases),
-        "confirma que la senal esta enfrente",
-    )
     comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en el Cuarto")
 
     # --- Giro y pasos del segundo tramo (Cuarto -> Sala) ------------
-    detector.senal = None
-    locutor.frases.clear()
-    paso(aplicacion, detector, mpu)
     comprobar(
         any("Gira a la izquierda 90 grados" in frase for frase in locutor.frases),
         "ya si anuncia el giro del segundo tramo",
@@ -3042,34 +3017,46 @@ def test_llegada_por_ventana() -> None:
         "sin la senal del destino no anuncia llegada",
     )
 
-    # --- 27.4 Pasado el 130 % sin senal: avisa y sigue buscando --
+    # --- 27.4 Pasado el 130 % sin senal: detiene y busca el punto --
     empezar_tramo()
     aplicacion.config = dataclasses.replace(
         aplicacion.config, confirmacion_desvio_s=0.0
     )
     locutor.frases.clear()
     caminar_hasta(12)
-    # Alimenta el último paso justo en la frontera, independientemente
-    # de la cadencia sintética del contador en esta prueba.
+    # Simula deriva severa: los pasos brutos llegan al límite de
+    # búsqueda aunque el avance proyectado siga corto.
     aplicacion.pasos._pasos = 13
-    aplicacion._avance_efectivo_m = 13 * aplicacion.zancada.metros
+    aplicacion._avance_efectivo_m = 0.0
     aplicacion._pasos_previos = 13
-    aplicacion.rumbo.girar(50.0)
+    aplicacion.rumbo.girar(100.0)
     aplicacion._en_navegando(ResultadoVision())
     comprobar(
-        any("Aún no veo la señal" in frase for frase in locutor.frases)
+        aplicacion.estado is Estado.ENCARAR_SENAL
+        and not aplicacion.pasos.habilitado
         and aplicacion._tramos_completados == 0,
-        "al superar la ventana busca la señal sin cerrar el tramo",
+        "al superar la ventana detiene los pasos sin confirmar el tramo",
     )
-    aplicacion._en_navegando(ResultadoVision())
+    comprobar(
+        any("Detente" in frase and "90 grados" in frase for frase in locutor.frases),
+        "indica detenerse y girar hacia la señal intermedia",
+    )
+    comprobar(
+        not any("Continúa despacio" in frase for frase in locutor.frases),
+        "no ordena seguir caminando a ciegas al pasar la ventana",
+    )
+
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion.estado is Estado.NAVEGANDO
-        and aplicacion._tramos_completados == 0,
-        "sin señal sigue en el tramo y no avanza a la siguiente ruta",
+        and aplicacion.ubicacion == "Cuarto"
+        and aplicacion._tramos_completados == 1,
+        "la señal visual confirma el punto antes de continuar la ruta",
     )
     comprobar(
         not any("Has llegado" in frase for frase in locutor.frases),
-        "sin la senal del destino no anuncia llegada falsa",
+        "la señal intermedia no anuncia falsamente la llegada al destino",
     )
 def test_zancada_adaptativa() -> None:
     """La zancada se mide en los tramos que cierra la camara.

@@ -235,6 +235,7 @@ class Aplicacion:
         self._instruccion_actual: Instruccion | None = None
         self._ruta_pendiente: list[Instruccion] | None = None
         self._instruccion_encarar_dada = False
+        self._buscando_senal_tramo_estimado = False
         # Zona e instante de la ultima senal interior confirmada con
         # la camara (busqueda, espera del destino o encarada).  Si
         # hace poco y el rumbo no ha girado desde entonces, la senal
@@ -675,6 +676,7 @@ class Aplicacion:
         pedirla otra vez la dejaria girando sin salida, porque las
         senales de las demas zonas estan a pasos de distancia.
         """
+        self._buscando_senal_tramo_estimado = False
         if self._senal_enfrente_reciente():
             self.pasos.deshabilitar()
             print(
@@ -715,6 +717,7 @@ class Aplicacion:
             indice = min(self._tramos_completados, len(self._camino) - 1)
             self.ubicacion = self._camino[indice]
             self._indice_zona = indice
+        self._buscando_senal_tramo_estimado = False
         self._ruta_pendiente = None
         self._instruccion_encarar_dada = False
         # El tramo anterior ya quedo acreditado: si la senal de la zona
@@ -735,15 +738,20 @@ class Aplicacion:
         no indican el frente medido y se avisa sin arrancar.
         """
         senal = resultado.senal
+        zona_objetivo = (
+            self._zona_cierre_tramo
+            if self._buscando_senal_tramo_estimado
+            else self.ubicacion
+        )
         if senal is not None:
-            if senal.zona != self.ubicacion:
+            if senal.zona != zona_objetivo:
                 # Senal de otra zona: no vale como "frente" (antes se
                 # anclaba el rumbo con cualquier senal y el resto de
                 # la ruta salia orientada al reves).
                 self._advertecer(
                     f"otra:{senal.zona}",
                     f"Veo la señal de {senal.zona}, pero tu zona es "
-                    f"{self.ubicacion}. Gira despacio a la "
+                    f"{zona_objetivo}. Gira despacio a la "
                     f"{self._lado_encarada} hasta encontrar "
                     "la señal de tu zona.",
                 )
@@ -761,6 +769,17 @@ class Aplicacion:
                     return
                 self.rumbo.anclar()
                 self._senal_enfrente = (senal.zona, time.monotonic())
+                if self._buscando_senal_tramo_estimado:
+                    self.ubicacion = senal.zona
+                    self.lado_puerta = senal.lado
+                    self._indice_zona = self._camino.index(senal.zona)
+                    self._tramos_completados += 1
+                    self._buscando_senal_tramo_estimado = False
+                    self._zona_cierre_tramo = None
+                    self._avance_efectivo_m = 0.0
+                    self._pasos_previos = 0
+                    self._falta_encarar = False
+                    self._hablar(f"Señal de {senal.zona} encontrada.")
                 print("RUMBO ANCLADO: señal de", senal.zona, "enfrente")
                 plan = self._ruta_pendiente
                 self._ruta_pendiente = None
@@ -830,6 +849,7 @@ class Aplicacion:
     def _reiniciar_plan(self, plan: list[Instruccion]) -> None:
         """Carga un plan nuevo hacia el destino desde la ubicacion actual."""
         self.pasos.deshabilitar()
+        self._buscando_senal_tramo_estimado = False
         self._plan = plan
         self._indice_plan = 0
         self._instruccion_actual = None
@@ -957,6 +977,7 @@ class Aplicacion:
     def _abandonar_ruta(self) -> None:
         """Deja la navegacion sin mentir y vuelve a pedir destino."""
         self.pasos.deshabilitar()
+        self._buscando_senal_tramo_estimado = False
         self._inicio_espera_destino = 0.0
         self.destino = None
         self._plan = []
@@ -1036,6 +1057,7 @@ class Aplicacion:
         """Da la llegada por VERIFICADA: se vio la senal del destino."""
         destino = self.destino
         self.pasos.deshabilitar()
+        self._buscando_senal_tramo_estimado = False
         self.ubicacion = destino
         self.lado_puerta = LADO_INTERIOR
         # La llegada se anuncia tras confirmar visualmente esta señal:
@@ -1603,7 +1625,16 @@ class Aplicacion:
 
         tiempo_parado = self.pasos.segundos_desde_ultimo_paso
         detenido_en_meta = dados >= objetivo and tiempo_parado >= 2.5
-        if fraccion_avance >= fin or detenido_en_meta:
+        busqueda_por_pasos_crudos = (
+            self._zona_cierre_tramo is not None
+            and self._zona_cierre_tramo != self.destino
+            and self.pasos.avanzar() >= math.ceil(objetivo * fin)
+        )
+        if (
+            fraccion_avance >= fin
+            or detenido_en_meta
+            or busqueda_por_pasos_crudos
+        ):
             if (
                 senal is not None
                 and senal.lado == LADO_INTERIOR
@@ -1652,12 +1683,38 @@ class Aplicacion:
             if self._zona_cierre_tramo == self.destino and senal is None:
                 self._empezar_a_confirmar_llegada()
                 return
+            if self._zona_cierre_tramo is not None:
+                self._iniciar_busqueda_senal_tramo()
+                return
             if not self._aviso_busqueda_dado:
                 self._aviso_busqueda_dado = True
                 self._hablar(
                     f"Aún no veo la señal de {self._zona_cierre_tramo}. "
                     "Continúa despacio; te indicaré cuando la encuentre."
                 )
+
+    def _iniciar_busqueda_senal_tramo(self) -> None:
+        """Detiene el tramo estimado y busca su señal antes de continuar."""
+        zona = self._zona_cierre_tramo
+        if zona is None:
+            return
+        self.pasos.deshabilitar()
+        self._instruccion_actual = None
+        self._ruta_pendiente = None
+        self._buscando_senal_tramo_estimado = True
+        self._instruccion_encarar_dada = True
+        self._lado_encarada = self._planificador.lado_encarada(
+            self.ubicacion, self.destino
+        )
+        self._avance_efectivo_m = 0.0
+        self._pasos_previos = 0
+        self.estado = Estado.ENCARAR_SENAL
+        self._etiqueta = f"Buscando señal de {zona}"
+        self._hablar(
+            f"Detente. Llegaste al final estimado del tramo. "
+            f"Gira aproximadamente 90 grados a la {self._lado_encarada} "
+            f"para buscar la señal de {zona}."
+        )
 
     def _umbral_aviso_llegada(self) -> float:
         """Adelanta el aviso con el ritmo de marcha, sin mover el cierre."""

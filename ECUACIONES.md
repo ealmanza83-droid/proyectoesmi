@@ -469,7 +469,9 @@ avance ≥ ventana_llegada_inicio
 fin = max(ventana_llegada_fin,
           1 + sigmas_cierre · incertidumbre / distancia_tramo)
 avance ≥ fin  sin esa señal
-    → se abre/ensancha la búsqueda, pero no se cierra el tramo
+    → se detiene la marcha y se busca la señal del punto intermedio
+      girando hacia ella; los pasos brutos también abren la búsqueda
+      al alcanzar ceil(N · fin), por si el desvío invalida su proyección
 ```
 
 El aviso se limita a adelantarse como máximo `anticipacion_llegada_max_fraccion`
@@ -480,6 +482,13 @@ búsqueda anticipada usa `avance + sigmas_inicio_busqueda · incertidumbre`;
 la incertidumbre puede ensanchar el límite máximo, pero nunca sustituye
 la señal ni anuncia una llegada. Si el tramo no tiene distancia conocida,
 se conserva el aviso en el umbral de `ventana_llegada_inicio`.
+
+En un tramo intermedio, alcanzar el límite superior sin ver su señal
+detiene el contador y pide buscarla girando hacia el lado de la ruta. Esto
+solo abre la búsqueda: no confirma la zona ni permite ejecutar el siguiente
+giro. La cámara debe reconocer la señal interior esperada para continuar.
+El límite de pasos brutos evita caminar indefinidamente cuando un desvío
+severo hace que la proyección longitudinal no avance.
 
 La **zona de cierre** es `_camino[tramos_completados + 1]` (la siguiente
 del camino, la que este tramo debe alcanzar): verla **no** es una

@@ -368,10 +368,12 @@ da por terminado en "N pasos" exactos, sino en una **ventana**:
   cámara**, si ve la señal interior de la zona de cierre (la
   siguiente del camino): *"Ya veo la señal. Puedes parar."*
 * el límite de búsqueda es al menos el 130 % y se amplía con la
-  incertidumbre del estimador. Si llega a ese límite sin señal, la
-  aplicación pide buscarla, pero **no cierra el tramo**. En el tramo
-  final, el ultrasonido puede guiar la aproximación y la cámara sigue
-  siendo quien confirma.
+  incertidumbre del estimador. En un tramo intermedio, si se llega al
+  límite sin señal (o al límite de pasos brutos por un desvío), la
+  aplicación detiene la marcha y pide girar hacia la señal. **No cierra
+  ni avanza la ruta** hasta que la cámara confirme la señal interior.
+  En el tramo final, el ultrasonido puede guiar la aproximación y la
+  cámara sigue siendo quien confirma.
 
 En ningún caso los pasos por sí solos cierran el tramo ni anuncian la
 llegada. Tras cerrar un tramo con su señal interior, se encara esa zona

@@ -282,11 +282,12 @@ class Configuracion:
     #   ``ventana_llegada_fin`` (130 %), el tramo se da por completado
     #   (re-localizacion verificada: nunca se anuncia una llegada sin
     #   verla);
-    # * si se pasa del 130 % sin ver la senal, los tramos intermedios
-    #   siguen el flujo existente; en el tramo final, una lectura
-    #   ultrasónica fuera del rango seguro mantiene la aproximación
-    #   lenta. La señal reconocida no necesita estar centrada para
-    #   cerrar el tramo.
+    # * si se pasa del 130 % sin ver la señal en un tramo intermedio,
+    #   detiene la marcha y pide girar hacia ella; los pasos brutos
+    #   también abren esta búsqueda si el desvío deja corto el avance
+    #   proyectado. La cámara debe confirmar la señal antes de seguir.
+    #   En el tramo final, el ultrasonido puede guiar la aproximación.
+    #   La señal reconocida no necesita estar centrada para cerrar.
     ventana_llegada_inicio: float = 0.70
     ventana_llegada_fin: float = 1.30
     # Adelanta el aviso de frenado según la velocidad estimada por la
