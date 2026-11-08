@@ -372,6 +372,7 @@ da por terminado en "N pasos" exactos, sino en una **ventana**:
   límite sin señal (o al límite de pasos brutos por un desvío), la
   aplicación detiene la marcha y pide girar hacia la señal. **No cierra
   ni avanza la ruta** hasta que la cámara confirme la señal interior.
+  Durante esa búsqueda no se ordena avanzar por una lectura ultrasónica.
   En el tramo final, el ultrasonido puede guiar la aproximación y la
   cámara sigue siendo quien confirma.
 

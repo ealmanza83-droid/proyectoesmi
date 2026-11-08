@@ -3045,6 +3045,18 @@ def test_llegada_por_ventana() -> None:
         not any("Continúa despacio" in frase for frase in locutor.frases),
         "no ordena seguir caminando a ciegas al pasar la ventana",
     )
+    aplicacion._distancia_puerta_estable_cm = 120.0
+    locutor.frases.clear()
+    aplicacion._en_encarar_senal(ResultadoVision())
+    comprobar(
+        any("señal de Cuarto" in frase for frase in locutor.frases)
+        and not any("señal de Inicio" in frase for frase in locutor.frases),
+        "la búsqueda nombra el punto intermedio esperado, no el origen",
+    )
+    comprobar(
+        not any("avanza despacio" in frase for frase in locutor.frases),
+        "la distancia ultrasónica no ordena avanzar durante la búsqueda",
+    )
 
     detector.senal = Senal("Cuarto", LADO_INTERIOR)
     paso(aplicacion, detector, mpu)

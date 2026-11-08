@@ -489,6 +489,8 @@ solo abre la búsqueda: no confirma la zona ni permite ejecutar el siguiente
 giro. La cámara debe reconocer la señal interior esperada para continuar.
 El límite de pasos brutos evita caminar indefinidamente cuando un desvío
 severo hace que la proyección longitudinal no avance.
+Durante esta búsqueda no se usa el ultrasonido para ordenar avanzar: se
+mantiene a la persona detenida y se la orienta hacia la señal intermedia.
 
 La **zona de cierre** es `_camino[tramos_completados + 1]` (la siguiente
 del camino, la que este tramo debe alcanzar): verla **no** es una

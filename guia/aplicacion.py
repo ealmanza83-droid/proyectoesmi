@@ -793,6 +793,14 @@ class Aplicacion:
                 return
 
         self._etiqueta = "Encarando la senal orientadora"
+        if self._buscando_senal_tramo_estimado:
+            self._advertecer(
+                f"busqueda-tramo:{zona_objetivo}",
+                f"Detente. Aún no veo la señal de {zona_objetivo}. "
+                f"Gira despacio a la {self._lado_encarada} hasta encontrarla.",
+            )
+            return
+
         distancia = self._distancia_puerta_estable_cm
         obstaculo_central = any(
             obstaculo.lado == EN_MEDIO_DEL_CAMINO
@@ -809,7 +817,7 @@ class Aplicacion:
         ):
             self._advertecer(
                 f"encarada-lejos:{self.ubicacion}",
-                f"Aún no veo la señal de {self.ubicacion}. El sensor detecta "
+                f"Aún no veo la señal de {zona_objetivo}. El sensor detecta "
                 f"algo a {round(distancia)} centímetros; avanza despacio "
                 "hacia delante mientras sigues buscándola.",
             )
