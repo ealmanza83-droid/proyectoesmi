@@ -619,8 +619,9 @@ def test_flujo_completo() -> None:
         "no repite la indicación de encarar tras llegar",
     )
     comprobar(
-        any("Gira a la derecha" in frase for frase in locutor.frases),
-        "indica el giro de la ruta hacia el nuevo destino",
+        any("alinearte con el pasillo" in frase for frase in locutor.frases)
+        and any("a la derecha" in frase for frase in locutor.frases),
+        "indica cómo alinearse con el pasillo hacia el nuevo destino",
     )
 
     # --- 3.7 Caida: alarma constante y orden para apagarla ---------
@@ -1940,6 +1941,18 @@ def test_encarada_automatica() -> None:
         ventana=VentanaFalsa(),
     )
 
+    comprobar(
+        not aplicacion.pasos.habilitado,
+        "el contador de pasos inicia deshabilitado",
+    )
+    for i in range(500):
+        mpu.az = 1.6 if i % 50 < 25 else 1.0
+        aplicacion.pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        aplicacion.pasos.pasos == 0,
+        "no cuenta pasos mientras busca la señal",
+    )
+
     # La busqueda confirma la senal interior de Inicio.
     aplicacion.estado = Estado.BUSCAR_SENAL
     detector.senal = Senal("Inicio", LADO_INTERIOR)
@@ -1947,6 +1960,13 @@ def test_encarada_automatica() -> None:
     comprobar(
         aplicacion.estado is Estado.ESPERANDO_DESTINO,
         "la busqueda confirma la zona",
+    )
+    for i in range(500):
+        mpu.az = 1.6 if i % 50 < 25 else 1.0
+        aplicacion.pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        aplicacion.pasos.pasos == 0,
+        "no cuenta pasos mientras espera que la persona elija destino",
     )
 
     # Pide el destino sin moverse (baja la senal para hablar): la
@@ -1986,6 +2006,94 @@ def test_encarada_automatica() -> None:
     comprobar(
         any("encárate" in frase for frase in locutor.frases),
         "explica que hay que poner la senal enfrente",
+    )
+
+    aplicacion.pasos.deshabilitar()
+    aplicacion._empezar_a_caminar()
+    for i in range(500):
+        mpu.az = 1.6 if i % 50 < 25 else 1.0
+        aplicacion.pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        aplicacion.pasos.pasos >= 5,
+        "el contador se habilita cuando empieza el tramo a pie",
+    )
+    aplicacion.pasos.deshabilitar()
+    contados = aplicacion.pasos.pasos
+    for i in range(500):
+        mpu.az = 1.6 if i % 50 < 25 else 1.0
+        aplicacion.pasos.en_muestra(mpu.leer(), dt=0.01)
+    comprobar(
+        aplicacion.pasos.pasos == contados,
+        "el contador se pausa al terminar el segmento de marcha",
+    )
+
+
+def test_destino_no_escuchado_y_giro_inicial() -> None:
+    """Repite la pregunta y exige el giro de salida antes de contar."""
+    print("\n[21.1] Reintento de destino y giro de salida")
+    config = dataclasses.replace(
+        Configuracion(), repetir_pregunta_destino_s=0.0
+    )
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    detector.senal = Senal("Inicio", LADO_INTERIOR)
+    aplicacion.estado = Estado.BUSCAR_SENAL
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO
+        and microfono.modo is ModoMicrofono.DESTINO,
+        "la señal abre la escucha del destino",
+    )
+
+    locutor.frases.clear()
+    aplicacion.pasos.habilitar()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO
+        and "No te escuché. ¿A dónde quieres ir?" in locutor.frases,
+        "si no oye respuesta vuelve a preguntar",
+    )
+    comprobar(
+        not aplicacion.pasos.habilitado,
+        "no empieza a contar mientras espera el destino",
+    )
+
+    microfono.eventos.put(
+        EventoVoz(ModoMicrofono.DESTINO, "quiero ir al cuarto")
+    )
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO
+        and aplicacion._instruccion_actual is not None
+        and aplicacion._instruccion_actual.accion is Accion.GIRAR_IZQUIERDA,
+        "el plan inicia con el giro de alineación del mapa",
+    )
+    comprobar(
+        any("alinearte con el pasillo" in frase for frase in locutor.frases),
+        "explica el giro necesario antes de caminar",
+    )
+    for i in range(500):
+        mpu.az = 1.6 if i % 50 < 25 else 1.0
+        paso(aplicacion, detector, mpu)
+    comprobar(
+        not aplicacion.pasos.habilitado and aplicacion.pasos.pasos == 0,
+        "el contador permanece apagado durante el giro inicial",
     )
 
 
@@ -4087,6 +4195,7 @@ def main() -> int:
         test_obstaculos_en_medio()
         test_encarada_intermedia_de_tramo()
         test_encarada_automatica()
+        test_destino_no_escuchado_y_giro_inicial()
         test_obstaculos_sincronizados()
         test_pasos_con_media_cambiada()
         test_rumbo_ignora_balanceo()

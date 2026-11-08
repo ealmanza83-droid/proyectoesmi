@@ -183,6 +183,7 @@ class Aplicacion:
         self.rumbo = Rumbo()
         self.giro = MedidorGiro(config, rumbo=self.rumbo)
         self.pasos = ContadorPasos(config)
+        self.pasos.deshabilitar()
         self._odometro_ultrasonico = OdometroUltrasonico(config)
         self._medidor_distancia_puerta = OdometroUltrasonico(
             config,
@@ -295,6 +296,7 @@ class Aplicacion:
         # ahi: la navegacion manda y un aviso jamas atrasa una
         # indicacion de la ruta.
         self._ultima_voz_en = 0.0
+        self._inicio_espera_destino = 0.0
 
         self._etiqueta = ""
         self._ultimo_aviso_giro = 0.0
@@ -503,9 +505,9 @@ class Aplicacion:
                 if destino is not None:
                     self._asignar_destino(destino)
                 else:
-                    self._hablar(
+                    self._preguntar_destino(
                         "No reconozco ese lugar. Puedes pedir inicio, "
-                        "sala, baño o cuarto."
+                        "sala, baño o cuarto. ¿A dónde quieres ir?"
                     )
 
             elif evento.modo is ModoMicrofono.COMANDO:
@@ -533,10 +535,13 @@ class Aplicacion:
 
         elif comando.tipo is TipoComando.PARAR:
             self._en_pausa = True
+            self.pasos.deshabilitar()
             self._hablar("Alto. Navegación en pausa.")
 
         elif comando.tipo is TipoComando.REANUDAR:
             self._en_pausa = False
+            if self._debe_contar_pasos():
+                self.pasos.habilitar()
             self._hablar("Navegación reanudada.")
 
         elif comando.tipo is TipoComando.SILENCIAR:
@@ -606,6 +611,7 @@ class Aplicacion:
         indicacion se quedaba sin reconocer.
         """
         self.destino = destino
+        self._inicio_espera_destino = 0.0
         print("DESTINO:", destino)
 
         if destino == self.ubicacion:
@@ -670,6 +676,7 @@ class Aplicacion:
         senales de las demas zonas estan a pasos de distancia.
         """
         if self._senal_enfrente_reciente():
+            self.pasos.deshabilitar()
             print(
                 "ENCARADA AUTOMATICA: la senal de",
                 self.ubicacion,
@@ -802,13 +809,27 @@ class Aplicacion:
         """Explica el problema y vuelve a pedir el destino."""
         self.destino = None
         self._hablar(motivo)
-        self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
+        self._preguntar_destino()
+
+    def _preguntar_destino(self, texto: str = "¿A dónde quieres ir?") -> None:
+        """Pide el destino y habilita el plazo para repetir si no se oye."""
+        self._hablar(texto, cambiar_a=ModoMicrofono.DESTINO)
+        self._inicio_espera_destino = time.monotonic()
 
     def _iniciar_navegacion(self, plan: list[Instruccion]) -> None:
         self._reiniciar_plan(plan)
 
+    def _debe_contar_pasos(self) -> bool:
+        """Solo cuenta durante los estados e instrucciones de marcha."""
+        return self.estado is Estado.CINCO_PASOS or (
+            self.estado is Estado.NAVEGANDO
+            and self._instruccion_actual is not None
+            and self._instruccion_actual.es_pasos
+        )
+
     def _reiniciar_plan(self, plan: list[Instruccion]) -> None:
         """Carga un plan nuevo hacia el destino desde la ubicacion actual."""
+        self.pasos.deshabilitar()
         self._plan = plan
         self._indice_plan = 0
         self._instruccion_actual = None
@@ -935,12 +956,14 @@ class Aplicacion:
 
     def _abandonar_ruta(self) -> None:
         """Deja la navegacion sin mentir y vuelve a pedir destino."""
+        self.pasos.deshabilitar()
+        self._inicio_espera_destino = 0.0
         self.destino = None
         self._plan = []
         self._indice_plan = 0
         self._instruccion_actual = None
         self.estado = Estado.ESPERANDO_DESTINO
-        self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
+        self._preguntar_destino()
 
     def _empezar_a_confirmar_llegada(self) -> None:
         """Tras los pasos medidos, falta VER la senal del destino.
@@ -949,6 +972,7 @@ class Aplicacion:
         dejar a la persona a un lado de la puerta: anunciar la
         llegada solo por el contador seria dar una indicacion errada.
         """
+        self.pasos.deshabilitar()
         self.estado = Estado.CONFIRMANDO_LLEGADA
         self._inicio_llegada = time.monotonic()
         # La puerta del destino esta en el mismo lado que las demas:
@@ -1011,6 +1035,7 @@ class Aplicacion:
     def _anunciar_llegada(self) -> None:
         """Da la llegada por VERIFICADA: se vio la senal del destino."""
         destino = self.destino
+        self.pasos.deshabilitar()
         self.ubicacion = destino
         self.lado_puerta = LADO_INTERIOR
         # La llegada se anuncia tras confirmar visualmente esta señal:
@@ -1027,7 +1052,7 @@ class Aplicacion:
         self.estado = Estado.ESPERANDO_DESTINO
 
         self._hablar(f"Has llegado a {destino}.")
-        self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
+        self._preguntar_destino()
 
     # ------------------------------------------------------------------
     # Obstaculos y seguridad
@@ -1304,7 +1329,7 @@ class Aplicacion:
                 print("SEÑAL ENCONTRADA:", self.ubicacion)
                 self._hablar(f"Estás en {self.ubicacion}.")
                 self.estado = Estado.ESPERANDO_DESTINO
-                self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
+                self._preguntar_destino()
                 return
             # Cara del pasillo: la persona esta al otro lado de la
             # puerta, no dentro de la zona (antes cualquier senal
@@ -1365,10 +1390,12 @@ class Aplicacion:
         # zona esta la persona); fuera de ella se espera llegar al
         # tope de la ventana.
         if dados >= inicio and resultado.senal is not None:
+            self.pasos.deshabilitar()
             self._en_buscar_senal(resultado)
             return
 
         if dados >= fin:
+            self.pasos.deshabilitar()
             self._hablar(
                 f"{objetivo} pasos completados. Puedes parar. Gira "
                 f"{self.config.grados_giro_inicial} grados a la derecha "
@@ -1382,6 +1409,8 @@ class Aplicacion:
 
     def _en_esperando_destino(self, resultado: ResultadoVision) -> None:
         self._etiqueta = "Esperando destino"
+        if self.pasos.habilitado:
+            self.pasos.deshabilitar()
         senal = resultado.senal
         if (
             senal is not None
@@ -1394,6 +1423,12 @@ class Aplicacion:
             # la encarada posterior (ver _iniciar_encarada).
             self.rumbo.anclar()
             self._senal_enfrente = (senal.zona, time.monotonic())
+        if (
+            self._inicio_espera_destino
+            and time.monotonic() - self._inicio_espera_destino
+            >= self.config.repetir_pregunta_destino_s
+        ):
+            self._preguntar_destino("No te escuché. ¿A dónde quieres ir?")
 
     def _en_navegando(self, resultado: ResultadoVision) -> None:
         if self._en_pausa:
@@ -1430,10 +1465,17 @@ class Aplicacion:
                 self._empezar_a_confirmar_llegada()
                 return
 
-            self._anunciar_instruccion(self._instruccion_actual)
             if self._instruccion_actual.es_giro:
+                if self._indice_plan == 1:
+                    self._hablar(
+                        "Para alinearte con el pasillo, "
+                        + self._texto_giro(self._instruccion_actual)
+                    )
+                else:
+                    self._anunciar_instruccion(self._instruccion_actual)
                 self.giro.reiniciar()
             else:
+                self._anunciar_instruccion(self._instruccion_actual)
                 self._empezar_a_caminar()
 
         instruccion = self._instruccion_actual
@@ -1686,6 +1728,7 @@ class Aplicacion:
         crudos y acreditados (y los intervalos de la linea PASO)
         muestran si entraron pasos de mas.
         """
+        self.pasos.deshabilitar()
         print(
             f"TRAMO: {dados:.1f} pasos efectivos de "
             f"{self.pasos.avanzar()} crudos"
@@ -1699,7 +1742,9 @@ class Aplicacion:
 
     def _empezar_a_caminar(self) -> None:
         """Reinicia el tramo a pie: pasos, rumbo de partida y avisos."""
+        self.pasos.deshabilitar()
         self.pasos.reiniciar()
+        self.pasos.habilitar()
         self._picos_previos = 0
         # La referencia de la linea recta se fija con el primer paso
         # (ver _creditar_pasos): el residuo del giro anterior, la
@@ -2391,3 +2436,12 @@ class Aplicacion:
             self._hablar(f"Gira a la izquierda {instruccion.cantidad} grados.")
         elif instruccion.accion is Accion.CAMINAR:
             self._hablar(f"Camina {instruccion.cantidad} pasos.")
+
+    @staticmethod
+    def _texto_giro(instruccion: Instruccion) -> str:
+        sentido = (
+            "a la derecha"
+            if instruccion.accion is Accion.GIRAR_DERECHA
+            else "a la izquierda"
+        )
+        return f"gira {sentido} {instruccion.cantidad} grados."

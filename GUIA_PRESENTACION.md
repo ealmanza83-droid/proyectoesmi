@@ -128,7 +128,7 @@ código se convierte en banderas globales imposibles de explicar.
 | `BUSCAR_SENAL` | Mira 1 minuto buscando una señal | Ve una señal / se acaba el tiempo |
 | `MEDIA_VUELTA` | Media vuelta de 180° (1.er intento fallido) | Lleva los 180° |
 | `CINCO_PASOS` | Camina 5 pasos y reintenta girar (2.º intento) | Dio los 5 pasos |
-| `ESPERANDO_DESTINO` | Escucha *"Raspi, ve a la sala"* | Pide un destino |
+| `ESPERANDO_DESTINO` | Escucha el destino; si no detecta respuesta, repite la pregunta cada 8 s | Pide un destino |
 | `ENCARAR_SENAL` | Pide poner la señal de la zona enfrente (se omite con la encarada automática: señal confirmada hace < 30 s y giro < 20°) | Ve esa señal por su cara interior |
 | `NAVEGANDO` | Ejecuta la ruta: giros integrados + pasos acreditados | Se agota el plan |
 | `CONFIRMANDO_LLEGADA` | Pide girar despacio hasta ver la señal del destino | Ve la señal del destino |
@@ -142,23 +142,14 @@ código se convierte en banderas globales imposibles de explicar.
 2. Búsqueda: *"Buscando la señal durante un minuto"* → la cámara ve la
    vaca (cara interior de Inicio) → *"Estás en Inicio. ¿A dónde
    quieres ir?"*
-3. Destino: *"Raspi, ve a la sala"* → *"Entendido. Vamos a Sala."*
-4. **Encarada**: como las rutas se midieron mirando la señal, se pide
-   ponerla enfrente: *"Para saber hacia dónde miras, primero encárate
-   con la señal de esta zona. Gira despacio a la izquierda hasta que
-   te diga que la tienes frente a ti."* → al verla: `RUMBO ANCLADO`
-   (rumbo = 0°) → *"La señal está frente a ti."* El lado en el que
-   gira sale del sentido de la ruta (`GIRO_SENAL_NORMAL` /
-   `GIRO_SENAL_INVERSO`): a la **izquierda** en el sentido normal y a
-   la derecha al volver, porque las imágenes cambian de lado.
-   **Excepción (encarada automática)**: si la señal de la zona
-   se acaba de confirmar en el paso 2 y no has girado más de 20°
-   desde entonces, no se pide nada: la ruta arranca directo
-   (`ENCARADA AUTOMATICA` en consola). En casa no podría encontrarse
-   otra señal en el mismo sitio, así que pedirla otra vez dejaría a
-   la persona girando sin salida.
-5. Navegación: *"Gira a la izquierda 90 grados"* → *"Puedes parar.
-   Giro completo."* → *"Camina 14 pasos"*
+3. Destino: *"Raspi, ve a la sala"* → *"Entendido. Vamos a Sala."*.
+   Si no se reconoce ninguna respuesta, vuelve a preguntar cada 8 s;
+   permanece esperando y no cuenta pasos.
+4. **Encarada automática**: la cámara ya acaba de confirmar la señal
+   interior de Inicio, así que no se vuelve a pedir que la busque ni
+   que la centre. La ruta arranca desde esa orientación.
+5. Navegación: *"Para alinearte con el pasillo, gira a la izquierda
+   90 grados"* → *"Puedes parar. Giro completo."* → *"Camina 14 pasos"*
    (hasta el Cuarto) → cuenta solo pasos rectos → *"Pasos
    completados. Puedes parar."* → **encarada intermedia**: como al
    terminar el tramo la persona queda de espaldas a la señal de esa
@@ -236,6 +227,9 @@ del intervalo mediano); los cambios de ritmo se aceptan. Tras una pausa
 superior a 1.5 s, el primer pico queda pendiente: se acredita junto con
 el siguiente si confirma que la marcha se reanudó; un movimiento aislado
 no suma pasos. Tras tres picos demasiado cercanos se re-basela el ritmo.
+El muestreador del MPU sigue activo, pero el contador de pasos solo se
+habilita durante los cinco pasos de búsqueda o un segmento de caminata;
+no cuenta durante giros, búsqueda de señal ni espera del destino.
 
 ### 5.4 Línea recta: avance proyectado
 

@@ -421,6 +421,13 @@ class FiltroPaso:
         self._y2, self._y1 = self._y1, salida
         return salida
 
+    def reiniciar(self) -> None:
+        """Descarta el estado del filtro antes de una nueva caminata."""
+        self._fs = None
+        self._x1 = self._x2 = 0.0
+        self._y1 = self._y2 = 0.0
+        self._sembrado = False
+
 
 class ContadorPasos:
     """Detecta pasos por la oscilacion de la aceleracion al caminar.
@@ -456,6 +463,8 @@ class ContadorPasos:
 
     def __init__(self, config: Configuracion):
         self._config = config
+        self._bloqueo = threading.Lock()
+        self._habilitado = True
         self._pasos = 0
         # Reloj propio (segundos acumulados): unico origen del tiempo
         # para intervalos y cadencia.
@@ -484,6 +493,12 @@ class ContadorPasos:
 
     def en_muestra(self, lectura: LecturaMPU, dt: float) -> None:
         """Cuenta un paso si la muestra trae una oscilacion de paso."""
+        with self._bloqueo:
+            if not self._habilitado:
+                return
+            self._procesar_muestra(lectura, dt)
+
+    def _procesar_muestra(self, lectura: LecturaMPU, dt: float) -> None:
         dt = min(dt, DT_MAXIMO_S)
         self._tiempo += dt
 
@@ -653,6 +668,34 @@ class ContadorPasos:
         return self._pasos
 
     @property
+    def habilitado(self) -> bool:
+        """Indica si el contador está activo para el estado actual."""
+        return self._habilitado
+
+    def habilitar(self) -> None:
+        """Activa el contador y descarta ciclos parciales anteriores."""
+        with self._bloqueo:
+            if self._habilitado:
+                return
+            self._filtro.reiniciar()
+            self._ultimo_paso = None
+            self._paso_pendiente = None
+            self._en_pico = False
+            self._pico_actual = 0.0
+            self._pico_contado = False
+            self._habilitado = True
+
+    def deshabilitar(self) -> None:
+        """Pausa la detección fuera de los segmentos que se caminan."""
+        with self._bloqueo:
+            self._habilitado = False
+            self._filtro.reiniciar()
+            self._paso_pendiente = None
+            self._en_pico = False
+            self._pico_actual = 0.0
+            self._pico_contado = False
+
+    @property
     def picos_por_paso(self) -> tuple[float, ...]:
         """Picos filtrados (g), en el mismo orden que los pasos contados."""
         return tuple(self._picos_por_paso)
@@ -669,10 +712,12 @@ class ContadorPasos:
         persona, no del tramo) y borra el ultimo paso: el primero del
         tramo nuevo cuenta sin juzgar, como siempre.
         """
-        self._pasos = 0
-        self._ultimo_paso = None
-        self._paso_pendiente = None
-        self._en_pico = False
-        self._pico_contado = False
-        self._rechazos = 0
-        self._picos_por_paso.clear()
+        with self._bloqueo:
+            self._pasos = 0
+            self._ultimo_paso = None
+            self._paso_pendiente = None
+            self._en_pico = False
+            self._pico_actual = 0.0
+            self._pico_contado = False
+            self._rechazos = 0
+            self._picos_por_paso.clear()

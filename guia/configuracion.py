@@ -115,6 +115,9 @@ class Configuracion:
     carpeta_audio: Path = Path("/tmp/audio_orientacion")
     microfono_id: int | None = None
     ventana_comando_s: float = 8.0
+    # Si no llega una transcripcion mientras se espera el destino,
+    # repetir la pregunta en vez de dejar a la persona sin feedback.
+    repetir_pregunta_destino_s: float = 8.0
 
     # ------------------------------------------------------------------
     # MPU6050 (giroscopio + acelerometro)

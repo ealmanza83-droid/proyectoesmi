@@ -399,6 +399,13 @@ cinta métrica (`distancia_m`) y anota los pasos que diste andándolo
 puerta. La zancada exacta la calcula el sistema sola, al cerrar el
 primer tramo con la cámara.
 
+Aunque el MPU sigue muestreando, el contador solo se activa durante los
+cinco pasos de búsqueda o al caminar un tramo. No cuenta pasos durante
+los giros, la búsqueda visual ni la espera de un destino.
+Después de elegir destino, la primera instrucción del mapa indica el giro
+para alinearse con el pasillo; solo al completarlo comienza el conteo del
+tramo. Si no se detecta una respuesta, la pregunta se repite cada 8 s.
+
 ### Comandos de voz
 
 Palabra clave: **"Raspi"** (también "ras pi", "ras py").
