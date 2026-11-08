@@ -52,6 +52,7 @@ replanifica desde la ubicacion real.
 from __future__ import annotations
 
 import queue
+import math
 import time
 from pathlib import Path
 from typing import Callable
@@ -250,9 +251,13 @@ class Aplicacion:
         # Correccion guiada del rumbo: el giro de vuelta a la recta se
         # sigue en vivo (no con un numero fijo) hasta decir "para".
         self._corrigiendo = False
+        self._hubo_correccion_desvio = False
+        self._desvio_maximo_tramo = 0.0
+        self._hubo_obstaculo_central_anunciado = False
         self._desvio_inicial = 0.0
-        self._pasos_acreditados = 0
+        self._avance_efectivo_m = 0.0
         self._pasos_previos = 0
+        self._picos_previos = 0
         # Zonas del plan en curso: sirven para seguir el avance y para
         # detectar si la persona se devolvio (y replanificar a tiempo).
         self._camino: list[str] = []
@@ -267,12 +272,14 @@ class Aplicacion:
         # y el aviso de "ya casi llegas", dado una sola vez por tramo.
         self._zona_cierre_tramo: str | None = None
         self._aviso_ventana_dado = False
+        self._aviso_busqueda_dado = False
         # Distancia medida del tramo en curso (0.0 si el mapa no la
         # tiene): al cerrarlo con la camara es con lo que se mide la
         # zancada de la persona.
         self._distancia_tramo = 0.0
         self._distancia_frontal_inicio_cm: float | None = None
-        self._avance_ultrasonico_m: float | None = None
+        self._posicion_ultrasonico_inicio_m: float | None = None
+        self._posicion_ultrasonico_m: float | None = None
         self._ultima_secuencia_ultrasonica: int | None = None
         self._inicio_llegada = 0.0
 
@@ -706,7 +713,7 @@ class Aplicacion:
         # El tramo anterior ya quedo acreditado: si la senal de la zona
         # sigue a la vista al retomar, _seguir_senal no debe leer esos
         # pasos como "se devolvio" y replanificar sin mas.
-        self._pasos_acreditados = 0
+        self._avance_efectivo_m = 0.0
         self._pasos_previos = 0
         self._lado_encarada = self._planificador.lado_encarada(
             self.ubicacion, self.destino
@@ -743,13 +750,13 @@ class Aplicacion:
                 )
             else:
                 self.lado_puerta = senal.lado
+                if not self._puede_continuar_encarada(resultado, senal):
+                    return
                 self.rumbo.anclar()
                 self._senal_enfrente = (senal.zona, time.monotonic())
                 print("RUMBO ANCLADO: señal de", senal.zona, "enfrente")
                 plan = self._ruta_pendiente
                 self._ruta_pendiente = None
-                if self._instruccion_encarar_dada:
-                    self._hablar("La señal está frente a ti.")
                 if plan is None:
                     # Encarada intermedia (fin de tramo): no hay plan
                     # nuevo; la ruta en curso sigue y el giro del
@@ -760,6 +767,28 @@ class Aplicacion:
                 return
 
         self._etiqueta = "Encarando la senal orientadora"
+        distancia = self._distancia_puerta_estable_cm
+        obstaculo_central = any(
+            obstaculo.lado == EN_MEDIO_DEL_CAMINO
+            for obstaculo in resultado.obstaculos
+        )
+        if (
+            distancia is not None
+            and distancia > self.config.distancia_maxima_senal_cm
+            and abs(self.rumbo.grados)
+            > self.config.encarada_max_giro_grados
+            and not obstaculo_central
+            and time.monotonic() - self._ultima_alerta_obstaculo_en
+            >= self.config.espera_llegada_tras_obstaculo_s
+        ):
+            self._advertecer(
+                f"encarada-lejos:{self.ubicacion}",
+                f"Aún no veo la señal de {self.ubicacion}. El sensor detecta "
+                f"algo a {round(distancia)} centímetros; avanza despacio "
+                "hacia delante mientras sigues buscándola.",
+            )
+            return
+
         if not self._instruccion_encarar_dada:
             self._instruccion_encarar_dada = True
             self._hablar(
@@ -784,10 +813,14 @@ class Aplicacion:
         self._indice_plan = 0
         self._instruccion_actual = None
         self._en_pausa = False
-        self._pasos_acreditados = 0
+        self._avance_efectivo_m = 0.0
         self._pasos_previos = 0
         self._zona_cierre_tramo = None
         self._aviso_ventana_dado = False
+        self._aviso_busqueda_dado = False
+        self._hubo_obstaculo_central_anunciado = False
+        self._hubo_correccion_desvio = False
+        self._desvio_maximo_tramo = 0.0
         # Zonas del recorrido: la primera es donde se parte, y cada
         # senal interior confirmada va avanzando por la lista.
         self._camino = self._planificador.camino(self.ubicacion, self.destino) or []
@@ -861,7 +894,7 @@ class Aplicacion:
             # Sigue en la zona de la que partio el tramo: si aun no
             # habia avanzado, es solo un reanclaje (arranco viendo su
             # propia puerta); si ya hay pasos dados, se devolvio.
-            if self._pasos_acreditados == 0:
+            if self.pasos_efectivos == 0:
                 return False
         elif indice == self._indice_zona + 1:
             # Avance normal: acaba de entrar en la siguiente zona.
@@ -980,6 +1013,11 @@ class Aplicacion:
         destino = self.destino
         self.ubicacion = destino
         self.lado_puerta = LADO_INTERIOR
+        # La llegada se anuncia tras confirmar visualmente esta señal:
+        # queda enfrente mientras la persona siga en el sitio. Al elegir
+        # el siguiente destino no hace falta volver a pedir que la encare.
+        self.rumbo.anclar()
+        self._senal_enfrente = (destino, time.monotonic())
         self.destino = None
         self._plan = []
         self._indice_plan = 0
@@ -1126,6 +1164,7 @@ class Aplicacion:
                     f"Alto, en medio del camino hay {articulo}: {nombres}."
                 )
             self._medio_anunciado = tuple(en_medio)
+            self._hubo_obstaculo_central_anunciado = True
             self._ultimo_anuncio_obstaculo = ahora
             self._registrar_alerta_obstaculo()
 
@@ -1250,7 +1289,8 @@ class Aplicacion:
         self._etiqueta = f"Buscando senal - intento {self._intento}"
 
         senal = resultado.senal
-        self._guiar_con_puerta(resultado)
+        if self.config.usar_puertas:
+            self._guiar_con_puerta(resultado)
         if senal is not None:
             self.rumbo.anclar()  # se mira la senal: rumbo conocido
             if senal.lado == LADO_INTERIOR:
@@ -1314,8 +1354,9 @@ class Aplicacion:
     def _en_cinco_pasos(self, resultado: ResultadoVision) -> None:
         objetivo = self.config.pasos_objetivo
         dados = self._creditar_pasos(resultado)
-        self._etiqueta = f"Caminando - {dados}/{objetivo} pasos"
-        self._guiar_con_puerta(resultado)
+        self._etiqueta = f"Caminando - {dados:.1f}/{objetivo} pasos efectivos"
+        if self.config.usar_puertas:
+            self._guiar_con_puerta(resultado)
         inicio = objetivo * self.config.ventana_llegada_inicio
         fin = objetivo * self.config.ventana_llegada_fin
 
@@ -1415,7 +1456,9 @@ class Aplicacion:
 
         elif instruccion.es_pasos:
             dados = self._creditar_pasos(resultado)
-            self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
+            self._etiqueta = (
+                f"Caminando: {dados:.1f}/{instruccion.cantidad} pasos efectivos"
+            )
             self._actualizar_odometro_ultrasonico(instruccion)
             self._actualizar_posicion_tramo(resultado, instruccion, dados)
             self._valorar_llegada_del_tramo(
@@ -1428,14 +1471,15 @@ class Aplicacion:
             self._guiar_con_senal(resultado)
             self._vigilar_desvio(resultado)
             if (
-                self._instruccion_actual is not None
+                self.config.usar_puertas
+                and self._instruccion_actual is not None
                 and self._aviso_ventana_dado
                 and resultado.senal is None
             ):
                 self._guiar_con_puerta(resultado)
 
     def _valorar_llegada_del_tramo(
-        self, resultado: ResultadoVision, dados: int, objetivo: int
+        self, resultado: ResultadoVision, dados: float, objetivo: int
     ) -> None:
         """Ventana de llegada del tramo: manda la camara, no el contador.
 
@@ -1451,10 +1495,9 @@ class Aplicacion:
         * entre el 70 % y el ``ventana_llegada_fin`` (130 %) esa
           lectura da el tramo por completado (re-localizacion
           verificada: nunca se anuncia sin verla);
-        * pasados los 130 % sin senal, los tramos intermedios siguen
-          el flujo de siempre. En el tramo final, si el ultrasonido
-          estable indica que aun esta lejos, se mantiene la marcha
-          lenta hasta el rango de puerta y entonces se busca la senal.
+        * pasada la ventana sin senal, el estimador abre/ensancha la
+          busqueda, pero no cierra un tramo intermedio. En el tramo final,
+          el ultrasonido puede guiar la aproximacion y la camara confirma.
         """
         fraccion_pasos = dados / objetivo if objetivo > 0 else 0.0
         fraccion_posicion = (
@@ -1463,8 +1506,26 @@ class Aplicacion:
             else 0.0
         )
         fraccion_avance = max(fraccion_pasos, fraccion_posicion)
+        fraccion_aviso = fraccion_avance
+        if self._distancia_tramo > 0:
+            posicion_superior = (
+                self.estimador_posicion.posicion_m
+                + self.config.sigmas_inicio_busqueda
+                * self.estimador_posicion.incertidumbre_m
+            )
+            fraccion_aviso = max(
+                fraccion_pasos, posicion_superior / self._distancia_tramo
+            )
         inicio = self.config.ventana_llegada_inicio
         fin = self.config.ventana_llegada_fin
+        if self._distancia_tramo > 0:
+            fin = max(
+                fin,
+                1.0
+                + self.config.sigmas_cierre
+                * self.estimador_posicion.incertidumbre_m
+                / self._distancia_tramo,
+            )
         senal = resultado.senal
 
         if (
@@ -1484,7 +1545,7 @@ class Aplicacion:
         ):
             print(
                 f"TRAMO cerrado por camara: senal de {senal.zona} vista "
-                f"con {dados} pasos acreditados"
+                f"con {dados:.1f} pasos efectivos"
             )
             self._hablar("Ya veo la señal. Puedes parar.")
             self._aprender_zancada(dados)
@@ -1492,7 +1553,7 @@ class Aplicacion:
             return
 
         umbral_aviso = self._umbral_aviso_llegada()
-        if fraccion_avance >= umbral_aviso and not self._aviso_ventana_dado:
+        if fraccion_aviso >= umbral_aviso and not self._aviso_ventana_dado:
             self._aviso_ventana_dado = True
             self._hablar(
                 "Reduce el paso; te indicaré dónde detenerte."
@@ -1546,15 +1607,15 @@ class Aplicacion:
                 )
                 self._empezar_a_confirmar_llegada()
                 return
-            print(
-                f"TRAMO: {dados} pasos acreditados de {objetivo} "
-                "esperados sin ver la senal de cierre"
-            )
-            self._hablar(
-                "Detente. Ya recorriste los pasos previstos, pero todavía "
-                "no confirmé la señal. Voy a buscarla."
-            )
-            self._cerrar_tramo(dados)
+            if self._zona_cierre_tramo == self.destino and senal is None:
+                self._empezar_a_confirmar_llegada()
+                return
+            if not self._aviso_busqueda_dado:
+                self._aviso_busqueda_dado = True
+                self._hablar(
+                    f"Aún no veo la señal de {self._zona_cierre_tramo}. "
+                    "Continúa despacio; te indicaré cuando la encuentre."
+                )
 
     def _umbral_aviso_llegada(self) -> float:
         """Adelanta el aviso con el ritmo de marcha, sin mover el cierre."""
@@ -1590,7 +1651,7 @@ class Aplicacion:
             self.config.ventana_llegada_inicio - margen / self._distancia_tramo,
         )
 
-    def _aprender_zancada(self, dados: int) -> None:
+    def _aprender_zancada(self, dados: float) -> None:
         """Mide la zancada con el tramo que acaba de cerrar la camara.
 
         Solo quien VERIFICA el tramo sirve para medir: la distancia
@@ -1599,6 +1660,17 @@ class Aplicacion:
         % sin senal) no mide nada, porque ahi no se sabe donde acabo
         el tramo de verdad.
         """
+        if (
+            self._hubo_obstaculo_central_anunciado
+            or self._hubo_correccion_desvio
+            or self._desvio_maximo_tramo
+            >= self.config.desvio_aprendizaje_max_grados
+        ):
+            print(
+                "ZANCADA: no se aprende; tramo con obstaculo o desvio "
+                f"(maximo {self._desvio_maximo_tramo:.1f} grados)"
+            )
+            return
         medida = self.zancada.medir(self._distancia_tramo, dados)
         if medida is None:
             return
@@ -1607,30 +1679,39 @@ class Aplicacion:
             f"-> {medida:.3f} m/paso (EMA)"
         )
 
-    def _cerrar_tramo(self, dados: int) -> None:
+    def _cerrar_tramo(self, dados: float) -> None:
         """Da el tramo por terminado: toca encarar la zona alcanzada.
 
         Deja en consola lo que senso el contador: la diferencia entre
         crudos y acreditados (y los intervalos de la linea PASO)
         muestran si entraron pasos de mas.
         """
-        print(f"TRAMO: {dados} pasos acreditados de {self.pasos.avanzar()} crudos")
+        print(
+            f"TRAMO: {dados:.1f} pasos efectivos de "
+            f"{self.pasos.avanzar()} crudos"
+        )
         self._tramos_completados += 1
         self._falta_encarar = True
         self._instruccion_actual = None
+        self._hubo_obstaculo_central_anunciado = False
+        self._hubo_correccion_desvio = False
+        self._desvio_maximo_tramo = 0.0
 
     def _empezar_a_caminar(self) -> None:
         """Reinicia el tramo a pie: pasos, rumbo de partida y avisos."""
         self.pasos.reiniciar()
+        self._picos_previos = 0
         # La referencia de la linea recta se fija con el primer paso
         # (ver _creditar_pasos): el residuo del giro anterior, la
         # reaccion al "ya giraste, puedes parar", no debe contaminarla.
         self._rumbo_al_caminar = self.rumbo.grados
         self._ultima_alerta_desvio = None
         self._corrigiendo = False
+        self._hubo_correccion_desvio = False
+        self._desvio_maximo_tramo = 0.0
         self._desvio_inicial = 0.0
         self._pasos_previos = 0
-        self._pasos_acreditados = 0
+        self._avance_efectivo_m = 0.0
         # Quien cierra este tramo es la camara viendo la senal de la
         # zona SIGUIENTE del camino (la de cierre).  Se fija aqui, al
         # tomar la instruccion CAMINAR, para que _seguir_senal sepa
@@ -1642,6 +1723,7 @@ class Aplicacion:
             else None
         )
         self._aviso_ventana_dado = False
+        self._aviso_busqueda_dado = False
         # Distancia medida del tramo que empieza: sirve para medir la
         # zancada cuando la camara lo cierre.
         self._distancia_tramo = (
@@ -1662,7 +1744,8 @@ class Aplicacion:
         self._puerta_guiada = False
         self._puertas_ausentes = 0
         self._distancia_frontal_inicio_cm = None
-        self._avance_ultrasonico_m = None
+        self._posicion_ultrasonico_inicio_m = None
+        self._posicion_ultrasonico_m = None
         self._ultima_secuencia_ultrasonica = getattr(
             self.sensor, "secuencia_medicion", None
         )
@@ -1672,7 +1755,11 @@ class Aplicacion:
     ) -> None:
         """Integra solo lecturas nuevas y estables en los tramos habilitados."""
         distancia_fin_cm = instruccion.distancia_frontal_fin_cm
-        if distancia_fin_cm is None or distancia_fin_cm <= 0:
+        if (
+            distancia_fin_cm is None
+            or distancia_fin_cm <= 0
+            or self._distancia_tramo <= 0
+        ):
             return
 
         secuencia = getattr(self.sensor, "secuencia_medicion", None)
@@ -1689,7 +1776,10 @@ class Aplicacion:
             if estable_cm <= distancia_fin_cm:
                 return
             self._distancia_frontal_inicio_cm = estable_cm
-            self._avance_ultrasonico_m = 0.0
+            self._posicion_ultrasonico_inicio_m = (
+                self.estimador_posicion.posicion_m
+            )
+            self._posicion_ultrasonico_m = self._posicion_ultrasonico_inicio_m
             print(f"ODOMETRO HC-SR04: inicio estable a {estable_cm:.1f} cm")
             return
 
@@ -1702,15 +1792,32 @@ class Aplicacion:
         )
         if self._distancia_tramo > 0:
             distancia_objetivo = min(distancia_objetivo, self._distancia_tramo)
-        self._avance_ultrasonico_m = min(avance, distancia_objetivo)
+        posicion_inicio = self._posicion_ultrasonico_inicio_m or 0.0
+        self._posicion_ultrasonico_m = min(
+            posicion_inicio + min(avance, distancia_objetivo),
+            self._distancia_tramo,
+        )
 
     def _actualizar_posicion_tramo(
-        self, resultado: ResultadoVision, instruccion: Instruccion, dados: int
+        self, resultado: ResultadoVision, instruccion: Instruccion, dados: float
     ) -> None:
         """Predice por pasos y corrige con mediciones verificables."""
         nuevos = max(0, dados - self._pasos_estimador_previos)
         self._pasos_estimador_previos = dados
-        self.estimador_posicion.predecir(nuevos, self.zancada.metros)
+        obstaculo_central = any(
+            obstaculo.lado == EN_MEDIO_DEL_CAMINO
+            for obstaculo in resultado.obstaculos
+        )
+        factor_incertidumbre = (
+            self.config.inflar_incertidumbre_esquive
+            if obstaculo_central or self._corrigiendo
+            else 1.0
+        )
+        self.estimador_posicion.predecir(
+            nuevos,
+            self.zancada.metros,
+            factor_incertidumbre=factor_incertidumbre,
+        )
 
         senal = resultado.senal
         if (
@@ -1736,17 +1843,24 @@ class Aplicacion:
                 )
 
         if (
-            self._avance_ultrasonico_m is not None
-            and self._avance_ultrasonico_m
+            self._posicion_ultrasonico_m is not None
+            and self._posicion_ultrasonico_m
             != self._ultima_medicion_ultra_aplicada
+            and self._distancia_tramo > 0
+            and self._distancia_tramo
+            - self.estimador_posicion.posicion_m
+            <= self.config.distancia_maxima_m
+            and not obstaculo_central
+            and time.monotonic() - self._ultima_alerta_obstaculo_en
+            >= self.config.espera_llegada_tras_obstaculo_s
         ):
             self.estimador_posicion.corregir(
-                self._avance_ultrasonico_m,
+                self._posicion_ultrasonico_m,
                 self.config.varianza_medicion_ultrasonido_m2,
             )
-            self._ultima_medicion_ultra_aplicada = self._avance_ultrasonico_m
+            self._ultima_medicion_ultra_aplicada = self._posicion_ultrasonico_m
 
-        if self._distancia_tramo > 0:
+        if self.config.usar_puertas and self._distancia_tramo > 0:
             for puerta in resultado.puertas:
                 if puerta.posicion != "centro" or puerta.distancia_m is None:
                     continue
@@ -1756,25 +1870,28 @@ class Aplicacion:
                 )
                 break
 
-        pasadas_antes = self._contador_puertas.pasadas
-        pasadas = self._contador_puertas.actualizar(
-            (puerta.centro_x_px, puerta.posicion == "centro")
-            for puerta in resultado.puertas
-        )
-        if (
-            instruccion.puertas_en_tramo > 0
-            and pasadas > pasadas_antes
-            and self._distancia_tramo > 0
-        ):
-            medicion = self._distancia_tramo * pasadas / (
-                instruccion.puertas_en_tramo + 1
+        if self.config.usar_puertas:
+            pasadas_antes = self._contador_puertas.pasadas
+            pasadas = self._contador_puertas.actualizar(
+                (puerta.centro_x_px, puerta.posicion == "centro")
+                for puerta in resultado.puertas
             )
-            self.estimador_posicion.corregir(
-                medicion, self.config.varianza_medicion_puerta_m2
-            )
+            if (
+                instruccion.puertas_en_tramo > 0
+                and pasadas > pasadas_antes
+                and self._distancia_tramo > 0
+            ):
+                medicion = self._distancia_tramo * pasadas / (
+                    instruccion.puertas_en_tramo + 1
+                )
+                self.estimador_posicion.corregir(
+                    medicion, self.config.varianza_medicion_puerta_m2
+                )
 
     def _guiar_con_puerta(self, resultado: ResultadoVision) -> None:
         """Da una sola indicación direccional por puerta visible."""
+        if not self.config.usar_puertas:
+            return
         if not resultado.puertas:
             self._puertas_ausentes += 1
             if self._puertas_ausentes > self.config.frames_puerta_perdida:
@@ -1835,19 +1952,17 @@ class Aplicacion:
     def _senal_en_rango_de_llegada(
         self, resultado: ResultadoVision, senal: Senal
     ) -> bool:
-        """Valida señal centrada y camino frontal libre.
+        """Valida señal reconocida y camino libre.
 
         El ultrasonido es una salvaguarda de proximidad, no un punto de
         llegada preciso: puede medir una pared u obstáculo detrás de la
         señal. La señal interior confirmada por cámara da la referencia;
-        solo se bloquea por obstáculo frontal o por distancia insegura.
+        solo se bloquea por obstáculo frontal o por proximidad insegura.
         """
         distancia = self._distancia_puerta_estable_cm
         if (
-            (
-                distancia is not None
-                and distancia < self.config.distancia_puerta_min_cm
-            )
+            distancia is not None
+            and distancia < self.config.distancia_puerta_min_cm
             or time.monotonic() - self._ultima_alerta_obstaculo_en
             < self.config.espera_llegada_tras_obstaculo_s
             or any(
@@ -1869,15 +1984,7 @@ class Aplicacion:
         if deteccion_senal is None:
             return False
 
-        centro_senal = deteccion_senal.centro_x_px / self.config.ancho
-        if not (
-            self.config.guia_senal_centro_min
-            <= centro_senal
-            <= self.config.guia_senal_centro_max
-        ):
-            return False
-
-        if resultado.puertas:
+        if self.config.usar_puertas and resultado.puertas:
             x1, _, x2, _ = deteccion_senal.caja
             centro_x = (x1 + x2) / 2
             if not any(
@@ -1935,22 +2042,10 @@ class Aplicacion:
             if deteccion is None:
                 detalle = "Mantén la señal orientadora a la vista."
             else:
-                centro = deteccion.centro_x_px / self.config.ancho
-                if centro < self.config.guia_senal_centro_min:
-                    detalle = (
-                        "La señal está a la izquierda. Gira despacio a la "
-                        "izquierda hasta centrarla."
-                    )
-                elif centro > self.config.guia_senal_centro_max:
-                    detalle = (
-                        "La señal está a la derecha. Gira despacio a la "
-                        "derecha hasta centrarla."
-                    )
-                else:
-                    detalle = (
-                        "La señal está enfrente. No hace falta buscar una "
-                        "distancia exacta; sigue despacio."
-                    )
+                detalle = (
+                    "La señal está reconocida. Continúa con el siguiente "
+                    "paso de la guía."
+                )
 
         self._advertecer(
             f"distancia-senal:{senal.zona}",
@@ -1961,6 +2056,39 @@ class Aplicacion:
             for obstaculo in resultado.obstaculos
         ):
             self._registrar_alerta_obstaculo()
+
+    def _puede_continuar_encarada(
+        self, resultado: ResultadoVision, senal: Senal
+    ) -> bool:
+        """Evita iniciar la ruta ante obstáculos o proximidad insegura."""
+        obstaculo_central = any(
+            obstaculo.lado == EN_MEDIO_DEL_CAMINO
+            for obstaculo in resultado.obstaculos
+        )
+        if obstaculo_central:
+            self._advertecer(
+                f"encarada-obstaculo:{senal.zona}",
+                "Detente; hay un obstáculo delante.",
+            )
+            return False
+        if (
+            time.monotonic() - self._ultima_alerta_obstaculo_en
+            < self.config.espera_llegada_tras_obstaculo_s
+        ):
+            self._advertecer(
+                f"encarada-espera:{senal.zona}",
+                "Espera un momento; estoy comprobando que el camino esté libre.",
+            )
+            return False
+
+        distancia = self._distancia_puerta_estable_cm
+        if distancia is not None and distancia < self.config.distancia_puerta_min_cm:
+            self._advertecer(
+                f"encarada-distancia:{senal.zona}",
+                "Estás demasiado cerca de la puerta. Detente y aléjate un poco.",
+            )
+            return False
+        return True
 
     def _deteccion_senal_cierre_centrada(
         self, resultado: ResultadoVision | None
@@ -1997,40 +2125,80 @@ class Aplicacion:
             <= self.config.guia_senal_centro_max
         )
 
-    def _creditar_pasos(self, resultado: ResultadoVision | None = None) -> int:
-        """Pasos que cuentan hacia el tramo: rectos o guiados por visión.
+    def _creditar_pasos(self, resultado: ResultadoVision | None = None) -> float:
+        """Proyecta los pasos detectados sobre el avance del tramo.
 
-        La ruta esta medida en linea recta: un paso dado mientras la
-        persona esta desviada no la acerca al sitio medido (la curva
-        alarga el recorrido), asi que no se acredita. Si la cámara ve
-        centrada la señal interior esperada, usa esa referencia visual
-        para acreditar el avance aunque el rumbo inercial derive.
+        El rumbo inercial aproxima la direccion del desplazamiento: cada
+        paso aporta su zancada por el coseno del desvio respecto al tramo.
+        Una senal de cierre centrada prevalece sobre el rumbo.
         """
         crudos = self.pasos.avanzar()
         nuevos = crudos - self._pasos_previos
         self._pasos_previos = crudos
 
-        if self._deteccion_senal_cierre_centrada(resultado):
-            # La cámara confirma que el destino inmediato está delante:
-            # en este caso su dirección visual es mejor referencia que
-            # una deriva inercial y los pasos sí avanzan hacia la señal.
-            self._rumbo_al_caminar = self.rumbo.grados
-            self._pasos_acreditados += nuevos
-            return self._pasos_acreditados
-
         if crudos == 0:
-            # Aun no ha pisado: mientras gira por inercia la referencia
-            # sigue su rumbo.  El primer paso la bloquea.
             self._rumbo_al_caminar = self.rumbo.grados
+            desvio = 0.0
         else:
             desvio = abs(
-                self.rumbo.diferencia(self.rumbo.grados, self._rumbo_al_caminar)
+                self.rumbo.diferencia(
+                    self.rumbo.grados, self._rumbo_al_caminar
+                )
             )
-            if desvio < self.config.desvio_maximo_grados:
-                self._pasos_acreditados += nuevos
-            elif nuevos:
-                print(f"PASO SIN CREDITO: desviado {desvio:.0f} grados")
-        return self._pasos_acreditados
+            self._desvio_maximo_tramo = max(
+                self._desvio_maximo_tramo, desvio
+            )
+
+        if self._deteccion_senal_cierre_centrada(resultado):
+            self._rumbo_al_caminar = self.rumbo.grados
+            self._avance_efectivo_m += sum(self._longitudes_paso(nuevos))
+            return self.pasos_efectivos
+
+        if crudos != 0:
+            if nuevos > 0:
+                if desvio <= self.config.desvio_credito_max_grados:
+                    self._avance_efectivo_m += (
+                        sum(self._longitudes_paso(nuevos))
+                        * max(0.0, math.cos(math.radians(desvio)))
+                    )
+                else:
+                    print(f"PASO SIN AVANCE: desviado {desvio:.0f} grados")
+        return self.pasos_efectivos
+
+    def _longitudes_paso(self, nuevos: int) -> list[float]:
+        """Devuelve la longitud base o la opcional estimada por pico."""
+        picos = self.pasos.picos_por_paso
+        if not self.config.usar_zancada_por_pico:
+            self._picos_previos = len(picos)
+            return [self.zancada.metros] * nuevos
+
+        picos_nuevos = picos[self._picos_previos :]
+        self._picos_previos = len(picos)
+        if len(picos_nuevos) != nuevos:
+            raise RuntimeError(
+                "La cantidad de picos por paso no coincide con los pasos nuevos"
+            )
+
+        media = self.pasos.media_picos_g
+        if media <= 0.0:
+            return [self.zancada.metros] * nuevos
+        return [
+            self.zancada.metros
+            * min(max((pico / media) ** 0.25, 0.75), 1.25)
+            for pico in picos_nuevos
+        ]
+
+    @property
+    def avance_efectivo_m(self) -> float:
+        """Avance acumulado proyectado sobre la dirección del tramo."""
+        return self._avance_efectivo_m
+
+    @property
+    def pasos_efectivos(self) -> float:
+        """Avance proyectado expresado en zancadas vigentes."""
+        if self.zancada.metros <= 0:
+            return 0.0
+        return self._avance_efectivo_m / self.zancada.metros
 
     def _guiar_con_senal(self, resultado: ResultadoVision) -> None:
         """Guia visual del tramo: caminar hacia la senal si esta enfrente.
@@ -2146,7 +2314,7 @@ class Aplicacion:
             if self._corrigiendo:
                 self._corrigiendo = False
                 self._ultima_alerta_desvio = None
-                self._hablar("Ya enderezaste. Los pasos vuelven a contar.")
+                self._hablar("Ya enderezaste. Mantén ese rumbo.")
             return
 
         if abs(desvio) < umbral:
@@ -2179,6 +2347,7 @@ class Aplicacion:
                 return
             self._ultima_alerta_desvio = ahora
             self._corrigiendo = True
+            self._hubo_correccion_desvio = True
             self._desvio_inicial = abs(desvio)
             print(f"DESVIO: {desvio:+.1f} grados -> corregir a la {sentido}")
             self._hablar(

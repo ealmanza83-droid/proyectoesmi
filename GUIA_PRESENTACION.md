@@ -21,17 +21,18 @@ ultrasonico + MPU6050 + micrófono + altavoz) que:
    sistema da instrucciones habladas: *"Gira a la izquierda 90
    grados"*, *"Camina 6 pasos"*.
 3. **No miente**: nunca anuncia una llegada que no verificó; exige la
-   señal centrada, el camino frontal libre y una pausa tras avisar un
-   obstáculo. El ultrasonido solo bloquea si detecta proximidad insegura.
+   señal reconocida, el camino frontal libre y una pausa tras avisar un
+   obstáculo. No exige centrar la imagen; el ultrasonido solo bloquea
+   si detecta proximidad insegura.
 4. **Cuida la seguridad**: avisa obstáculos cercanos (pitidos que se
    aceleran) y detecta caídas (alarma continua + "di silencia").
 
-**Dato clave para la presentación**: el código admite la clase
-personalizada `door`, pero los modelos incluidos en el repositorio no la
-contienen. El modelo configurado debe incluir tanto `door` como las
-señales de animales; si falta `door`, el arranque lo advierte. Una puerta
-ayuda a orientar la búsqueda, pero solo una señal interior determina la
-zona.
+**Dato clave para la presentación**: la clase personalizada `door` es
+opcional y está desactivada por defecto (`usar_puertas = False`).
+Sin ella no hay advertencia al arrancar: la señal interior es la única
+referencia visual para identificar zonas, guiar y cerrar tramos. Si se
+activa `usar_puertas`, el modelo debe incluir `door` y vuelve a habilitar
+la guía y el conteo auxiliares de puertas.
 
 ---
 
@@ -81,13 +82,13 @@ guia/
     camara.py               Captura de frames
     ultrasonido.py          HC-SR04 (gpiozero) en hilo propio + alerta
 pruebas/
-  test_flujo.py             34 pruebas automatizadas sin hardware
+  test_flujo.py             Suite de flujo automatizada sin hardware
   prueba_ultrasonido.py     Verificación directa del HC-SR04 en la Pi
   caracterizar_mpu6050.py   Offset y ruido del MPU6050 en reposo
   registrar_caminata.py     CSV de sensores con la aplicación cerrada
   evaluar_pasos.py          Reproducción offline y error del contador
   calibrar_focal.py         Calibración de distancia visual
-mi_deteccion/               Modelos YOLO (incluye la clase personalizada door)
+mi_deteccion/               Modelos YOLO (door es opcional)
 piper_voices/  vosk/        Modelos de voz (TTS y reconocimiento)
 ```
 
@@ -236,13 +237,13 @@ superior a 1.5 s, el primer pico queda pendiente: se acredita junto con
 el siguiente si confirma que la marcha se reanudó; un movimiento aislado
 no suma pasos. Tras tres picos demasiado cercanos se re-basela el ritmo.
 
-### 5.4 Línea recta: solo cuentan los pasos rectos
+### 5.4 Línea recta: avance proyectado
 
-Los pasos del mapa se midieron en línea recta. Un paso dado mientras la
-persona va curvando **no la acerca al sitio medido** (la curva alarga el
-recorrido), así que no se acredita: el rumbo compara contra el rumbo del
-primer paso (`_rumbo_al_caminar`). Si la desviación supera 35°, los
-pasos se congelan hasta enderezar. El rumbo solo se mueve con **giro
+Los pasos del mapa se midieron en línea recta. El sistema proyecta cada
+zancada sobre el rumbo del tramo: un desvío de 40° aporta
+`zancada × cos(40°)` y uno mayor de `desvio_credito_max_grados` (75°)
+aporta cero. El desvío de 35° sigue activando una corrección hablada,
+pero no congela los créditos. El rumbo solo se mueve con **giro
 sostenido** (EMA de 0.5 s, gate de 5 °/s), así que el balanceo al
 caminar no lo deforma.
 
@@ -259,7 +260,7 @@ voz habla y tú sigues caminando. En su lugar guía el giro **en vivo**:
    grados. Gira despacio a la izquierda hasta que te diga que ya
    enderezaste."*
 3. Al volver por debajo del 60% del umbral (histéresis): *"Ya
-   enderezaste. Los pasos vuelven a contar."*
+   enderezaste. Mantén ese rumbo."*
 4. Respaldo: si a los 15 s de terminar de sonar el aviso sigues fuera
    de la recta (o giraste al revés), se recuerda con los grados
    actualizados.
@@ -269,7 +270,9 @@ No hay avisos al 50% ni al 75% del giro de corrección (antes decían
 la voz es lenta y, cuando terminaba de decir la frase, la persona ya
 había girado más de lo que tocaba y el giro se deshacía.
 
-Los pasos de la corrección **tampoco se acreditan** hasta enderezar.
+Durante la corrección los pasos siguen contribuyendo al avance según su
+proyección; la frase de liberación ya no implica que antes estuvieran
+congelados.
 
 ### 5.6 Visión: YOLO + confirmación temporal
 
@@ -278,7 +281,8 @@ detecciones por el catálogo (`dominio/catalogo.py`):
 
 * **Señales orientadoras** (una foto por zona por cara de puerta).
 * **Puertas** (`door`): geometría y rango para guiar la búsqueda y
-  corregir posición; no identifican una zona.
+  corregir posición; no identifican una zona. Son opcionales y se
+  omiten por defecto (`usar_puertas = False`).
 * **Obstáculos** que se anuncian en voz alta con su nombre: silla,
   mesa (*"dining table"*, el nombre real en COCO), maceta. La imagen
   se divide en **3 fragmentos iguales** (izquierda, centro, derecha);
@@ -323,25 +327,26 @@ los últimos `distancia_mediana_frames` suaviza el parpadeo; el historial
 se descarta tras perder la clase. Hasta calibrar `focal_px` (por defecto
 0), no se usa una distancia visual.
 
-Si el modelo configurado contiene `door`, se devuelve aparte de las
-señales, con caja, centro, alto, ancho y distancia suavizada con la mediana. En una búsqueda, si
+Con `usar_puertas = True`, si el modelo contiene `door`, se devuelve
+aparte de las señales, con caja, centro, alto, ancho y distancia suavizada
+con la mediana. En una búsqueda, si
 hay una puerta y todavía no se confirma una señal, se anuncia una vez
 su ubicación izquierda/centro/derecha y se guía hacia ella. El animal
 detectado dentro de la caja de puerta tiene prioridad sobre animales en
 otras zonas del frame. El ultrasonido filtra lecturas nuevas para detectar
-proximidad insegura; no se exige estar a una distancia exacta para
-confirmar una señal centrada. Sin señal visible, la distancia máxima
-configurable indica cuándo detener la aproximación y volver a buscarla con
-la cámara. La puerta nunca identifica la zona: sigue siendo necesaria la
-señal interior.
+proximidad insegura; no se exige estar a una distancia exacta ni centrar
+la caja para confirmar una señal reconocida. Si, tras girar hacia la señal,
+la cámara aún no la reconoce y el ultrasonido marca más de 80 cm, pide
+avanzar despacio mientras se sigue buscando. La puerta nunca identifica
+la zona: sigue siendo necesaria la señal interior.
 
 ### 5.7 Señales de las dos caras de la puerta (idea original)
 
 Cada puerta tiene **dos fotos**: la cara *interior* (se ve estando
 dentro de la zona) y la cara del *pasillo* (se ve desde el otro lado).
-Las fotos de animales usan clases reconocidas por el modelo base. Para
-que la clase personalizada `door` localice el marco, el modelo cargado
-debe haber sido entrenado/exportado con esa clase además de las señales:
+Las fotos de animales usan clases reconocidas por el modelo base. Solo
+con `usar_puertas = True`, la clase personalizada `door` debe estar en el
+modelo cargado además de las señales:
 
 | Zona | Cara interior (dentro) | Cara pasillo (fuera) |
 |---|---|---|
@@ -365,19 +370,20 @@ da por terminado en "N pasos" exactos, sino en una **ventana**:
 * antes del 70 %, el sistema estima la reacción y el frenado a partir
   de la cadencia reciente y avisa *"Reduce el paso; te indicaré dónde
   detenerte."* El adelanto está limitado al 15 % del tramo;
-* entre el 70 % y el **130 %** → quien cierra el tramo es **la
+* desde el 70 % → quien cierra el tramo es **la
   cámara**, si ve la señal interior de la zona de cierre (la
   siguiente del camino): *"Ya veo la señal. Puedes parar."*
-* pasado el 130 % sin verla → avisa que se superó el recorrido previsto y
-  detiene la marcha para buscar la señal;
-  el flujo sigue como siempre en tramos intermedios. En el tramo final,
-  si no ve la señal, usa el umbral de distancia máxima para detener la
-  aproximación lenta y volver a buscarla.
+* el límite de búsqueda es al menos el 130 % y se amplía con la
+  incertidumbre del estimador. Si llega a ese límite sin señal, la
+  aplicación pide buscarla, pero **no cierra el tramo**. En el tramo
+  final, el ultrasonido puede guiar la aproximación y la cámara sigue
+  siendo quien confirma.
 
-En ningún caso los pasos por sí solos anuncian la llegada: tras el
-tramo entra en `CONFIRMANDO_LLEGADA` y pide girar despacio hasta ver
-la señal del destino. Si ve la señal de **otra** zona, avisa *"Parece
-que pasaste de largo. Estás en Sala."* y replanifica. Es el principio
+En ningún caso los pasos por sí solos cierran el tramo ni anuncian la
+llegada. Tras cerrar un tramo con su señal interior, se encara esa zona
+antes de continuar; en el destino, solo la señal interior esperada
+anuncia la llegada. Si ve la señal de **otra** zona, avisa *"Parece que
+pasaste de largo. Estás en Sala."* y replanifica. Es el principio
 rector: **mejor callar que dar una indicación errada**.
 
 Detalle fino: ver la señal de la zona de cierre **dos veces** (la
@@ -387,12 +393,15 @@ provocaba un *"Te saliste de la ruta"* falso.
 ### Estimador de posición del tramo
 
 El estado del filtro es la distancia recorrida y su varianza. Predice
-con los pasos rectos y la zancada actual, y corrige con distancia visual
-a la señal interior esperada y con el HC-SR04 estable si el tramo lo
-habilita. La aplicación expone `posicion_m` e `incertidumbre_m`; puede
-usar el límite superior de confianza para empezar antes el aviso de
-búsqueda. El filtro **no sustituye la señal**: sin la señal correcta la
-llegada no se confirma.
+con el avance proyectado de los pasos y la zancada actual. A la varianza
+por paso se suma un error relativo de zancada (15 % de la distancia
+avanzada); durante un obstáculo central o una corrección activa, ese
+ruido se multiplica por 2. Corrige con distancia visual a la señal
+interior esperada y con el HC-SR04 estable si el tramo lo habilita. La
+aplicación expone `posicion_m` e `incertidumbre_m`; el límite superior de
+confianza puede anticipar la búsqueda y `sigmas_cierre` amplía su ventana
+máxima. El filtro **no sustituye la señal**: sin la señal correcta el
+tramo no se cierra ni se confirma la llegada.
 
 ### 5.9 Zancada adaptativa: el paso real
 
@@ -402,7 +411,9 @@ medido, el plan anuncia los pasos del mapa (es el conteo con el que se
 midio la casa).
 
 En cuanto la cámara cierra un tramo dentro de la ventana (5.8), ese
-tramo sirve para **medir la zancada real** de la persona:
+tramo sirve para **medir la zancada real** de la persona, solo si fue
+limpio: no se anunció un obstáculo central, no hubo corrección de desvío
+y el desvío máximo fue menor de 20°:
 
 ```
 medida  = distancia / pasos_acreditados
@@ -413,9 +424,23 @@ pasos   = round(distancia / zancada)
 A partir de ahí el plan recalcula los pasos con esa zancada, así el
 número anunciado se acerca al paso real. La media móvil es
 deliberada: un tramo raro (contado al revés) no descuadra el plan
-siguiente. Y **solo mide el cierre verificado**: si el tramo se cerró
-por pasos de más (130 % sin señal), no se sabe dónde acabó y no se
-mide nada.
+siguiente. La semilla es `0,60 m` (30,2 m / 50 pasos). El cierre
+verificado es necesario, pero no suficiente: si el tramo tuvo obstáculo
+anunciado, corrección o desvío máximo de 20° o más, no se aprende.
+
+Existe un ajuste experimental de longitud individual por amplitud del
+pico de aceleración (Weinberg), pero está **desactivado** con
+`usar_zancada_por_pico = False`. Para decidir con datos, registra varios
+recorridos con ojos vendados y ejecuta:
+
+```text
+python pruebas/evaluar_pasos.py caminata.csv --pasos-reales 50 --distancia-real-m 30.2 --ojos-vendados
+```
+
+El evaluador compara el error de distancia con zancada constante y por
+pico, e informa la correlación pico/longitud estimada. Solo recomienda
+probar la opción si reduce el error en esos CSV; una correlación alta no
+demuestra por sí sola que la longitud estimada sea correcta.
 
 ### 5.10 Re-localización: cada señal es un GPS a pie
 
@@ -519,15 +544,13 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     y *"Puedes parar"* sale primero en la frase.
     El rumbo se normaliza a ±180° para que una vuelta acumulada no
     invierta la dirección de la corrección.
-27. **Llegada por ventana**: calcula el aviso de reducción según la
-    cadencia y el frenado, con adelanto máximo del 15 %; entre 70 % y
-    130 % **la cámara** cierra el tramo viendo la señal de cierre;
-    pasado el 130 % sin señal avisa y el flujo sigue como siempre (sin
-    anunciar llegadas falsas).
-28. **Zancada adaptativa**: el plan usa los pasos del mapa mientras no
-    haya medida; la EMA se actualiza solo con el cierre verificado por
-    la cámara (el de 130 % no mide nada) y el plan siguiente calcula
-    `distancia / zancada`.
+27. **Llegada por ventana**: el aviso anticipa reacción/frenado y usa
+    posición más incertidumbre; desde 70 % **la cámara** cierra el tramo
+    al ver la señal. El límite sin señal se amplía con incertidumbre y
+    solo abre la búsqueda, nunca cierra ni anuncia llegada.
+28. **Zancada adaptativa**: la semilla es 0,60 m; la EMA solo se actualiza
+    con pasos efectivos de un tramo verificado y limpio (sin obstáculo
+    central anunciado, corrección ni desvío de 20° o más).
 29. **Banda del paso y cadencia adaptable**: marcha lenta (1 s/paso),
     rápida (0,25 s) y suave (0,12 g) cuentan sin tocar la
     configuración; los cambios de ritmo se aceptan, el temblor de
@@ -572,19 +595,28 @@ También se puede usar `python pruebas/registrar_caminata.py --salida
 pruebas/caminata.csv` con la aplicación cerrada para una prueba aislada
 de sensores.
 
-Para estimar la distancia de la señal, mide su altura real y el alto de
-su caja en un frame tomado a distancia conocida. Ejecuta
+Para estimar la distancia de la señal, mide la altura real de la impresión
+y el alto de su caja en un frame tomado a distancia conocida. Ejecuta
 `python pruebas/calibrar_focal.py --distancia-m 1.5 --altura-real-m 0.20 --alto-px 96`
 y copia la salida en `Configuracion.focal_px`; reemplaza las medidas del
-ejemplo por las reales de la casa.
+ejemplo por las reales de la casa. `altura_senal_m` debe coincidir con la
+impresión real. Con `focal_px = 0`, el arranque lo advierte y no calcula
+distancias; cajas de señal menores que `alto_minimo_senal_px = 20` tampoco
+se usan porque un error de pocos píxeles las vuelve muy ruidosas. El mapa
+actual no define señales intermedias, por eso la corrección visual se
+aplica a la señal esperada de cierre.
 
 El HC-SR04 también puede estimar el avance en un pasillo con una pared
-frontal conocida al final. Configura
-`TramoRuta(distancia_frontal_fin_cm=...)` con esa distancia final,
+frontal fija conocida al final y dentro de su alcance (menos de 4 m).
+Configura en ese tramo `distancia_m` y
+`distancia_frontal_fin_cm` (distancia final del sensor a la pared), y
 ajusta `muestras_ultrasonido_odometro` y
-`salto_maximo_ultrasonido_cm`, y valida las lecturas con el sensor. No
-uses una puerta lateral como referencia frontal: el sensor debe mirar
-hacia la pared o puerta de fin de tramo.
+`salto_maximo_ultrasonido_cm`. La medida solo corrige posición cuando el
+estimador ya está dentro de los últimos `distancia_maxima_m = 4 m`, hay
+eco estable y la cámara no anuncia un obstáculo central. No la habilites
+si el eco puede venir de objetos móviles o de una puerta lateral: el
+HC-SR04 no identifica qué objeto midió. La señal interior sigue siendo
+quien cierra el tramo.
 
 ---
 
@@ -598,15 +630,15 @@ hacia la pared o puerta de fin de tramo.
    adelanta 12°: la orden sale primero mientras sigues girando)
 3. Dejar que encuentre la señal: *"Estás en Inicio. ¿A dónde quieres
    ir?"*
-4. Pedir *"Raspi, ve a la sala"* → encarar la señal → ruta.
+4. Pedir *"Raspi, ve a la sala"* → seguir las indicaciones de la ruta.
 5. Mostrar el giro de la ruta (en silencio) hasta *"Puedes parar. Giro
    completo."*
 6. **Demostración del desvío**: caminar curvando a propósito → aviso,
    corrección guiada en vivo, *"Ya enderezaste. Los pasos vuelven a
    contar."*
-7. Llegar: la cámara debe centrar y confirmar la señal interior; el
-   ultrasonido solo impide confirmar si indica que se está demasiado
-   cerca o hay un obstáculo frontal.
+7. Llegar: la cámara debe reconocer la señal interior; no hace falta
+   centrarla. El ultrasonido solo impide confirmar si indica que se está
+   demasiado cerca o hay un obstáculo frontal.
 8. (Opcional) Simular una caída (golpe suave al sensor) y silenciar
    diciendo solo *"silencia"*.
 9. Cerrar con el principio: *"el sistema prefiere callar antes que
@@ -618,10 +650,10 @@ hacia la pared o puerta de fin de tramo.
 ## 9. Preguntas típicas y posibles respuestas
 
 **¿Hay que entrenar un modelo?** Las señales de animales están en el
-modelo COCO. Para detectar marcos, hace falta además un modelo con la
-clase `door`; los modelos incluidos ahora mismo no la contienen y el
-programa lo advierte. La puerta no cambia la regla de identidad: solo
-una señal interior confirma la zona.
+modelo COCO. La clase opcional `door` solo hace falta si se activa
+`usar_puertas`; con el valor por defecto el sistema no la busca ni la
+requiere. La puerta no cambia la regla de identidad: solo una señal
+interior confirma la zona.
 
 **¿Cómo sabe en qué zona está?** Viendo la cara interior de la señal
 de esa zona (3 detecciones seguidas). La cara del pasillo solo dice
@@ -674,7 +706,13 @@ Todo umbral vive en `guia/configuracion.py`:
 | Distancia de alerta | `distancia_alerta_cm = 300` |
 | Adelanto del corte de giro | `grados_compensacion_giro = 12` |
 | Pasos del tramo de re-búsqueda | `pasos_objetivo = 5` |
-| Ventana de llegada del tramo | `ventana_llegada_inicio = 0.70` / `ventana_llegada_fin = 1.30` |
+| Ventana de llegada del tramo | `ventana_llegada_inicio = 0.70` / `ventana_llegada_fin = 1.30`, ampliada por `sigmas_cierre = 2.0` |
+| Semilla de zancada | `zancada_m = 0.60 m` (30,2 m / 50 pasos) |
+| Altura mínima para distancia de señal | `alto_minimo_senal_px = 20` |
+| Incertidumbre relativa de zancada | `error_relativo_zancada = 0.15` / `inflar_incertidumbre_esquive = 2.0` |
+| Desvío máximo para aprender zancada | `desvio_aprendizaje_max_grados = 20` |
+| Proyección por pico (experimental) | `usar_zancada_por_pico = False`; evaluar solo con CSV de ojos vendados |
+| Ángulo máximo que aún proyecta avance | `desvio_credito_max_grados = 75` |
 | Aviso de frenado por ritmo | reacción `0.8 s`, desaceleración `1.2 m/s²`, adelanto máximo `0.15` del tramo |
 | Zancada: peso de la última medida (EMA) | `zancada_ema_alfa = 0.30` |
 | Zancada: recorte de la medida | `zancada_min_m = 0.30` / `zancada_max_m = 0.90` |
@@ -683,6 +721,7 @@ Todo umbral vive en `guia/configuracion.py`:
 | Seguimiento horizontal de puerta | `salto_maximo_puerta_px = 160` / `frames_puerta_perdida = 4` |
 | Ruido de las mediciones de posición | `varianza_medicion_senal_m2`, `varianza_medicion_ultrasonido_m2`, `varianza_medicion_puerta_m2` |
 | Margen de incertidumbre de búsqueda | `sigmas_inicio_busqueda = 1.0` |
+| Guía y conteo visual de puertas | `usar_puertas = False` |
 
 La casa (mapa) se define en `guia/dominio/rutas.py` (`TRAMOS_DEMO`):
 cada tramo solo se mide en un sentido; el inverso se calcula con los

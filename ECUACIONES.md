@@ -209,25 +209,27 @@ si desvío ≥ 35° (desvio_maximo_grados) durante ≥ 1,5 s (confirmacion_desvi
 al volver por debajo de 0,6·35° (liberacion_desvio_factor) → "enderezaste"
 ```
 
-**Referencia visual prioritaria**: si la cámara confirma la señal interior
-esperada del tramo, su centro está en el intervalo configurado y no hay
-obstáculo frontal, se toma la señal como referencia de alineación:
+**Avance proyectado**: cada paso nuevo aporta su longitud por la proyección
+del rumbo sobre el eje del tramo. El umbral de 35° sigue activando avisos,
+pero no descarta avance:
 
 ```
-senal_centrada_esperada ∧ camino_frontal_libre
-    → rumbo_al_caminar = rumbo_actual
-    → acreditar_pasos_nuevos
-    → no emitir corrección inercial
+desvio = |rumbo_actual − rumbo_al_empezar_a_caminar|
+avance += L_paso · max(0, cos(desvio))
+si desvio > desvio_credito_max_grados (75°): avance += 0
+pasos_efectivos = avance / zancada_vigente
 ```
 
-La señal visible no confirma por sí sola la llegada; se mantienen las
-comprobaciones de distancia y posición.
+Si la cámara confirma centrada la señal interior esperada, prevalece esa
+referencia visual: el rumbo se reancla y los pasos nuevos aportan su zancada
+completa. La señal visible y el camino libre siguen siendo requisitos para
+cerrar el tramo; el avance estimado nunca anuncia por sí solo la llegada.
 
 La **confirmación temporal** evita avisos falsos por un paso torcido o un
 balanceo puntual; la **histéresis de liberación** evita el efecto
-aviso/contraviso en el umbral. Los pasos con `desvío ≥ 35°` no se acreditan
-salvo que la cámara confirme centrada la señal esperada y el camino frontal
-esté libre.
+aviso/contraviso en el umbral. Los pasos desviados aportan avance longitudinal
+reducido por el coseno del ángulo, en vez de congelarse al cruzar el umbral
+de aviso.
 
 ---
 
@@ -464,17 +466,20 @@ avance ≥ ventana_llegada_inicio
     ∧ la cámara ve la señal interior de la zona de cierre
     → el tramo se cierra  (re-localización VERIFICADA)
 
-avance ≥ ventana_llegada_fin  sin esa señal
-    → se detiene y busca la señal mediante el flujo existente
-      (encarada intermedia o CONFIRMANDO_LLEGADA)
+fin = max(ventana_llegada_fin,
+          1 + sigmas_cierre · incertidumbre / distancia_tramo)
+avance ≥ fin  sin esa señal
+    → se abre/ensancha la búsqueda, pero no se cierra el tramo
 ```
 
 El aviso se limita a adelantarse como máximo `anticipacion_llegada_max_fraccion`
 (0,15 del tramo por defecto). Si aún no hay cadencia medida, se estima
 con `periodo_paso_llegada_s`. El cálculo anticipa reacción y desaceleración;
-no altera el umbral mínimo de 70 % para cerrar con cámara ni anuncia una
-llegada por sí solo. Si el tramo no tiene distancia conocida, se conserva
-el aviso en el umbral de `ventana_llegada_inicio`.
+no altera el umbral mínimo de 70 % para cerrar con cámara. El umbral de
+búsqueda anticipada usa `avance + sigmas_inicio_busqueda · incertidumbre`;
+la incertidumbre puede ensanchar el límite máximo, pero nunca sustituye
+la señal ni anuncia una llegada. Si el tramo no tiene distancia conocida,
+se conserva el aviso en el umbral de `ventana_llegada_inicio`.
 
 La **zona de cierre** es `_camino[tramos_completados + 1]` (la siguiente
 del camino, la que este tramo debe alcanzar): verla **no** es una
@@ -489,7 +494,8 @@ siendo un caso aparte: solo la señal **interior del destino** la anuncia.
 
 La zancada (metros que avanza la persona con un paso) no es constante:
 cambia con el calzado, el ritmo y la pendiente, y de ella salen los
-pasos de cada tramo (`pasos = round(distancia / zancada)`).
+pasos de cada tramo (`pasos = round(distancia / zancada)`). La semilla
+es `0,60 m`, medida como 30,2 m / 50 pasos.
 
 **Medida** — solo en un tramo cerrado **por la cámara** dentro de la
 ventana de llegada (§14): solo ahí se recorrió entera la distancia
@@ -501,8 +507,25 @@ medida_k ← clip(medida_k, zancada_min_m, zancada_max_m)   # 0,30 … 0,90
 zancada_k = α · medida_k + (1 − α) · zancada_{k−1}        # α = zancada_ema_alfa = 0,30
 ```
 
-El cierre por pasos de más (130 % sin señal, §14) **no** mide: ahí no
-se sabe dónde acabó el tramo, y `distancia/pasos` no sería la zancada.
+Solo se aprende si el tramo fue limpio: sin obstáculo central anunciado,
+sin corrección de desvío y con desvío máximo menor que
+`desvio_aprendizaje_max_grados` (20°). El cierre sin señal nunca aprende,
+porque no se sabe dónde acabó el tramo y `distancia/pasos` no sería la
+zancada.
+
+**Ajuste experimental opcional por pico** — desactivado por defecto:
+
+```
+L_k = zancada_EMA · clip((pico_k / media_picos) ** 0.25, 0.75, 1.25)
+```
+
+El contador expone el pico filtrado de cada paso. Para evaluar CSV sin
+activar la opción en la guía:
+`python pruebas/evaluar_pasos.py caminata.csv --pasos-reales N --distancia-real-m D`.
+El evaluador compara el error de distancia constante y por pico e informa
+la correlación pico/longitud. La salida solo recomienda activarlo cuando
+el CSV se marca explícitamente como de ojos vendados (`--ojos-vendados`)
+y el error por pico es menor; hacen falta varios recorridos para calibrar.
 
 **Uso** — `PlanificadorRutas.planificar(origen, destino, zancada_m)`:
 
@@ -551,10 +574,19 @@ f_px = d_m · h_px / H_m       (calibración a distancia conocida)
 La aplicación acumula las últimas `distancia_mediana_frames` medidas por
 clase y usa su mediana; tras `distancia_mediana_perdidas` frames sin la
 clase, vacía el historial para no reutilizar una distancia antigua. Una
-focal `<= 0`, una altura física no positiva o una caja sin altura produce
-`None`, no una distancia inventada. `altura_senal_m` debe medirse para la
-impresión usada y coincidir con `--altura-real-m` de
-`pruebas/calibrar_focal.py`.
+caja de señal menor que `alto_minimo_senal_px` (20 px), una focal `<= 0`,
+una altura física no positiva o una caja sin altura produce `None`, no una
+distancia inventada. Si `focal_px` no está calibrada, el arranque avisa.
+`altura_senal_m` debe medirse para la impresión usada y coincidir con
+`--altura-real-m` de `pruebas/calibrar_focal.py`.
+
+La corrección del filtro usa la distancia a la señal interior esperada:
+`x_medida = distancia_tramo − d_m`, con
+`varianza_medicion_senal_m2`. El mapa actual solo declara señales de zona
+como destino/cierre del tramo; no declara hitos visuales intermedios, por
+lo que no hay una segunda clase de señal que corregir. Si el mapa incorpora
+hitos, cada uno debe declarar su ubicación en el tramo y usar una varianza
+mayor que la señal de cierre.
 
 ---
 
@@ -574,7 +606,12 @@ avance = clip((d_inicio − d_estable) / 100, 0, (d_inicio − d_fin) / 100)
 se vuelve a alimentar el filtro con la misma muestra: el HC-SR04 expone
 un número de secuencia para distinguir medidas nuevas. El avance es una
 medición auxiliar de posición, no una confirmación visual ni un anuncio
-de llegada.
+de llegada. Su corrección solo se fusiona si el mapa conoce la longitud
+del tramo, la posición estimada está a `distancia_maxima_m` (4 m) o menos
+del final y no hay un obstáculo central/recentemente anunciado. La
+posición inicial del odómetro se ancla a la posición estimada al obtener
+la primera lectura estable; así no se interpreta el primer eco como el
+inicio del tramo.
 
 ---
 
@@ -587,13 +624,18 @@ cierre y/o odómetro frontal estable):
 
 ```
 x⁻ = x + Δpasos · zancada
-P⁻ = P + Δpasos · varianza_proceso_paso_m2
+Δavance = Δpasos · zancada
+P⁻ = P + factor · (Δpasos · varianza_proceso_paso_m2
+                   + (error_relativo_zancada · Δavance)²)
 K  = P⁻ / (P⁻ + R)
 x  = x⁻ + K · (z − x⁻)
 P  = (1 − K) · P⁻
 incertidumbre = √P
 ```
 
+`factor = inflar_incertidumbre_esquive` mientras haya un obstáculo central
+anunciado o una corrección de desvío activa; en marcha normal vale 1. La
+semilla inicial de zancada es `0,60 m` (30,2 m / 50 pasos medidos).
 La posición se limita a `[0, distancia_tramo]` cuando el mapa conoce el
 largo. Una lectura de señal da `z = distancia_tramo − distancia_a_señal`;
 el HC-SR04 aporta `z = avance_ultrasonico`. `R` usa la varianza
@@ -630,12 +672,15 @@ la corrección débil es `z = D·k/(M+1)`. Ninguna de estas medidas produce
 `Senal`, avanza identidad de zona ni cierra un tramo sin confirmación de
 la señal interior.
 
-La llegada a una señal interior esperada se confirma con la señal de la
-cámara centrada y el camino libre. El ultrasonido no impone una distancia
-exacta ni necesita una lectura estable; solo bloquea la confirmación si
-una lectura estable indica que se está demasiado cerca (menos de
-`distancia_puerta_min_cm`). Una detección de obstáculo frontal también
-bloquea la confirmación:
+La llegada a una señal interior esperada se confirma al reconocerla con
+la cámara y tener el camino libre; no es necesario centrar la caja en la
+imagen. Si hay una lectura ultrasónica estable menor que
+`distancia_puerta_min_cm` (45 cm), se pide detenerse y alejarse. Si la
+señal se reconoce, no se exige estar a menos de 80 cm: esa distancia solo
+se usa como guía de acercamiento cuando la persona ya giró hacia la señal,
+pero la cámara todavía no la reconoce. Si el ultrasonido no tiene una
+lectura estable, la cámara sigue siendo la referencia. Una detección de
+obstáculo frontal también bloquea la confirmación:
 
 Si una medida salta más de `salto_maximo_ultrasonido_puerta_cm`, se
 mantiene como candidata y solo se adopta el nuevo rango después de
@@ -653,19 +698,23 @@ confirmar una llegada.
 ```
 d_ultra = mediana(d_1, ..., d_M) si hay lecturas estables; ⊥ si no
 confirmar = señal_interior_esperada
-            ∧ centro_señal
             ∧ (d_ultra no disponible ∨ d_ultra ≥ distancia_puerta_min_cm)
             ∧ camino_frontal_libre
             ∧ tiempo_desde_aviso_obstáculo ≥ espera_llegada_tras_obstaculo_s
 ```
 
+En el estado de encarado, si la persona ya giró y aún no reconoce la señal,
+una lectura superior a `distancia_maxima_senal_cm` (80 cm) da un aviso para
+avanzar despacio mientras continúa la búsqueda. Si la cámara sí reconoce la
+señal, se ancla el rumbo y sigue la ruta independientemente de que la
+distancia supere 80 cm.
+
 Los pasos y una advertencia de obstáculo no confirman la llegada; tras un
 aviso se espera el intervalo configurado aunque la señal aparezca en el
 frame siguiente. Si la señal aún no aparece, la aproximación final
 continúa lentamente hasta `distancia_puerta_max_cm` (140 cm por defecto)
-y entonces vuelve a buscarla con la cámara. Los modelos incluidos deben contener
-explícitamente la clase `door`; de lo contrario, el detector lo advierte
-al arrancar.
+y entonces vuelve a buscarla con la cámara. La clase `door` es opcional:
+solo se exige y se advierte su ausencia cuando `usar_puertas=True`.
 
 ---
 
@@ -686,10 +735,10 @@ al arrancar.
 | Audio | `s[i] = A·sin(2π f i/fs)` | `audio/alarma.py:62` |
 | Confirmación de señal | racha ≥ 3, tolera 2 fallos, conf ≥ 0,60 | `vision/detector.py` |
 | Desvío en línea recta | `\|θ−θ₀\| ≥ 35°` durante 1,5 s → corregir; libera a 0,6·35° | `aplicacion.py` (`_vigilar_desvio`) |
-| Ventana de llegada del tramo | `0,70·N ≤ ventana ≤ 1,30·N`; cierra la cámara con la señal de cierre | `aplicacion.py` (`_valorar_llegada_del_tramo`) |
-| Zancada adaptativa | `z_k = α·(D/N) + (1−α)·z_{k−1}` con recorte 0,30…0,90; pasos `= round(D/z)` | `dominio/zancada.py` |
-| Distancia visual | `d=f·H/h`; focal `f=d·h/H`; mediana por clase | `vision/detector.py` |
-| Odómetro opcional | `avance=clip((d_inicio−d_actual)/100, 0, d_inicio−d_fin)` tras mediana estable | `navegacion/odometro.py` |
+| Ventana de llegada del tramo | `fin=max(1,30; 1+sigmas_cierre·σ/D)`; solo la cámara cierra | `aplicacion.py` (`_valorar_llegada_del_tramo`) |
+| Zancada adaptativa | EMA de `D/pasos_efectivos`, solo tramo limpio; semilla 0,60 m | `dominio/zancada.py` |
+| Distancia visual | `d=f·H/h`; alto mínimo 20 px; mediana por clase | `vision/detector.py` |
+| Odómetro opcional | `x_inicio + clip((d_inicio−d_actual)/100, 0, d_inicio−d_fin)` dentro de últimos 4 m | `aplicacion.py`, `navegacion/odometro.py` |
 | Posición por tramo | Predicción por pasos + corrección Kalman `K=P/(P+R)`; `σ=√P` | `navegacion/posicion.py` |
 | Puertas | Rango por `f·H/h`; conteo por caja centrada, una vez por rastro | `vision/detector.py`, `navegacion/puertas.py` |
 | Rutas | BFS (camino mínimo, peso 1) + giros espejo | `dominio/rutas.py` |

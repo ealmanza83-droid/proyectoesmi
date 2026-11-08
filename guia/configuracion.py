@@ -60,6 +60,12 @@ class Configuracion:
     # pruebas/calibrar_focal.py; cero desactiva mediciones no calibradas.
     altura_senal_m: float = 0.20
     focal_px: float = 0.0
+    # No calcular distancias a partir de cajas de señal más pequeñas:
+    # a esa escala el error de unos pocos píxeles distorsiona mucho d.
+    alto_minimo_senal_px: int = 20
+    # Puertas son una guía auxiliar opcional; las señales interiores
+    # identifican la ubicación y bastan para cerrar los tramos.
+    usar_puertas: bool = False
     distancia_mediana_frames: int = 5
     distancia_mediana_perdidas: int = 3
     altura_puerta_m: float = 2.0
@@ -69,13 +75,15 @@ class Configuracion:
     muestras_ultrasonido_puerta: int = 3
     salto_maximo_ultrasonido_puerta_cm: float = 60.0
     retencion_eco_ultrasonido_s: float = 0.35
-    # Solo se impide confirmar si una lectura estable dice que la
-    # persona está demasiado cerca; la señal centrada de cámara es la
-    # referencia de llegada, no una franja exacta de distancia.
+    # Una lectura estable por debajo de este límite impide confirmar
+    # y pide alejarse un poco de la puerta.
     distancia_puerta_min_cm: float = 45.0
     # Sin señal visible, se usa solo para decidir cuándo dejar de
     # acercarse a una puerta y empezar a buscarla con la cámara.
     distancia_puerta_max_cm: float = 140.0
+    # Distancia de referencia para el aviso de acercamiento cuando la
+    # cámara aún no reconoce la señal y la persona ya giró hacia ella.
+    distancia_maxima_senal_cm: float = 80.0
     espera_llegada_tras_obstaculo_s: float = 4.0
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
 
@@ -236,7 +244,10 @@ class Configuracion:
     # Es la SEMILLA: hasta que la camara no cierra ningun tramo, el
     # plan usa los pasos del mapa; a partir de ahi manda la zancada
     # medida (ver zancada_ema_alfa).
-    zancada_m: float = 0.44       # metros que avanza con un paso (semilla realista)
+    zancada_m: float = 0.60       # 30,2 m / 50 pasos medidos
+    # Ajusta cada paso por la amplitud del pico de aceleración. Desactivado
+    # hasta que reduzca el error en recorridos reales con ojos vendados.
+    usar_zancada_por_pico: bool = False
     velocidad_m_s: float = 1.85   # velocidad de desplazamiento (m/s)
     # Zancada ADAPTATIVA (ver dominio/zancada.py): en cada tramo que
     # la camara cierra se mide "distancia del mapa / pasos contados"
@@ -270,9 +281,9 @@ class Configuracion:
     #   verla);
     # * si se pasa del 130 % sin ver la senal, los tramos intermedios
     #   siguen el flujo existente; en el tramo final, una lectura
-    #   ultrasónica por encima del límite de proximidad mantiene la
-    #   aproximación lenta. Una señal centrada no exige una franja
-    #   ultrasónica exacta para cerrar el tramo.
+    #   ultrasónica fuera del rango seguro mantiene la aproximación
+    #   lenta. La señal reconocida no necesita estar centrada para
+    #   cerrar el tramo.
     ventana_llegada_inicio: float = 0.70
     ventana_llegada_fin: float = 1.30
     # Adelanta el aviso de frenado según la velocidad estimada por la
@@ -291,6 +302,12 @@ class Configuracion:
     # mientras la persona camina acumula mas giro que este umbral, va
     # curvando la ruta y se le avisa que enderece.
     desvio_maximo_grados: float = 35.0
+    # Un paso aporta su proyeccion sobre la direccion del tramo hasta
+    # este angulo; por encima se considera que no hubo avance longitudinal.
+    desvio_credito_max_grados: float = 75.0
+    # Un tramo solo actualiza la EMA de zancada si su rumbo se mantuvo
+    # dentro de este máximo durante toda la caminata.
+    desvio_aprendizaje_max_grados: float = 20.0
     # El sensor esta en la cintura: un giro repentino del torso o un
     # balanceo fuerte no son un cambio de ruta.  El aviso solo sale si
     # el desvio SE SOSTIENE durante este tiempo desde que cruzo el
@@ -353,10 +370,18 @@ class Configuracion:
     salto_maximo_ultrasonido_cm: float = 60.0
     sigma_inicial_posicion_m: float = 0.5
     varianza_proceso_paso_m2: float = 0.0025
+    # Error relativo de la zancada: la incertidumbre crece también con
+    # la distancia predicha, no solo con el número de pasos.
+    error_relativo_zancada: float = 0.15
+    # Multiplica el ruido de avance durante un esquive/corrección activa.
+    inflar_incertidumbre_esquive: float = 2.0
     varianza_medicion_senal_m2: float = 0.16
     varianza_medicion_ultrasonido_m2: float = 0.09
     varianza_medicion_puerta_m2: float = 0.64
+    # Margen de confianza usado para anticipar la búsqueda de la señal.
     sigmas_inicio_busqueda: float = 1.0
+    # Margen de confianza para ensanchar la ventana de cierre del tramo.
+    sigmas_cierre: float = 2.0
 
     def preparar(self) -> None:
         """Crea las carpetas que el sistema necesita para funcionar."""

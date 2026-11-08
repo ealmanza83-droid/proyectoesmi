@@ -246,13 +246,18 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Ventana máxima para confirmar el primer paso tras una pausa | `intervalo_paso_max_s` | `1.5` s; el primer pico queda pendiente y se acredita con el siguiente (en `0` se desactiva) |
 | Tolerancia de cadencia: solo descarta intervalos muy cortos | `cadencia_tolerancia` / `cadencia_intervalos_minimos` | `0.70` (descarta intervalos menores al 30 % de la mediana) / `3` intervalos antes de juzgar |
 | Picos demasiado cercanos seguidos que re-baselan el ritmo | `rechazos_rebasar` | `3` (tras ellos se olvida la cadencia y el siguiente pico arranca un ritmo nuevo) |
-| Zancada (metros que avanza con un paso) | `zancada_m` | `0.46` (semilla: hasta que no se mide la primera, el plan usa los pasos del mapa) |
+| Zancada (metros que avanza con un paso) | `zancada_m` | `0.60` (semilla: 30,2 m / 50 pasos; hasta medir, el plan usa pasos del mapa) |
 | Peso de la última zancada medida (EMA) | `zancada_ema_alfa` | `0.30` |
 | Recorte mínimo/máximo de la zancada medida | `zancada_min_m` / `zancada_max_m` | `0.30` / `0.90` m por paso |
 | Velocidad de marcha | `velocidad_m_s` | `1.85` m/s |
 | Pasos a dar si no hay señal | `pasos_objetivo` | `5` |
 | Umbral mínimo para cerrar el tramo con señal de cámara | `ventana_llegada_inicio` | `0.70` (70 % de avance) |
-| Fin de la ventana de llegada (límite para tramos intermedios) | `ventana_llegada_fin` | `1.30` (130 % de los pasos esperados) |
+| Fin base de la ventana de llegada | `ventana_llegada_fin` | `1.30` (se amplía con la incertidumbre; nunca cierra sin señal) |
+| Error relativo de zancada / inflación durante esquive | `error_relativo_zancada` / `inflar_incertidumbre_esquive` | `0.15` / `2.0` |
+| Máximo desvío que permite aprender zancada | `desvio_aprendizaje_max_grados` | `20`° |
+| Longitud individual ajustada por pico | `usar_zancada_por_pico` | `False` (experimental; validar en CSV con ojos vendados) |
+| Puertas visuales auxiliares | `usar_puertas` | `False` |
+| Alto mínimo de caja de señal para estimar distancia | `alto_minimo_senal_px` | `20` px |
 | Cadencia de paso si aún no hay suficientes muestras | `periodo_paso_llegada_s` | `0.6` s |
 | Tiempo de reacción para estimar frenado | `tiempo_reaccion_llegada_s` | `0.8` s |
 | Desaceleración usada para estimar frenado | `desaceleracion_llegada_m_s2` | `1.2` m/s² |
@@ -275,6 +280,7 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 | Salto horizontal máximo al seguir una puerta | `salto_maximo_puerta_px` | `160` px |
 | Proximidad insegura al confirmar señal | `distancia_puerta_min_cm` | `45` cm |
 | Distancia para detener la aproximación sin señal visible | `distancia_puerta_max_cm` | `140` cm |
+| Distancia de referencia para acercarse si la cámara aún no reconoce la señal | `distancia_maxima_senal_cm` | `80` cm |
 | Muestras ultrasónicas estables para aproximación | `muestras_ultrasonido_puerta` | `3` |
 | Retención de pitido ante una pérdida breve de eco | `retencion_eco_ultrasonido_s` | `0.35` s (solo para el pitido; nunca para confirmar llegada) |
 | Espera tras un aviso de obstáculo antes de confirmar llegada | `espera_llegada_tras_obstaculo_s` | `4` s |
@@ -287,11 +293,11 @@ Todo vive en **`guia/configuracion.py`** (dataclass `Configuracion`):
 
 Las rutas de los modelos se calculan desde la ubicación del proyecto:
 funcionan igual en la Raspberry Pi que en el PC (sin rutas absolutas fijas).
-El modelo configurado debe contener las clases de señales orientadoras y
-`door` para detectar ambos. El modelo COCO incluido no tiene `door`, y el
-`best_ncnn_model` incluido solo contiene `maceta`, `mesa` y `silla`; al
-arrancar, el sistema avisa si faltan las clases de puerta. Entrena/exporta
-un modelo con las clases necesarias y apunta `ruta_modelo` a ese modelo.
+El modelo debe contener las clases de señales orientadoras y los objetos
+que se quieran reconocer. La clase `door` es opcional: con
+`usar_puertas=False` (por defecto) no se busca ni se advierte su ausencia;
+con `True`, sí se habilita la guía auxiliar y se avisa si el modelo no la
+incluye. La señal interior es la única referencia de ubicación y llegada.
 
 ### Señales orientadoras (`guia/dominio/catalogo.py`)
 
@@ -303,18 +309,20 @@ OBJETOS_PERMITIDOS   = {"chair": "silla", "table": "mesa",
                         "potted plant": "maceta"}
 ```
 
-El detector devuelve las puertas en una lista aparte con caja,
-centro horizontal, alto/ancho y rango. Durante la búsqueda, una puerta
-visible sin señal confirmada se anuncia una vez por encuentro; el animal
-detectado dentro de su caja tiene prioridad. El rango usa
+Con `usar_puertas=True`, el detector devuelve las puertas en una lista
+aparte con caja, centro horizontal, alto/ancho y rango. Durante la
+búsqueda, una puerta visible sin señal confirmada se anuncia una vez por
+encuentro; el animal detectado dentro de su caja tiene prioridad. El rango usa
 `altura_puerta_m` (o `ancho_puerta_m` como respaldo) y la misma
 `focal_px` calibrada. La puerta nunca cambia `ubicacion`.
-Cuando la cámara ve centrada la señal interior esperada, esa señal
-confirma el tramo si el camino está libre y no hay una lectura ultrasónica
-estable que indique proximidad insegura (menos de `distancia_puerta_min_cm`).
-No se exige una distancia exacta ni una lectura ultrasónica estable. Sin
-señal visible, `distancia_puerta_max_cm` solo define cuándo detener la
-aproximación final y volver a buscarla con la cámara.
+La señal interior esperada se acepta al reconocerla, sin pedir que se centre
+en la imagen, siempre que el camino esté libre y el ultrasonido no indique
+menos de `distancia_puerta_min_cm`. Reconocerla tiene prioridad sobre el
+límite de 80 cm: esa distancia solo sirve como orientación de respaldo
+cuando, después de girar, la cámara aún no logra verla. Si no hay lectura
+ultrasónica estable, se continúa buscando la señal con la cámara. Sin señal
+visible, `distancia_puerta_max_cm` solo define cuándo detener la aproximación
+final y volver a buscarla con la cámara.
 
 ### Mapa de la casa (`guia/dominio/rutas.py`)
 
@@ -349,9 +357,10 @@ diferencia entre una medida y la siguiente).
 
 Si un pasillo termina frente a una pared o puerta cuya distancia se
 conoce, el tramo puede activar opcionalmente el odómetro con
-`distancia_frontal_fin_cm`. El avance ultrasónico es la diferencia entre
-la primera distancia estable y la actual; se corrige con la ventana de
-llegada, pero **nunca confirma por sí solo** que se llegó.
+`distancia_frontal_fin_cm`. El odómetro solo se habilita en tramos con pared frontal fija conocida,
+longitud mapeada y alcance menor de 4 m. La corrección se limita a los
+últimos 4 m y se suspende si la cámara anuncia un obstáculo central; el
+HC-SR04 no identifica el objeto. **Nunca confirma por sí solo** que se llegó.
 
 El estimador por tramo predice posición con los pasos acreditados y la
 zancada vigente, y corrige con la distancia a la señal esperada y, cuando
@@ -359,21 +368,22 @@ se configuró, con el HC-SR04 frontal. Expone posición e incertidumbre.
 La incertidumbre puede iniciar antes el aviso de búsqueda, pero la ventana
 solo se cierra al confirmar con cámara la señal interior esperada.
 
-Un tramo también puede declarar `puertas_en_tramo` (cantidad de puertas
-intermedias esperadas). El contador horizontal corrige débilmente la
-posición al pasar cada puerta, una vez por detección; no la usa para
-identificar la zona ni para anunciar llegada.
+Con `usar_puertas=True`, un tramo también puede declarar
+`puertas_en_tramo` (cantidad de puertas intermedias esperadas). El
+contador horizontal corrige débilmente la posición al pasar cada puerta,
+una vez por detección; no la usa para identificar la zona ni para
+anunciar llegada.
 
 **Zancada adaptativa** (`guia/dominio/zancada.py`): mientras no haya
 ninguna medida, el plan usa `pasos` (el conteo del mapa). En cuanto la
-cámara cierra un tramo dentro de la ventana de llegada, se mide
+cámara cierra un tramo dentro de la ventana, se mide con pasos efectivos
 `distancia_m / pasos` y se guarda como media móvil exponencial
 (`zancada_ema_alfa`, recortada entre `zancada_min_m` y
 `zancada_max_m`); a partir de ahí el plan recalcula
 `round(distancia / zancada)`, así el número de pasos anunciado se
 acerca al paso real de la persona. Solo sirve el cierre **verificado
-con la cámara**: el cierre por pasos de más (130 % sin señal) no mide
-nada, porque ahí no se sabe dónde acabó el tramo de verdad.
+con la cámara** y un tramo limpio: sin obstáculo central anunciado,
+corrección ni desvío máximo de 20° o más. La semilla es 0,60 m.
 
 Cada tramo se pone **en un solo sentido**; el planificador calcula
 solo el camino de vuelta con los mismos pasos y los giros espejados
@@ -432,13 +442,13 @@ Mientras la persona gira o camina, el sistema la guía en todo momento:
   reacción/frenado, adelantándolo como máximo un 15 % del tramo; dice
   *"Reduce el paso; te indicaré dónde detenerte."* El aviso no cierra el
   tramo. Solo la cámara lo **cierra** si ve la señal interior de la zona
-  siguiente entre el **70 %** y el **130 %**:
+  siguiente desde el **70 %** y dentro de un límite máximo adaptado a la
+  incertidumbre:
   *"Ya veo la señal. Puedes parar."* Si se pasa del 130 % sin verla,
-  indica que se detenga y explica que aún no confirmó la señal; sigue
-  el flujo de siempre (encarada intermedia o `CONFIRMANDO_LLEGADA`).
-  En el tramo final, si no ve la señal, continúa despacio hasta la
-  distancia máxima de búsqueda configurada y luego vuelve a buscarla.
-  La llegada al destino **nunca** se anuncia sin haber visto su señal.
+  abre/ensancha la búsqueda, pero mantiene el tramo abierto. En el tramo
+  final, si no ve la señal, continúa despacio según la proximidad
+  ultrasónica y vuelve a buscarla. La llegada al destino **nunca** se
+  anuncia sin haber visto su señal.
   Además ver
   la puerta de la zona de cierre mientras se camina no se lee como
   una desviación (antes provocaba un *"Te saliste de la ruta"* falso).
@@ -461,14 +471,17 @@ Por eso, al pedir un destino el sistema **no arranca a ciegas**:
   ruta arranca de inmediato ("Entendido. Vamos a Baño." → "Gira a la
   izquierda 90 grados.").
 * Si la señal **se acaba de confirmar** (la búsqueda la vio, o se
-  mantuvo a la vista esperando el destino) y no has girado más de
+  mantuvo a la vista esperando el destino, o confirmó tu llegada) y no has girado más de
   `encarada_max_giro_grados` (20°) en menos de `encarada_validez_s`
   (30 s) → también arranca directo, **sin volver a pedir encarar**:
   la encarada automática (`ENCARADA AUTOMATICA` en consola) da por
   hecho que sigues enfrente de tu señal. En casa las señales de las
   demás zonas están a pasos de distancia, así que pedirla otra vez
   dejaría a la persona girando sin salida. Si pasan más de 30 s o
-  giras más de 20°, sí se pide encarar como siempre.
+  giras más de 20°, sí se pide encarar como siempre. Al llegar, si
+  permaneces en el sitio, se usa la señal que acaba de confirmar la
+  cámara y solo se anuncian los giros necesarios para el siguiente
+  destino.
 * Si **no** está a la vista → el nuevo estado *Encarar señal* pide
   girar despacio hasta encontrarla ("Para saber hacia dónde miras,
   primero encárate con la señal de esta zona..."); solo entonces se
@@ -476,8 +489,12 @@ Por eso, al pedir un destino el sistema **no arranca a ciegas**:
   una orientación conocida. **El lado en el que hay que girar sale
   del sentido de la ruta** (`PlanificadorRutas.lado_encarada`): a la
   izquierda en el sentido normal y a la derecha al volver, porque las
-  imágenes cambian de lado (ver *Mapa de la casa*). Lo mismo vale
-  para confirmar la llegada a la puerta del destino.
+  imágenes cambian de lado (ver *Mapa de la casa*). Si ya giraste y la
+  señal aún no se reconoce, una lectura ultrasónica estable mayor de
+  `distancia_maxima_senal_cm` (80 cm) pide avanzar despacio mientras
+  sigues buscándola. Si la cámara sí la reconoce, continúa el flujo sin
+  esperar a que el ultrasonido baje de 80 cm. Lo mismo vale para
+  confirmar la llegada a la puerta del destino.
 * **Encarada intermedia**: al terminar los pasos de un tramo (quedan
   más tramos por delante) la persona normalmente queda mirando hacia
   donde vino, así que antes del giro del siguiente tramo se vuelve a
@@ -500,24 +517,24 @@ desvío. Mientras gira, el sistema integra el giro de corrección, sin
 avisos a mitad de giro (*"Llevas la mitad del giro para enderezar"*,
 *"Ya casi enderezas"* se quitaron por el mismo motivo de desfase: la
 voz tarda más que la persona en girar); si el desvio no baja vuelve a
-avisar cada 15 s con el grados actualizado, y al entrar en la recta
-anuncia *"Ya enderezaste.
-Los pasos vuelven a contar"*. El número de grados del aviso es solo
+avisar cada 15 s con los grados actualizados y al entrar en la recta
+anuncia *"Ya enderezaste. Mantén ese rumbo."* El número de grados del aviso es solo
 contexto (cuánto te desviaste): el criterio para parar de girar es la
 voz, no cumplir un número fijo que se quedaría viejo mientras la
 persona sigue caminando.
 
-Y no es solo un aviso: **los pasos dados mientras está desviado no se
-acreditan**. El sensor sigue contando la marcha a ciegas, pero el
-tramo solo avanza con pasos rectos — si no, el sistema daría por
-"completos" los pasos del tramo caminando en curva y diría que has llegado a
-un sitio que está en otro. Excepción basada en cámara: si YOLO confirma
+El avance no se congela al superar 35°: cada paso aporta su proyección
+longitudinal según el coseno del desvío, hasta `desvio_credito_max_grados`
+(75°); por encima aporta cero. Así rodear un obstáculo no elimina todos
+los pasos ni se confunde con avanzar recto. Excepción basada en cámara:
+si YOLO confirma
 la señal interior esperada del siguiente tramo y esta queda centrada,
 esa referencia visual prevalece sobre un rumbo inercial discrepante;
 los pasos hacia la señal cuentan y no se ordena girar alejándose de ella.
-Un obstáculo frontal desactiva esta excepción. La señal centrada por sí
-sola no confirma llegada: siguen siendo necesarios el rango ultrasónico
-y las demás validaciones configuradas.
+Un obstáculo frontal desactiva esta excepción. Reconocer la señal por sí
+solo no confirma llegada: siguen siendo necesarios el camino libre, la
+distancia mínima de seguridad si hay lectura ultrasónica y las demás
+validaciones configuradas.
 
 ### Alertas de seguridad
 

@@ -33,12 +33,25 @@ class EstimadorPosicionTramo:
         self._posicion_m = 0.0
         self._varianza_m2 = self._config.sigma_inicial_posicion_m**2
 
-    def predecir(self, pasos: int, zancada_m: float) -> None:
-        """Predice avance por pasos rectos y aumenta incertidumbre."""
+    def predecir(
+        self,
+        pasos: float,
+        zancada_m: float,
+        *,
+        factor_incertidumbre: float = 1.0,
+    ) -> None:
+        """Predice avance por pasos proyectados y propaga error de zancada."""
         if pasos <= 0 or zancada_m <= 0:
             return
-        self._posicion_m += pasos * zancada_m
-        self._varianza_m2 += pasos * self._config.varianza_proceso_paso_m2
+        avance_m = pasos * zancada_m
+        ruido_paso = pasos * self._config.varianza_proceso_paso_m2
+        ruido_zancada = (
+            self._config.error_relativo_zancada * avance_m
+        ) ** 2
+        self._posicion_m += avance_m
+        self._varianza_m2 += factor_incertidumbre * (
+            ruido_paso + ruido_zancada
+        )
         self._limitar_posicion()
 
     def corregir(self, posicion_m: float, varianza_medicion_m2: float) -> bool:

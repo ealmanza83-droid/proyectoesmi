@@ -250,7 +250,7 @@ class DetectorVisual:
         self._config = config
         self._senales = SENALES_ORIENTADORAS
         self._objetos = OBJETOS_PERMITIDOS
-        self._puertas = PUERTAS
+        self._puertas = PUERTAS if config.usar_puertas else {}
         self._distancias = MedianaDistanciasVisuales(
             config.distancia_mediana_frames,
             config.distancia_mediana_perdidas,
@@ -258,10 +258,15 @@ class DetectorVisual:
         self._confirmador = ConfirmadorSenal(config)
         self._modelo = YOLO(str(config.ruta_modelo), task="detect")
         print("YOLO OK")
+        if config.focal_px <= 0.0:
+            print(
+                "AVISO VISION: focal_px no está calibrada; no se usarán "
+                "distancias visuales de señales."
+            )
         nombres = self._modelo.names
         clases_modelo = set(nombres.values() if isinstance(nombres, dict) else nombres)
         clases_puerta_ausentes = set(self._puertas) - clases_modelo
-        if clases_puerta_ausentes:
+        if config.usar_puertas and clases_puerta_ausentes:
             print(
                 "AVISO YOLO: el modelo no incluye la clase "
                 f"{', '.join(sorted(clases_puerta_ausentes))}; "
@@ -302,6 +307,8 @@ class DetectorVisual:
         for caja in resultados[0].boxes:
             clase_id = int(caja.cls[0])
             nombre = self._modelo.names[clase_id]
+            if not self._config.usar_puertas and nombre in PUERTAS:
+                continue
             if nombre not in CLASES_PERMITIDAS:
                 continue
             x1, y1, x2, y2 = map(int, caja.xyxy[0])
@@ -310,10 +317,15 @@ class DetectorVisual:
             observaciones.append((nombre, confianza, limites))
 
             if nombre in self._senales:
-                medida = distancia_por_altura(
-                    self._config.focal_px,
-                    self._config.altura_senal_m,
-                    y2 - y1,
+                alto_px = y2 - y1
+                medida = (
+                    distancia_por_altura(
+                        self._config.focal_px,
+                        self._config.altura_senal_m,
+                        alto_px,
+                    )
+                    if alto_px >= self._config.alto_minimo_senal_px
+                    else None
                 )
             elif nombre in self._puertas:
                 medida = distancia_por_altura(

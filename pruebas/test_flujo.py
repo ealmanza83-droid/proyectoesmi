@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import io
 import math
 import queue
 import sys
@@ -24,6 +25,7 @@ import threading
 import time
 import types
 import csv
+from contextlib import redirect_stdout
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -248,6 +250,7 @@ class MicrofonoFalso:
 class DetectorFalso:
     def __init__(self) -> None:
         self.senal: Senal | None = None
+        self.caja_senal = (250, 100, 390, 300)
         self.obstaculos: tuple[ObstaculoVisto, ...] = ()
         self.puertas: tuple[PuertaVisto, ...] = ()
 
@@ -263,7 +266,7 @@ class DetectorFalso:
                 Deteccion(
                     clase,
                     0.9,
-                    (250, 100, 390, 300),
+                    self.caja_senal,
                     True,
                     False,
                 ),
@@ -598,6 +601,27 @@ def test_flujo_completo() -> None:
     comprobar(aplicacion.destino is None, "destino limpio tras la llegada")
     comprobar("Has llegado a Baño." in locutor.frases, "anuncio de llegada")
     comprobar("¿A dónde quieres ir?" in locutor.frases, "vuelve a preguntar destino")
+
+    # La señal de llegada queda como referencia válida mientras la
+    # persona no gire: el nuevo destino solo debe anunciar la ruta.
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    locutor.frases.clear()
+    microfono.eventos.put(
+        EventoVoz(ModoMicrofono.DESTINO, "quiero ir a la sala")
+    )
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "elige el siguiente destino sin volver a encarar la señal",
+    )
+    comprobar(
+        not any("encárate" in frase for frase in locutor.frases),
+        "no repite la indicación de encarar tras llegar",
+    )
+    comprobar(
+        any("Gira a la derecha" in frase for frase in locutor.frases),
+        "indica el giro de la ruta hacia el nuevo destino",
+    )
 
     # --- 3.7 Caida: alarma constante y orden para apagarla ---------
     # El golpe tiene que durar varias muestras seguidas: un glitch
@@ -970,18 +994,37 @@ def test_encarada_y_desvio() -> None:
     comprobar(aplicacion.estado is Estado.ENCARAR_SENAL, "sigue encarando")
     comprobar(aplicacion._ruta_pendiente is not None, "la ruta queda pendiente")
 
-    # Aparece la senal: se ancla el rumbo y arranca la navegacion.
+    # Sin reconocimiento, el ultrasonido orienta el acercamiento después
+    # de que la persona ya giró buscando la señal.
+    detector.senal = None
+    preparar_distancia_puerta(aplicacion, 100.0)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ENCARAR_SENAL,
+        "sin señal reconocida mantiene el estado de encarado",
+    )
+    comprobar(
+        any("centímetros" in frase and "avanza despacio" in frase
+            for frase in locutor.frases),
+        "a más de 80 cm el ultrasonido orienta el acercamiento si falta la señal",
+    )
+
+    # Si la cámara sí la reconoce, continúa incluso a más de 80 cm y
+    # aunque la caja no esté en el centro exacto de la imagen.
     detector.senal = Senal("Sala", LADO_INTERIOR)
+    detector.caja_senal = (0, 100, 100, 300)
+    locutor.frases.clear()
     paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion.estado is Estado.NAVEGANDO,
-        "con la senal enfrente arranca la ruta",
+        "con la señal reconocida a más de 80 cm arranca la ruta",
     )
     comprobar(
-        any("frente a ti" in frase for frase in locutor.frases),
-        "confirma que la senal esta enfrente",
+        not any("centr" in frase.lower() for frase in locutor.frases),
+        "no pide centrar una señal orientadora ya reconocida",
     )
     comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en cero")
+    detector.caja_senal = (250, 100, 390, 300)
     detector.senal = None  # la persona giro hacia el destino: senal atras
 
     # Giro de la ruta (Sala -> Baño: izquierda) completado.
@@ -1049,8 +1092,8 @@ def test_encarada_y_desvio() -> None:
         "avisa cuando ya corrigio el desvio",
     )
     comprobar(
-        any("vuelven a contar" in frase for frase in locutor.frases),
-        "recuerda que los pasos vuelven a contar",
+        any("Mantén ese rumbo" in frase for frase in locutor.frases),
+        "recuerda mantener el rumbo recto",
     )
     comprobar(
         not any("mitad del giro" in frase for frase in locutor.frases),
@@ -1172,6 +1215,7 @@ def test_lados_de_puerta() -> None:
 
     # 11.6 Cara interior de su zona: ancla el rumbo y arranca.
     detector.senal = Senal("Baño", LADO_INTERIOR)
+    preparar_distancia_puerta(aplicacion, 75.0)
     paso(aplicacion, detector, mpu)
     comprobar(aplicacion.estado is Estado.NAVEGANDO, "con la cara interior si arranca")
     comprobar(aplicacion.rumbo.grados == 0.0, "rumbo anclado en la senal")
@@ -1237,15 +1281,18 @@ def test_relocalizacion_y_devolucion() -> None:
         "sin la senal no anuncia una llegada falsa",
     )
 
-    # 12.2 La señal del destino centrada confirma sin exigir 70-80 cm.
+    # 12.2 Una señal reconocida continúa el flujo aunque el ultrasonido
+    # marque más de 80 cm, sin exigir que la caja esté centrada.
     detector.senal = Senal("Baño", LADO_INTERIOR)
     preparar_distancia_puerta(aplicacion, 150.0)
+    detector.caja_senal = (0, 100, 100, 300)
     paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion.estado is Estado.ESPERANDO_DESTINO
         and "Has llegado a Baño." in locutor.frases,
-        "la señal centrada a 150 cm confirma sin exigir una distancia exacta",
+        "la señal reconocida a más de 80 cm confirma aunque esté descentrada",
     )
+    detector.caja_senal = (250, 100, 390, 300)
     comprobar(aplicacion.ubicacion == "Baño", "ubicacion actualizada al llegar")
     aplicacion.config = dataclasses.replace(
         aplicacion.config, distancia_alerta_cm=100.0
@@ -1279,6 +1326,7 @@ def test_relocalizacion_y_devolucion() -> None:
     aplicacion._ultima_alerta_obstaculo_en = (
         time.monotonic() - aplicacion.config.espera_llegada_tras_obstaculo_s - 1
     )
+    preparar_distancia_puerta(aplicacion, 75.0)
     paso(aplicacion, detector, mpu)
     comprobar(
         aplicacion.estado is Estado.ESPERANDO_DESTINO
@@ -1333,7 +1381,7 @@ def test_relocalizacion_y_devolucion() -> None:
     for i in range(16):
         mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
-    comprobar(aplicacion._pasos_acreditados > 0, "acredita algunos pasos rectos")
+    comprobar(aplicacion.pasos_efectivos > 0, "acredita algunos pasos rectos")
     detector.senal = Senal("Sala", LADO_INTERIOR)  # miro hacia atras: sigue en Sala
     locutor.frases.clear()
     paso(aplicacion, detector, mpu)
@@ -1342,7 +1390,7 @@ def test_relocalizacion_y_devolucion() -> None:
         "avisa de que se salio de la ruta",
     )
     comprobar(aplicacion.estado is Estado.NAVEGANDO, "sigue navegando con plan nuevo")
-    comprobar(aplicacion._pasos_acreditados == 0, "el plan nuevo reinicia los pasos")
+    comprobar(aplicacion.pasos_efectivos == 0, "el plan nuevo reinicia el avance")
 
     # 12.5 Ordenes de voz para devolverse o recalcular la ruta.
     comprobar(
@@ -1701,7 +1749,7 @@ def test_obstaculos_sincronizados() -> None:
 
 
 def test_encarada_intermedia_de_tramo() -> None:
-    """Al terminar un tramo falta encarar la zona alcanzada.
+    """Solo una señal de la zona alcanzada cierra el tramo intermedio.
 
     La ruta Inicio -> Sala tiene dos tramos: despues de los pasos del
     primero la persona esta en el Cuarto mirando hacia donde vino, y
@@ -1764,8 +1812,25 @@ def test_encarada_intermedia_de_tramo() -> None:
         if aplicacion.estado is not Estado.NAVEGANDO:
             break
     comprobar(
+        aplicacion.estado is Estado.NAVEGANDO
+        and aplicacion._tramos_completados == 0,
+        "los pasos estiman avance pero no cierran el tramo sin señal",
+    )
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    preparar_distancia_puerta(aplicacion, 75.0)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._tramos_completados == 1,
+        "la señal interior de Cuarto confirma el cierre del primer tramo",
+    )
+    comprobar(
+        aplicacion.ubicacion == "Cuarto",
+        "la señal interior corrige la ubicación a Cuarto",
+    )
+    paso(aplicacion, detector, mpu)
+    comprobar(
         aplicacion.estado is Estado.ENCARAR_SENAL,
-        "al completar los pasos pide encarar la zona alcanzada",
+        "tras la señal confirmada pide encarar la zona alcanzada",
     )
     comprobar(aplicacion.ubicacion == "Cuarto", "ubica a la persona en el Cuarto")
     comprobar(
@@ -1775,6 +1840,7 @@ def test_encarada_intermedia_de_tramo() -> None:
 
     # Sin verla aun, pide girar al lado donde estan las senales en el
     # sentido de la ruta (``GIRO_SENAL_NORMAL``) y NO el giro de 90.
+    detector.senal = None
     locutor.frases.clear()
     paso(aplicacion, detector, mpu)
     comprobar(
@@ -1902,6 +1968,7 @@ def test_encarada_automatica() -> None:
 
     # Si entretanto giro bastante, la senal ya no esta enfrente: si
     # que hay que encarar antes de arrancar.
+    preparar_distancia_puerta(aplicacion, 75.0)
     aplicacion.ubicacion = "Inicio"
     aplicacion.lado_puerta = LADO_INTERIOR
     aplicacion.estado = Estado.ESPERANDO_DESTINO
@@ -2142,6 +2209,49 @@ def test_senal_centrada_prevalece_sobre_deriva_inercial() -> None:
     )
 
 
+def test_avance_proyectado_esquive() -> None:
+    """Un desvío reduce avance según su proyección, pero no lo congela."""
+    print("\n[19d] Avance proyectado: pasos al esquivar")
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=LocutorFalso(),
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    aplicacion._rumbo_al_caminar = 0.0
+    for cantidad, rumbo in ((10, 40.0), (10, -40.0), (10, 0.0)):
+        aplicacion.rumbo._grados = rumbo
+        aplicacion.pasos._pasos += cantidad
+        aplicacion._creditar_pasos()
+
+    proporcion = aplicacion.pasos_efectivos / 30.0
+    comprobar(
+        0.75 <= proporcion <= 0.95,
+        f"el rodeo acredita la proyección de los pasos ({proporcion:.1%})",
+    )
+    esperado = 10 * aplicacion.zancada.metros * (
+        1.0 + 2.0 * math.cos(math.radians(40.0))
+    )
+    comprobar(
+        abs(aplicacion.avance_efectivo_m - esperado) < 1e-9,
+        "avance_efectivo_m suma zancada por coseno del desvío",
+    )
+
+    aplicacion.rumbo._grados = 80.0
+    aplicacion.pasos._pasos += 4
+    avance_antes = aplicacion.avance_efectivo_m
+    aplicacion._creditar_pasos()
+    comprobar(
+        aplicacion.avance_efectivo_m == avance_antes,
+        "los pasos con desvío superior al máximo no aportan avance",
+    )
+
+
 def test_desvio_requiere_confirmacion() -> None:
     """Ignora desvíos pequeños y confirma los grandes de forma sostenida.
 
@@ -2240,8 +2350,8 @@ def test_desvio_requiere_confirmacion() -> None:
         "bajando del umbral de liberacion si anuncia que enderezo",
     )
     comprobar(
-        any("vuelven a contar" in frase for frase in locutor.frases),
-        "recuerda que los pasos vuelven a contar",
+        any("Mantén ese rumbo" in frase for frase in locutor.frases),
+        "recuerda mantener el rumbo recto",
     )
 
 
@@ -2692,7 +2802,7 @@ def test_llegada_por_ventana() -> None:
             mpu.az = 1.6 if i % 4 < 2 else 1.0
             paso(aplicacion, detector, mpu)
             if (
-                aplicacion._pasos_acreditados >= pasos
+                aplicacion.pasos_efectivos >= pasos
                 or aplicacion.estado is not Estado.NAVEGANDO
             ):
                 return
@@ -2717,7 +2827,10 @@ def test_llegada_por_ventana() -> None:
 
     # --- 27.1 Antes del 70 % la senal vista NO cierra el tramo -----
     caminar_hasta(5)  # 50 % de 10
-    comprobar(aplicacion._pasos_acreditados == 5, "camina hasta el 50 % del tramo")
+    comprobar(
+        abs(aplicacion.pasos_efectivos - 5.0) < 1e-9,
+        "camina hasta el 50 % del tramo",
+    )
     detector.senal = Senal("Cuarto", LADO_INTERIOR)
     paso(aplicacion, detector, mpu)
     comprobar(
@@ -2739,10 +2852,12 @@ def test_llegada_por_ventana() -> None:
         0.54 <= aplicacion._umbral_aviso_llegada() < 0.70,
         "limita el aviso a un adelanto corto calculado por cadencia y frenado",
     )
-    caminar_hasta(5)
+    aplicacion._valorar_llegada_del_tramo(
+        ResultadoVision(), dados=5.0, objetivo=10
+    )
     comprobar(
-        not any("Reduce el paso" in frase for frase in locutor.frases),
-        "no adelanta el aviso más de lo configurado",
+        any("Reduce el paso" in frase for frase in locutor.frases),
+        "el límite superior de confianza puede anticipar el aviso",
     )
     caminar_hasta(6)
     comprobar(
@@ -2763,11 +2878,12 @@ def test_llegada_por_ventana() -> None:
     # --- 27.3 Entre el 70 % y el 130 % la camara CIERRA el tramo ---
     detector.senal = Senal("Cuarto", LADO_INTERIOR)
     preparar_distancia_puerta(aplicacion, 75.0)
+    detector.caja_senal = (0, 100, 100, 300)
     comprobar(
         aplicacion._senal_en_rango_de_llegada(
             detector.analizar(None), detector.senal
         ),
-        "la señal centrada y la distancia normal cumplen proximidad",
+        "una señal reconocida descentrada y a distancia segura cumple proximidad",
     )
     resultado_senal = detector.analizar(None)
     aplicacion._distancia_puerta_estable_cm = 90.0
@@ -2775,14 +2891,14 @@ def test_llegada_por_ventana() -> None:
         aplicacion._senal_en_rango_de_llegada(
             resultado_senal, detector.senal
         ),
-        "acepta la señal centrada a más de 80 cm sin pedir acercamiento exacto",
+        "la señal reconocida sigue válida aunque el ultrasonido marque más de 80 cm",
     )
     aplicacion._distancia_puerta_estable_cm = None
     comprobar(
         aplicacion._senal_en_rango_de_llegada(
             resultado_senal, detector.senal
         ),
-        "la cámara puede confirmar aunque el ultrasonido no tenga eco estable",
+        "la señal reconocida puede confirmar si el ultrasonido no tiene lectura",
     )
     aplicacion._distancia_puerta_estable_cm = 44.0
     comprobar(
@@ -2792,6 +2908,7 @@ def test_llegada_por_ventana() -> None:
         "mantiene el límite de seguridad cuando la persona está demasiado cerca",
     )
     aplicacion._distancia_puerta_estable_cm = 75.0
+    detector.caja_senal = (250, 100, 390, 300)
     locutor.frases.clear()
     paso(aplicacion, detector, mpu)
     comprobar(
@@ -2817,7 +2934,7 @@ def test_llegada_por_ventana() -> None:
         "sin la senal del destino no anuncia llegada",
     )
 
-    # --- 27.4 Pasado el 130 % sin senal: aviso y flujo de siempre --
+    # --- 27.4 Pasado el 130 % sin senal: avisa y sigue buscando --
     empezar_tramo()
     aplicacion.config = dataclasses.replace(
         aplicacion.config, confirmacion_desvio_s=0.0
@@ -2827,36 +2944,25 @@ def test_llegada_por_ventana() -> None:
     # Alimenta el último paso justo en la frontera, independientemente
     # de la cadencia sintética del contador en esta prueba.
     aplicacion.pasos._pasos = 13
-    aplicacion._pasos_acreditados = 13
+    aplicacion._avance_efectivo_m = 13 * aplicacion.zancada.metros
     aplicacion._pasos_previos = 13
     aplicacion.rumbo.girar(50.0)
     aplicacion._en_navegando(ResultadoVision())
     comprobar(
-        any(
-            "recorriste los pasos previstos" in frase
-            and "no confirmé la señal" in frase
-            for frase in locutor.frases
-        ),
-        "al 130 % da una sola instrucción clara y explica que falta la señal",
+        any("Aún no veo la señal" in frase for frase in locutor.frases)
+        and aplicacion._tramos_completados == 0,
+        "al superar la ventana busca la señal sin cerrar el tramo",
     )
     aplicacion._en_navegando(ResultadoVision())
     comprobar(
-        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
-        "el tramo cerrado pasa a confirmar la llegada con la camara",
+        aplicacion.estado is Estado.NAVEGANDO
+        and aplicacion._tramos_completados == 0,
+        "sin señal sigue en el tramo y no avanza a la siguiente ruta",
     )
     comprobar(
         not any("Has llegado" in frase for frase in locutor.frases),
         "sin la senal del destino no anuncia llegada falsa",
     )
-    comprobar(
-        not any(
-            "desviando" in frase or "Pasos completados" in frase
-            for frase in locutor.frases
-        ),
-        "al cerrar el tramo no añade un aviso de desvío contradictorio",
-    )
-
-
 def test_zancada_adaptativa() -> None:
     """La zancada se mide en los tramos que cierra la camara.
 
@@ -2980,6 +3086,11 @@ def test_zancada_adaptativa() -> None:
     aplicacion.ubicacion = "Inicio"
     aplicacion.lado_puerta = LADO_INTERIOR
 
+    comprobar(
+        config.zancada_m == 0.60 and aplicacion.zancada.metros == 0.60,
+        "la semilla de zancada es 0.60 m",
+    )
+
     # Mientras no haya medida, el plan manda los pasos del mapa.
     aplicacion._asignar_destino("Sala")
     comprobar(
@@ -2993,6 +3104,7 @@ def test_zancada_adaptativa() -> None:
     )
 
     def empezar_tramo(distancia: float, pasos: int) -> None:
+        aplicacion.ubicacion = "Inicio"
         aplicacion.destino = "Sala"
         aplicacion.lado_puerta = LADO_INTERIOR
         aplicacion._iniciar_navegacion(
@@ -3007,26 +3119,60 @@ def test_zancada_adaptativa() -> None:
             mpu.az = 1.6 if i % 4 < 2 else 1.0
             paso(aplicacion, detector, mpu)
             if (
-                aplicacion._pasos_acreditados >= pasos
+                aplicacion.pasos_efectivos >= pasos
                 or aplicacion.estado is not Estado.NAVEGANDO
             ):
                 return
 
     # --- 28.4 El cierre por pasos de mas NO mide nada --------------
     empezar_tramo(distancia=6.1, pasos=10)
-    caminar_hasta(14)  # 130 % sin senal: cierra igual, pero sin verificar
+    caminar_hasta(14)  # sin señal: abre búsqueda, pero no cierra el tramo
     comprobar(
-        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
-        "el tramo de mas se cierra por el flujo de siempre",
+        aplicacion.estado is Estado.NAVEGANDO
+        and aplicacion._tramos_completados == 0,
+        "sin señal el tramo permanece abierto aunque exceda el estimado",
     )
     comprobar(
         not aplicacion.zancada.aprendida,
         "el cierre sin la senal no mide la zancada (no se sabe donde acabo)",
     )
 
-    # --- 28.5 Con la camara la zancada si se mide ------------------
+    # --- 28.5 Un obstaculo anunciado invalida el aprendizaje --------
+    empezar_tramo(distancia=6.1, pasos=10)
+    caminar_hasta(8)
+    aplicacion._ultima_voz_en = time.monotonic() - 100
+    aplicacion._anunciar_obstaculos(
+        ResultadoVision(
+            obstaculos=(ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
+        ),
+        None,
+    )
+    comprobar(
+        aplicacion._hubo_obstaculo_central_anunciado,
+        "registra el anuncio de obstáculo central en el tramo",
+    )
+    aplicacion._ultima_alerta_obstaculo_en = (
+        time.monotonic() - aplicacion.config.espera_llegada_tras_obstaculo_s - 1
+    )
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    preparar_distancia_puerta(aplicacion, 75.0)
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion._tramos_completados == 1
+        and not aplicacion.zancada.aprendida
+        and aplicacion.zancada.metros == config.zancada_m,
+        "un tramo con obstáculo cierra visualmente, pero no cambia la EMA",
+    )
+
+    # --- 28.6 Con tramo limpio y camara, la zancada si se mide ------
     empezar_tramo(distancia=6.1, pasos=10)
     caminar_hasta(8)  # 80 %: dentro de la ventana
+    comprobar(
+        not aplicacion._hubo_obstaculo_central_anunciado
+        and not aplicacion._hubo_correccion_desvio
+        and aplicacion._desvio_maximo_tramo < 20.0,
+        "el tramo de aprendizaje cumple los criterios de tramo limpio",
+    )
     detector.senal = Senal("Cuarto", LADO_INTERIOR)
     preparar_distancia_puerta(aplicacion, 75.0)
     paso(aplicacion, detector, mpu)
@@ -3044,7 +3190,22 @@ def test_zancada_adaptativa() -> None:
         "la medida del tramo entra en la EMA (6.1 m / 8 pasos)",
     )
 
-    # --- 28.6 El plan siguiente usa la zancada medida --------------
+    valor_aprendido = aplicacion.zancada.metros
+    aplicacion._hubo_correccion_desvio = True
+    aplicacion._aprender_zancada(8.0)
+    comprobar(
+        aplicacion.zancada.metros == valor_aprendido,
+        "una corrección de desvío impide aprender la zancada",
+    )
+    aplicacion._hubo_correccion_desvio = False
+    aplicacion._desvio_maximo_tramo = 20.0
+    aplicacion._aprender_zancada(8.0)
+    comprobar(
+        aplicacion.zancada.metros == valor_aprendido,
+        "un desvío máximo de 20 grados impide aprender",
+    )
+
+    # --- 28.7 El plan siguiente usa la zancada medida --------------
     detector.senal = None
     aplicacion.ubicacion = "Cuarto"  # ahi dejo la senal de cierre
     aplicacion.lado_puerta = LADO_INTERIOR
@@ -3063,6 +3224,38 @@ def test_zancada_adaptativa() -> None:
     comprobar(
         larga.cantidad != TRAMOS_DEMO[("Sala", "Baño")].pasos,
         "y ya no es el conteo viejo del mapa (31 pasos)",
+    )
+
+
+def test_zancada_por_pico_opcional() -> None:
+    """La variación por amplitud se aplica solo al habilitarla."""
+    print("\n[28.8] Zancada por pico: opcional y acotada")
+    config = dataclasses.replace(
+        Configuracion(), usar_zancada_por_pico=True
+    )
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=LocutorFalso(),
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    aplicacion.pasos._pasos = 2
+    aplicacion.pasos._picos_por_paso.extend((0.10, 0.40))
+    aplicacion.pasos._media_picos = 0.25
+    aplicacion._creditar_pasos(ResultadoVision())
+    esperado = 0.60 * ((0.10 / 0.25) ** 0.25 + (0.40 / 0.25) ** 0.25)
+    comprobar(
+        abs(aplicacion.avance_efectivo_m - esperado) < 1e-9,
+        "aplica Weinberg por pico usando la media móvil del contador",
+    )
+    comprobar(
+        not Configuracion().usar_zancada_por_pico,
+        "la zancada por pico permanece desactivada por defecto",
     )
 
 
@@ -3101,6 +3294,11 @@ def test_detector_de_pasos() -> None:
     # piso de "sin marcha" (1,5 s).
     lenta = marcha(100, 700)
     comprobar(lenta.pasos >= 5, f"la marcha lenta (1 s/paso) cuenta ({lenta.pasos})")
+    comprobar(
+        len(lenta.picos_por_paso) == lenta.pasos
+        and all(pico > 0.0 for pico in lenta.picos_por_paso),
+        "expone el pico filtrado de cada paso contado",
+    )
 
     # --- 29.2 Marcha rapida: un paso cada 0,25 s ------------------
     # 25 muestras de periodo = 4 Hz: aun dentro de la banda (5 Hz) y
@@ -3208,7 +3406,12 @@ def test_evaluacion_offline_pasos() -> None:
                     (i * 0.01, 0.0, 0.0, az, 0.0, 0.0, 0.0, "")
                 )
 
-        resultado = evaluar_csv(ruta, pasos_reales=6, config=config)
+        resultado = evaluar_csv(
+            ruta,
+            pasos_reales=6,
+            config=config,
+            distancia_real_m=3.0,
+        )
     comprobar(
         resultado.pasos_detectados > 0,
         "el evaluador detecta pasos reproduciendo aceleraciones registradas",
@@ -3218,6 +3421,13 @@ def test_evaluacion_offline_pasos() -> None:
         and resultado.error_porcentual
         == abs(resultado.pasos_detectados - 6) / 6 * 100.0,
         "reporta los pasos reales y el error porcentual absoluto",
+    )
+    comprobar(
+        resultado.distancia_constante_m
+        == resultado.pasos_detectados * config.zancada_m
+        and resultado.distancia_por_pico_m is not None
+        and resultado.error_distancia_por_pico_pct is not None,
+        "compara distancias estimadas constante y por pico",
     )
 
 
@@ -3292,6 +3502,46 @@ def test_distancia_visual_y_mediana() -> None:
     comprobar(
         distancia_por_altura(0.0, 0.2, 100) is None,
         "no devuelve distancias si la focal no está calibrada",
+    )
+    config = dataclasses.replace(
+        Configuracion(),
+        focal_px=1000.0,
+        alto_minimo_senal_px=30,
+        detecciones_senal_requeridas=1,
+    )
+
+    class ModeloSenal:
+        names = {0: "cow"}
+
+        def __init__(self) -> None:
+            self.boxes = [
+                types.SimpleNamespace(
+                    cls=[0], conf=[0.9], xyxy=[(250, 0, 390, 20)]
+                )
+            ]
+
+        def __call__(self, _frame, **_kwargs):
+            return [types.SimpleNamespace(boxes=self.boxes)]
+
+    detector = DetectorVisual.__new__(DetectorVisual)
+    detector._config = config
+    detector._senales = SENALES_ORIENTADORAS
+    detector._objetos = OBJETOS_PERMITIDOS
+    detector._puertas = {}
+    detector._distancias = MedianaDistanciasVisuales(
+        config.distancia_mediana_frames, config.distancia_mediana_perdidas
+    )
+    detector._confirmador = ConfirmadorSenal(config)
+    detector._modelo = ModeloSenal()
+    chica = detector.analizar(object())
+    detector._modelo.boxes = [
+        types.SimpleNamespace(cls=[0], conf=[0.9], xyxy=[(250, 0, 390, 40)])
+    ]
+    grande = detector.analizar(object())
+    comprobar(
+        chica.detecciones[0].distancia_m is None
+        and grande.detecciones[0].distancia_m == 5.0,
+        "ignora cajas pequeñas y calcula d=f·H/h sobre el alto mínimo",
     )
     suavizador = MedianaDistanciasVisuales(frames=3, perdidas=1)
     medidas = [suavizador.suavizar("cow", valor) for valor in (1.0, 2.0, 9.0)]
@@ -3387,7 +3637,7 @@ def test_odometro_ultrasonico_estable() -> None:
         aplicacion._actualizar_odometro_ultrasonico(ida[1])
     comprobar(
         aplicacion._distancia_frontal_inicio_cm == 200.0
-        and aplicacion._avance_ultrasonico_m == 0.0,
+        and aplicacion._posicion_ultrasonico_m == 0.0,
         "fija el origen solo tras tres lecturas frontales estables",
     )
     aplicacion.sensor.distancia_cm = 180.0
@@ -3395,8 +3645,33 @@ def test_odometro_ultrasonico_estable() -> None:
         aplicacion.sensor.secuencia_medicion += 1
         aplicacion._actualizar_odometro_ultrasonico(ida[1])
     comprobar(
-        aplicacion._avance_ultrasonico_m == 0.2,
+        aplicacion._posicion_ultrasonico_m == 0.2,
         "usa d_inicio - d_actual como avance tras estabilizar la lectura",
+    )
+    aplicacion.estimador_posicion.reiniciar(5.0)
+    aplicacion._posicion_ultrasonico_m = 1.5
+    aplicacion._actualizar_posicion_tramo(
+        ResultadoVision(), ida[1], dados=0.0
+    )
+    comprobar(
+        aplicacion.estimador_posicion.posicion_m == 0.0,
+        "no aplica el odómetro fuera de los últimos 4 m del tramo",
+    )
+    aplicacion.estimador_posicion._posicion_m = 1.0
+    obstaculo = ResultadoVision(
+        obstaculos=(ObstaculoVisto("silla", EN_MEDIO_DEL_CAMINO),)
+    )
+    aplicacion._actualizar_posicion_tramo(obstaculo, ida[1], dados=0.0)
+    comprobar(
+        aplicacion.estimador_posicion.posicion_m == 1.0,
+        "no corrige con ultrasonido mientras hay obstáculo central",
+    )
+    aplicacion._actualizar_posicion_tramo(
+        ResultadoVision(), ida[1], dados=0.0
+    )
+    comprobar(
+        aplicacion.estimador_posicion.posicion_m > 1.0,
+        "aplica la medición estable al entrar en la ventana final",
     )
 
 
@@ -3412,6 +3687,31 @@ def test_estimador_posicion_tramo() -> None:
         estimador.posicion_m == 2.0
         and estimador.incertidumbre_m > inicial,
         "predice metros por paso y aumenta la incertidumbre",
+    )
+    varianza_incremental = (
+        4 * config.varianza_proceso_paso_m2
+        + (config.error_relativo_zancada * 2.0) ** 2
+    )
+    comprobar(
+        abs(
+            estimador.varianza_m2
+            - (inicial**2 + varianza_incremental)
+        )
+        < 1e-9,
+        "suma ruido relativo proporcional a la distancia avanzada",
+    )
+    estimador_esquive = EstimadorPosicionTramo(config)
+    estimador_esquive.reiniciar(5.0)
+    estimador_esquive.predecir(
+        4, 0.5, factor_incertidumbre=config.inflar_incertidumbre_esquive
+    )
+    comprobar(
+        abs(
+            estimador_esquive.varianza_m2
+            - (inicial**2 + config.inflar_incertidumbre_esquive * varianza_incremental)
+        )
+        < 1e-9,
+        "multiplica el ruido durante un esquive/corrección",
     )
     varianza_antes = estimador.varianza_m2
     comprobar(
@@ -3468,8 +3768,47 @@ def test_estimador_posicion_tramo() -> None:
     aplicacion._valorar_llegada_del_tramo(resultado, dados=0, objetivo=10)
     comprobar(
         aplicacion._tramos_completados == 1
+        and 3.0 < aplicacion.estimador_posicion.posicion_m < 4.0
         and not any("Has llegado" in frase for frase in locutor.frases),
-        "la medición visual corrige posición y la señal cierra sin falsear llegada",
+        "corrige con D-d_visual y la señal cierra sin falsear llegada",
+    )
+
+    print("\n[33.1] La ventana adaptativa no cierra sin señal")
+    locutor = LocutorFalso()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    aplicacion.estado = Estado.NAVEGANDO
+    aplicacion.destino = "Baño"
+    aplicacion._zona_cierre_tramo = "Cuarto"
+    aplicacion._distancia_tramo = 5.0
+    aplicacion.estimador_posicion.reiniciar(5.0)
+    aplicacion.estimador_posicion._varianza_m2 = 4.0
+    aplicacion._valorar_llegada_del_tramo(
+        ResultadoVision(), dados=15.0, objetivo=10
+    )
+    comprobar(
+        not any("Aún no veo" in frase for frase in locutor.frases)
+        and aplicacion._tramos_completados == 0,
+        "con σ=2 m todavía no abre una ventana ampliada hasta el 180 %",
+    )
+    aplicacion._valorar_llegada_del_tramo(
+        ResultadoVision(), dados=18.0, objetivo=10
+    )
+    comprobar(
+        any("Aún no veo" in frase for frase in locutor.frases)
+        and aplicacion.estado is Estado.NAVEGANDO
+        and aplicacion._tramos_completados == 0
+        and not any("Has llegado" in frase for frase in locutor.frases),
+        "al alcanzar la ventana sin señal no cierra ni anuncia llegada",
     )
 
 
@@ -3494,6 +3833,7 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
 
     config = dataclasses.replace(
         Configuracion(),
+        usar_puertas=True,
         focal_px=1000.0,
         distancia_mediana_frames=3,
         detecciones_senal_requeridas=1,
@@ -3631,6 +3971,95 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
     )
 
 
+def test_puertas_opcionales() -> None:
+    """Sin usar_puertas no se detecta, guía ni cuenta la clase door."""
+    print("\n[35] Puertas opcionales: la señal basta")
+
+    class ModeloConPuerta:
+        names = {0: "door", 1: "sheep"}
+
+        def __init__(self) -> None:
+            self.boxes = [
+                types.SimpleNamespace(
+                    cls=[0], conf=[0.9], xyxy=[(100, 40, 350, 450)]
+                )
+            ]
+
+        def __call__(self, _frame, **_kwargs):
+            return [types.SimpleNamespace(boxes=self.boxes)]
+
+    modulo_detector = importlib.import_module("guia.vision.detector")
+    modelo = ModeloConPuerta()
+    yolo_anterior = modulo_detector.YOLO
+    modulo_detector.YOLO = lambda *_args, **_kwargs: modelo
+    try:
+        salida = io.StringIO()
+        with redirect_stdout(salida):
+            detector = DetectorVisual(
+                dataclasses.replace(Configuracion(), usar_puertas=False)
+            )
+        resultado = detector.analizar(object())
+    finally:
+        modulo_detector.YOLO = yolo_anterior
+    comprobar(
+        "clase door" not in salida.getvalue()
+        and "focal_px" in salida.getvalue()
+        and resultado.puertas == ()
+        and resultado.detecciones == (),
+        "no exige door al arrancar ni devuelve detecciones de puerta",
+    )
+
+    config = dataclasses.replace(Configuracion(), usar_puertas=False)
+    locutor = LocutorFalso()
+    aplicacion = Aplicacion(
+        config=config,
+        camara=CamaraFalsa(),
+        mpu=MPUFalso(),
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=MicrofonoFalso(),
+        detector=DetectorFalso(),
+        ventana=VentanaFalsa(),
+    )
+    puerta = PuertaVisto(
+        "puerta", (100, 20, 350, 450), 225.0, 430, 250, "centro", 1.0
+    )
+    resultado_puerta = ResultadoVision(puertas=(puerta,))
+    aplicacion._inicio_busqueda = time.monotonic()
+    aplicacion._en_buscar_senal(resultado_puerta)
+    aplicacion._en_cinco_pasos(resultado_puerta)
+    aplicacion._distancia_tramo = 6.0
+    aplicacion.estimador_posicion.reiniciar(6.0)
+    aplicacion._instruccion_actual = Instruccion(
+        Accion.CAMINAR, 10, distancia_m=6.0, puertas_en_tramo=1
+    )
+    aplicacion._aviso_ventana_dado = True
+    aplicacion._en_navegando(resultado_puerta)
+    aplicacion._actualizar_posicion_tramo(
+        resultado_puerta, aplicacion._instruccion_actual, dados=0.0
+    )
+    comprobar(
+        aplicacion._contador_puertas.pasadas == 0
+        and aplicacion.estimador_posicion.posicion_m == 0.0
+        and not any("puerta" in frase.lower() for frase in locutor.frases),
+        "no da instrucciones, no cuenta puertas ni usa su distancia",
+    )
+
+    senal = Senal("Cuarto", LADO_INTERIOR)
+    resultado_senal = ResultadoVision(
+        senal=senal,
+        detecciones=(
+            Deteccion("sheep", 0.9, (250, 100, 390, 300), True, False),
+        ),
+        puertas=(PuertaVisto("puerta", (0, 0, 100, 100), 50, 100, 100, "izquierda"),),
+    )
+    comprobar(
+        aplicacion._senal_en_rango_de_llegada(resultado_senal, senal),
+        "la señal centrada valida sin que una detección door la contenga",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -3663,6 +4092,7 @@ def main() -> int:
         test_rumbo_ignora_balanceo()
         test_sesgo_corregido_en_marcha()
         test_rumbo_resiste_aceleracion_de_pasos()
+        test_avance_proyectado_esquive()
         test_desvio_requiere_confirmacion()
         test_obstaculos_un_aviso_por_encuentro()
         test_pasos_sin_ritmo_se_descartan()
@@ -3671,6 +4101,7 @@ def main() -> int:
         test_giro_compensado()
         test_llegada_por_ventana()
         test_zancada_adaptativa()
+        test_zancada_por_pico_opcional()
         test_detector_de_pasos()
         test_evaluacion_offline_pasos()
         test_registro_sensores_con_aplicacion()
@@ -3678,6 +4109,7 @@ def main() -> int:
         test_odometro_ultrasonico_estable()
         test_estimador_posicion_tramo()
         test_deteccion_y_seguimiento_de_puertas()
+        test_puertas_opcionales()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

@@ -42,7 +42,7 @@ class Zancada:
         """Cierto desde el primer tramo cerrado por la camara."""
         return self._aprendida
 
-    def medir(self, distancia_m: float, pasos: int) -> float | None:
+    def medir(self, distancia_m: float, pasos: float) -> float | None:
         """Actualiza la zancada con un tramo medido.
 
         Devuelve la zancada vigente, o ``None`` si el tramo no sirve

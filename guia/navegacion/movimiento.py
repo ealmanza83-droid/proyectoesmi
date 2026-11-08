@@ -473,6 +473,7 @@ class ContadorPasos:
         self._pico_actual = 0.0
         self._pico_contado = False
         self._picos: deque[float] = deque(maxlen=5)
+        self._picos_por_paso: list[float] = []
         self._media_picos = 0.0
         # Intervalos de los ultimos pasos CONTADOS (los descartados no
         # entran): de ahi sale la cadencia con la que se juzga el
@@ -541,6 +542,7 @@ class ContadorPasos:
                 pico_pendiente, _, _ = self._paso_pendiente
                 self._paso_pendiente = None
                 self._picos.append(pico_pendiente)
+                self._picos_por_paso.append(pico_pendiente)
                 self._media_picos = sum(self._picos) / len(self._picos)
                 self._pasos += 1
                 print(
@@ -579,6 +581,7 @@ class ContadorPasos:
 
     def _contar(self, pico: float, umbral: float, intervalo: float | None) -> None:
         self._pasos += 1
+        self._picos_por_paso.append(pico)
         self._pico_contado = True
         if intervalo is not None:
             self._ritmo.append(intervalo)
@@ -649,6 +652,16 @@ class ContadorPasos:
         """Devuelve los pasos contados hasta ahora."""
         return self._pasos
 
+    @property
+    def picos_por_paso(self) -> tuple[float, ...]:
+        """Picos filtrados (g), en el mismo orden que los pasos contados."""
+        return tuple(self._picos_por_paso)
+
+    @property
+    def media_picos_g(self) -> float:
+        """Media reciente de picos ya finalizados, en g."""
+        return self._media_picos
+
     def reiniciar(self) -> None:
         """Pone el contador en cero.
 
@@ -662,3 +675,4 @@ class ContadorPasos:
         self._en_pico = False
         self._pico_contado = False
         self._rechazos = 0
+        self._picos_por_paso.clear()
