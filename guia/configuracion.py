@@ -172,9 +172,16 @@ class Configuracion:
     variacion_recalculo_filtro_paso_pct: float = 0.05
     # Piso del umbral: por debajo de esto no hay pico que valga como
     # paso (ruido del sensor).  Se mide sobre la senal YA FILTRADA.
-    # Si faltan pasos en casa, bajalo; si cuenta pasos al balancear,
-    # subelo (pruebas/caracterizar_mpu6050.py mide el ruido en reposo).
-    umbral_paso_min_g: float = 0.07
+    # La grabacion real de una caminata (pruebas/caminata.csv) muestra
+    # que los pasos de una marcha SUAVE rinden picos filtrados de solo
+    # 0,05 - 0,10 g (los vigorosos llegan a 0,34 g), mientras que el
+    # ruido filtrado en reposo no pasa de 0,005 - 0,02 g (medido en las
+    # ventanas quietas de la grabacion y con
+    # pruebas/caracterizar_mpu6050.py).  Con el piso viejo de 0,07 g
+    # (diez veces el ruido) se perdia la mayor parte de una marcha
+    # suave: era el subconteo.  Con 0,03 g queda un margen de ~3x sobre
+    # el ruido y entran los pasos suaves.
+    umbral_paso_min_g: float = 0.03
     # Umbral ADAPTATIVO: max(umbral_paso_min_g, factor x media de los
     # ultimos picos CONTADOS).  El 0.45 deja el umbral a la mitad de lo
     # que de verdad produce la marcha de esa persona: si camina suave
@@ -204,6 +211,76 @@ class Configuracion:
     # Tras N descartes seguidos de picos demasiado cercanos se olvida
     # la cadencia y el siguiente pico arranca un ritmo nuevo.
     rechazos_rebasar: int = 3
+    # --- Validacion del paso con la DIRECCION de la aceleracion --------
+    # El contador de pasos no mira la magnitud |a| (invariante a la
+    # orientacion) sino la componente VERTICAL de la aceleracion
+    # (proyectada sobre la gravedad medida).  Al caminar de verdad la
+    # pisada es un rebote vertical acompanado de un balanceo
+    # antero-posterior: la relacion entre la amplitud vertical y la
+    # horizontal queda en una franja caracteristica.  Un movimiento que
+    # no sea una marcha (agitar el equipo de lado a lado, sacudirlo al
+    # azar, o rebotarlo arriba y abajo sin dar pasos) cae FUERA de esa
+    # franja y no cuenta.
+    #
+    # `tau_gravedad_pasos_s`: constante del paso-bajo que estima el
+    # vector "arriba" (la gravedad).  Debe ser mas lenta que el paso
+    # (~1 s) para no confundir el rebote de la pisada con un cambio de
+    # postura.
+    tau_gravedad_pasos_s: float = 1.0
+    # Interruptor de la validacion direccional: en False vuelve al
+    # comportamiento clasico (solo la magnitud oscilante).
+    validar_direccion_pasos: bool = True
+    # Constante del paso-bajo de las ENVOLVENTES (|senal filtrada|) de
+    # la componente vertical y la horizontal: de su cociente sale la
+    # franja de validacion.  0,6 s cubre algo mas de un ciclo de paso.
+    tau_envolvente_paso_s: float = 0.6
+    # Por debajo de esta energia (suma de ambas envolventes) no hay
+    # movimiento claro y la puerta de direccion no veta nada (evita
+    # bloquear el arranque de una marcha muy suave).
+    piso_energia_paso_g: float = 0.02
+    # Franja valida de vertical/horizontal (medida con la grabacion
+    # real pruebas/caminata.csv: los pasos reales dan 0,30 - 0,89; una
+    # marcha en el sitio (botar sin avanzar) da 13 - 16; agitar el
+    # equipo de lado a lado o al azar da 0,20 - 0,25).
+    # Por DEBAJO del piso manda el movimiento horizontal: agitar el
+    # equipo de lado a lado.  Por ENCIMA del techo manda el rebote
+    # puramente vertical: botar/marchar sin componente antero-posterior.
+    # El piso se pone en 0,28: justo entre el maximo de la agitacion
+    # (0,25) y el minimo de una marcha real (0,30), para no vetar los
+    # pasos de una caminata floja.  El techo en 4,0 deja un margen
+    # enorme contra la marcha en el sitio (13 - 16).
+    piso_relacion_vertical_paso: float = 0.28
+    techo_relacion_vertical_paso: float = 4.0
+    # Si no se cuenta ningun pico durante este tiempo, se olvida la
+    # media de picos: el umbral adaptativo vuelve al piso y una marcha
+    # suave DESPUES de una vigorosa no se pierde (era un subconteo).
+    olvido_picos_s: float = 5.0
+    # Ventana maxima de asentamiento del pasa-banda al arrancar el
+    # contador.  El filtro, al primer flanco, responde con una
+    # oscilacion EN BANDA que DECAE: si la entrada es una vibracion
+    # fuera de banda (un temblor a 20 Hz) esa salida transitoria cruza
+    # el umbral y colaria pasos fantasma; si la entrada es una marcha
+    # real, la oscilacion se mantiene.  Por eso, al arrancar, el
+    # detector NO cuenta: sigue los picos y solo acepta el primero
+    # cuando la oscilacion se demuestra SOSTENIDA (ver
+    # ``asentamiento_sostenido_ratio_paso``).  Si no lo hace, a los
+    # ``asentamiento_arranque_paso_s`` se rinde y cuenta con
+    # normalidad (asi una marcha muy floja nunca se bloquea del todo).
+    # Solo aplica al PRIMER tramo de la vida del contador: tras
+    # reiniciar el filtro ya lleva rato asentado y el primer paso
+    # cuenta de inmediato.  1,5 s cubre los ~1,3 s que tarda en decaer
+    # el transitorio de un temblor fuera de banda.
+    asentamiento_arranque_paso_s: float = 1.5
+    # Un pico del calentamiento se acepta como paso (y cierra el
+    # calentamiento) si no es un pico que DECAE: su altura debe valer
+    # al menos esta fraccion del pico MAS ALTO visto en el
+    # calentamiento.  El transitorio de un temblor fuera de banda cae
+    # rapido (el segundo pico vale ~0,4 del primero), asi que nunca los
+    # confirma; una marcha real se mantiene (el segundo pico vale ~0,9
+    # del primero).  Se compara contra el maximo y no contra el pico
+    # anterior para que un pico espurio suelto mas alto que la marcha
+    # no cambie el veredicto.
+    asentamiento_sostenido_ratio_paso: float = 0.7
 
     # ------------------------------------------------------------------
     # Deteccion de caidas (acelerometro)

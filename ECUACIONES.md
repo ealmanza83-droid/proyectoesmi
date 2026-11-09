@@ -258,18 +258,56 @@ transitorio ni pico fantasma. Ojo: el pasa-banda tiene ceros en DC y en
 Nyquist, por eso una oscilación justo a fs/2 no aparece (las pruebas
 usan ciclos de 4 muestras a 10 Hz = 2,5 Hz, y no de 2).
 
+**Validación de la DIRECCIÓN del paso (el acelerómetro como juez, no
+solo la magnitud)**: el detector de picos trabaja sobre la *magnitud*
+`|a|` (la señal con más energía y por tanto la más sensible), pero la
+magnitud no distingue una pisada de un zarandeo, así que cada pico se
+**valida** con la dirección del movimiento. Con la gravedad medida
+`û = g⃗_filtrada/|g⃗_filtrada|` (paso bajo `tau_gravedad_pasos_s`) se
+construye una base ortonormal y se descompone `a⃗` (`_componentes`):
+
+```
+a_vertical      = a⃗ · û                            (rebote de la pisada)
+a_horizontal_1  = a⃗ · ê₁     ê₁ = normalizar(û × k̂) (balanceo)
+a_horizontal_2  = a⃗ · ê₂     ê₂ = û × ê₁
+```
+
+Así el contador es **independiente de cómo va montado el sensor**: la
+proyección sobre la gravedad real vale igual con el módulo plano, de
+canto o girado 90° sobre el eje Y.
+
+Las tres componentes pasan por su pasa-banda y de sus **envolventes**
+(|señal filtrada|, paso bajo `tau_envolvente_paso_s`) sale la
+**relación vertical/horizontal**; un pico solo cuenta si cae en la
+franja física de una marcha (`_marcha_valida`):
+
+```
+relación = envolvente_vertical / envolvente_horizontal
+piso_relacion_vertical_paso (0,28) ≤ relación ≤ techo_relacion_vertical_paso (4,0)
+```
+
+Por debajo del piso manda el movimiento horizontal (agitar de lado);
+por encima del techo un rebote puramente vertical (botar/marchar sin
+avanzar). Si aún no hay energía clara (
+`envolvente_vertical + envolvente_horizontal < piso_energia_paso_g`),
+no se veta: la relación todavía no es significativa.
+
 **Umbral adaptativo** sobre la señal ya filtrada:
 
 ```
 umbral = max(umbral_paso_min_g ; factor_umbral_paso · media_últimos_picos)
-       = max(0,09 g ; 0,45 · media de los ≤5 últimos picos CONTADOS)
+       = max(0,03 g ; 0,45 · media de los ≤5 últimos picos CONTADOS)
 ```
 
 Los picos **contados** alimentan la media al cerrarse el pico (bajar a
 la mitad del umbral), así que el umbral queda a la mitad de lo que de
 verdad produce la marcha de esa persona: si camina suave baja solo —el
-piso de 0,09 g cubre el ruido del sensor—, y si va vigoroso sube, con
-lo que el balanceo y el temblor se quedan fuera.
+piso de 0,03 g cubre el ruido del sensor—, y si va vigoroso sube, con
+lo que el balanceo y el temblor se quedan fuera. El piso se bajó de
+0,09 g a 0,03 g para dejar de **subcontar** las marchas de baja
+amplitud (grabaciones con picos filtrados de apenas 0,03-0,09 g): con
+0,09 g se perdían pasos reales; el mecanismo de asentamiento de abajo
+es ahora el que impide que bajarlo cuele temblores.
 
 **Histéresis (borde)**: un paso cuenta cuando la señal filtrada cruza
 el umbral de abajo hacia arriba, y se rearma al bajar a la mitad — así
@@ -303,6 +341,33 @@ todavía sin cadencia con que juzgarlo.
 cercanos seguidos, la cadencia ya no describe a la persona (cambio de
 paso): se olvida (`_ritmo.clear()`) y el siguiente pico arranca un
 ritmo nuevo.
+
+**Asentamiento del pasa-banda (anti falso positivo de arranque)**: al
+primer flanco el pasa-banda responde con una oscilación **en banda que
+decae**. Si la entrada es una vibración fuera de banda (un temblor a
+20 Hz) esa salida transitoria cruza el umbral y colaría pasos fantasma;
+si es una marcha real, la oscilación **se mantiene**. Por eso, mientras
+el contador no está asentado (`_asentado = False`) **sigue los picos
+pero no los cuenta**. El calentamiento solo se cierra cuando el pico
+en curso demuestra que la oscilación es sostenida:
+
+```
+sostenido = _pico_actual >= asentamiento_sostenido_ratio_paso · max(picos del calentamiento)
+asentamiento_sostenido_ratio_paso = 0,7
+```
+
+Es decir, el pico debe valer al menos el 70 % del **más alto** visto
+durante el calentamiento. Se compara contra el máximo (no contra el pico
+anterior) para que un pico espurio suelto más alto no cambie el
+veredicto. Un transitorio que se apaga cae rápido (el segundo pico vale
+~0,4 del primero) y nunca alcanza ese ratio; una marcha real se mantiene
+(el segundo pico vale ~0,9). Al confirmarse, ese pico cuenta como el
+primer paso y el calentamiento termina. Si no se confirma en
+`asentamiento_arranque_paso_s = 1,5 s`, el detector se rinde y cuenta
+con normalidad (así una marcha muy floja nunca se bloquea del todo).
+El calentamiento solo aplica al **primer** tramo de vida del contador:
+tras `reiniciar` el filtro ya lleva rato asentado y el primer paso
+cuenta de inmediato.
 
 El reloj del contador es la **suma de los `dt`** recibidos (no
 `time.monotonic`): la detección es reproducible en las pruebas y no

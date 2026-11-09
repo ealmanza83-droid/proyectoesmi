@@ -217,15 +217,29 @@ rumbo = 0°). Entre señales, la rotación se acumula con el giroscopio.
 Si la persona se gira y luego pide una ruta, el sistema lo sabe: por eso
 exige la **encarada** antes de arrancar.
 
-### 5.3 Pasos: banda del paso y umbral adaptativo
+### 5.3 Pasos: el acelerómetro valida la dirección
 
 Al caminar, el acelerómetro muestra oscilación con cada pisada, pero
 también gravedad, postura que cambia y balanceo lento. El
 `ContadorPasos` pasa la señal por un **pasa-banda de 0.5 a 5 Hz**
 (biquad RBJ sin scipy): solo queda la frecuencia del paso y, como el
 filtro no tiene entrada en continua, un cambio de postura de golpe no
-genera ningún pico. Sobre esa señal se cruza un **umbral adaptativo**,
-`máx(0.09 g; 0.45 × media de los últimos picos contados)`, con
+genera ningún pico.
+
+Detectar picos no basta: la **magnitud** de la aceleración oscila tanto
+en una pisada como al **zarandear el equipo sin caminar**, así que cada
+pico se **valida con la dirección**. Con la gravedad medida se
+descompone la aceleración en su parte **vertical** (el rebote de la
+pisada) y su parte **horizontal** (el balanceo); de sus envolventes
+sale la relación vertical/horizontal, y un pico solo cuenta si cae en
+la franja de una marcha real (0.28 a 4.0). Por debajo manda el
+movimiento horizontal (agitar de lado a lado); por encima, un rebote
+puramente vertical (marchar en el sitio). Como la proyección usa la
+gravedad real, el conteo **no depende de cómo va montado el sensor**
+(plano, de canto o girado 90°).
+
+Sobre la señal filtrada se cruza un **umbral adaptativo**,
+`máx(0.03 g; 0.45 × media de los últimos picos contados)`, con
 histéresis (hay que bajar a la mitad para rearmar) y un tiempo
 refractario de 0.18 s para no contar dos veces el mismo pisón. El
 umbral se mantiene solo, a la mitad de lo que de verdad produce la
@@ -235,6 +249,13 @@ del intervalo mediano); los cambios de ritmo se aceptan. Tras una pausa
 superior a 1.5 s, el primer pico queda pendiente: se acredita junto con
 el siguiente si confirma que la marcha se reanudó; un movimiento aislado
 no suma pasos. Tras tres picos demasiado cercanos se re-basela el ritmo.
+
+**Al arrancar** el pasa-banda responde con una oscilación en banda que
+**decae** (un temblor a 20 Hz la dispara) o **se mantiene** (una marcha
+real). Por eso, durante los primeros 1.5 s el contador sigue los picos
+pero no los cuenta hasta confirmar que la oscilación es **sostenida**
+(no cae respecto al pico más alto visto); así un temblor de arranque no
+cuela pasos fantasma.
 
 ### 5.4 Línea recta: solo cuentan los pasos rectos
 
@@ -528,11 +549,14 @@ sensor), y verifican el comportamiento completo. Ejemplos:
     haya medida; la EMA se actualiza solo con el cierre verificado por
     la cámara (el de 130 % no mide nada) y el plan siguiente calcula
     `distancia / zancada`.
-29. **Banda del paso y cadencia adaptable**: marcha lenta (1 s/paso),
-    rápida (0,25 s) y suave (0,12 g) cuentan sin tocar la
+29. **Banda del paso, dirección y cadencia adaptable**: marcha lenta
+    (1 s/paso), rápida (0,25 s) y suave (0,12 g) cuentan sin tocar la
     configuración; los cambios de ritmo se aceptan, el temblor de
     20 Hz (fuera de banda) no cuenta y los picos demasiado cercanos se
-    descartan para evitar dobles conteos.
+    descartan para evitar dobles conteos. Además, **marchar en el sitio**
+    (rebote puramente vertical) y **agitar el equipo de lado a lado**
+    cuentan 0, y la **misma marcha con el sensor girado 90°** cuenta
+    igual: el conteo no depende del montaje.
 30. **Evaluación offline**: un CSV registrado con la aplicación cerrada
     se reproduce con el mismo `ContadorPasos`; la prueba verifica que
     cuenta y calcula el error porcentual frente al conteo manual.
@@ -662,7 +686,9 @@ Todo umbral vive en `guia/configuracion.py`:
 | Cuánto giro cuenta como desvío | `desvio_maximo_grados = 35` |
 | Confirmación que debe durar el desvío antes de avisar | `confirmacion_desvio_s = 1.5` |
 | Histéresis de liberación del aviso | `liberacion_desvio_factor = 0.6` |
-| Delta de aceleración que vale como paso | `umbral_paso_min_g = 0.09` (piso) / `factor_umbral_paso = 0.45` (adaptativo) |
+| Delta de aceleración que vale como paso | `umbral_paso_min_g = 0.03` (piso) / `factor_umbral_paso = 0.45` (adaptativo) |
+| Franja vertical/horizontal de la marcha | `piso_relacion_vertical_paso = 0.28` / `techo_relacion_vertical_paso = 4.0` |
+| Asentamiento del pasa-banda al arrancar | `asentamiento_arranque_paso_s = 1.5` / `asentamiento_sostenido_ratio_paso = 0.7` |
 | Banda del paso (pasa-banda) | `frecuencia_paso_min_hz = 0.5` / `frecuencia_paso_max_hz = 5.0` |
 | Jitter permitido antes de rediseñar el filtro | `variacion_recalculo_filtro_paso_pct = 0.05` (5 %, evita reinicios por variaciones de I²C) |
 | Cadencia: intervalo mínimo como fracción de la mediana / mínimos para juzgar | `1 - cadencia_tolerancia = 0.30` / `cadencia_intervalos_minimos = 3` |
