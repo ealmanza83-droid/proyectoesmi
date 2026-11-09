@@ -286,13 +286,11 @@ class Configuracion:
     #   ``ventana_llegada_fin`` (130 %), el tramo se da por completado
     #   (re-localizacion verificada: nunca se anuncia una llegada sin
     #   verla);
-    # * si se pasa del 130 % sin ver la senal, los tramos intermedios
-    #   siguen el flujo existente; en el tramo final, una lectura
-    #   ultrasónica por encima del límite de proximidad mantiene la
-    #   aproximación lenta. Una señal centrada no exige una franja
-    #   ultrasónica exacta para cerrar el tramo.
+    # * si se alcanzan los pasos previstos (100 %) sin ver la señal frontal,
+    #   se detiene la marcha para buscar la señal hacia el costado de la ruta;
+    #   no se prolonga la caminata más allá de los pasos esperados.
     ventana_llegada_inicio: float = 0.70
-    ventana_llegada_fin: float = 1.30
+    ventana_llegada_fin: float = 1.00
     # Adelanta el aviso de frenado según la velocidad estimada por la
     # cadencia reciente y una distancia de reacción + desaceleración.
     # El adelanto se limita para no pedir que reduzca el paso demasiado

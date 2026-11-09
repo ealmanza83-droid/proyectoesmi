@@ -1884,12 +1884,12 @@ class Aplicacion:
     def _senal_en_rango_de_llegada(
         self, resultado: ResultadoVision, senal: Senal
     ) -> bool:
-        """Valida señal centrada y camino frontal libre.
+        """Valida que la señal esté reconocida y el camino frontal libre.
 
         El ultrasonido es una salvaguarda de proximidad, no un punto de
-        llegada preciso: puede medir una pared u obstáculo detrás de la
-        señal. La señal interior confirmada por cámara da la referencia;
-        solo se bloquea por obstáculo frontal o por distancia insegura.
+        llegada preciso: solo se bloquea por obstáculo frontal o por
+        distancia insegura. No se exige centrado exacto si la señal ya fue
+        reconocida por la cámara.
         """
         distancia = self._distancia_puerta_estable_cm
         if (
@@ -1918,22 +1918,6 @@ class Aplicacion:
         if deteccion_senal is None:
             return False
 
-        centro_senal = deteccion_senal.centro_x_px / self.config.ancho
-        if not (
-            self.config.guia_senal_centro_min
-            <= centro_senal
-            <= self.config.guia_senal_centro_max
-        ):
-            return False
-
-        if resultado.puertas:
-            x1, _, x2, _ = deteccion_senal.caja
-            centro_x = (x1 + x2) / 2
-            if not any(
-                puerta.caja[0] <= centro_x <= puerta.caja[2]
-                for puerta in resultado.puertas
-            ):
-                return False
         return True
 
     def _deteccion_senal_cierre(
@@ -1959,7 +1943,7 @@ class Aplicacion:
     def _pedir_acercamiento_a_senal(
         self, resultado: ResultadoVision, senal: Senal
     ) -> None:
-        """Explica por qué aún no puede cerrar el tramo por cámara."""
+        """Explica por qué aún no puede cerrar el tramo si hay bloqueo."""
         distancia = self._distancia_puerta_estable_cm
         obstaculo_frontal = any(
             obstaculo.lado == EN_MEDIO_DEL_CAMINO
@@ -1980,26 +1964,7 @@ class Aplicacion:
                 "Espera un momento; estoy comprobando que el camino esté libre."
             )
         else:
-            deteccion = self._deteccion_senal_cierre(resultado)
-            if deteccion is None:
-                detalle = "Mantén la señal orientadora a la vista."
-            else:
-                centro = deteccion.centro_x_px / self.config.ancho
-                if centro < self.config.guia_senal_centro_min:
-                    detalle = (
-                        "La señal está a la izquierda. Gira despacio a la "
-                        "izquierda hasta centrarla."
-                    )
-                elif centro > self.config.guia_senal_centro_max:
-                    detalle = (
-                        "La señal está a la derecha. Gira despacio a la "
-                        "derecha hasta centrarla."
-                    )
-                else:
-                    detalle = (
-                        "La señal está enfrente. No hace falta buscar una "
-                        "distancia exacta; sigue despacio."
-                    )
+            detalle = "Señal orientadora reconocida."
 
         self._advertecer(
             f"distancia-senal:{senal.zona}",

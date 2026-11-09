@@ -3056,13 +3056,14 @@ def test_zancada_adaptativa() -> None:
     ultimos = [i for i in planificador.ultimo_plan if i.es_pasos]
     larga = ultimos[-1]
     zancada_medida = planificador.zancadas[-1]
+    distancia_sala_bano = TRAMOS_DEMO[("Sala", "Baño")].distancia_m
     comprobar(
-        larga.cantidad == int(19.7 / zancada_medida + 0.5),
+        larga.cantidad == int(distancia_sala_bano / zancada_medida + 0.5),
         "el tramo largo pasa a calcular distancia / zancada",
     )
     comprobar(
         larga.cantidad != TRAMOS_DEMO[("Sala", "Baño")].pasos,
-        "y ya no es el conteo viejo del mapa (31 pasos)",
+        f"y ya no es el conteo viejo del mapa ({TRAMOS_DEMO[('Sala', 'Baño')].pasos} pasos)",
     )
 
 
@@ -3590,7 +3591,7 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
         "el conteo de puerta corrige avance una vez sin acumular duplicados",
     )
     app_conteo._valorar_llegada_del_tramo(
-        resultado_puerta, dados=10, objetivo=10
+        resultado_puerta, dados=8, objetivo=10
     )
     comprobar(
         app_conteo._tramos_completados == 0

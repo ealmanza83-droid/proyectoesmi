@@ -138,12 +138,12 @@ _GIRO_ESPEJO: dict[str, str] = {
 # Giro con el que hay que encarar la senal de la puerta (ver
 # PlanificadorRutas.lado_encarada).  Las imagenes van impresas del
 # lado DERECHO del pasillo: recorriendo la casa en el sentido en que
-# se midieron los tramos la persona gira a la IZQUIERDA para poner la
+# se midieron los tramos la persona gira a la DERECHA para poner la
 # imagen enfrente, y en el sentido inverso (por ejemplo ir del Bano a
 # la Sala, donde la imagen le quedaria a su izquierda) la indicacion
-# se invierte y hay que girar a la DERECHA.
-GIRO_SENAL_NORMAL = "izquierda"
-GIRO_SENAL_INVERSO = "derecha"
+# se invierte y hay que girar a la IZQUIERDA.
+GIRO_SENAL_NORMAL = "derecha"
+GIRO_SENAL_INVERSO = "izquierda"
 
 
 class PlanificadorRutas:
