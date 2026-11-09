@@ -590,6 +590,21 @@ class Aplicacion:
         """
         return self.zancada.metros if self.zancada.aprendida else None
 
+    def _objetivo_pasos(self, instruccion: Instruccion) -> int:
+        """Pasos que quedan para el tramo en curso.
+
+        Se calculan desde la distancia del tramo y la zancada aprendida
+        (``round(distancia / zancada)``): es la fuente fiable del objetivo
+        de avance, y de ahi salen los pasos que se anuncian y con los que
+        se evalua la ventana de llegada.  Mientras la zancada no se haya
+        aprendido con un tramo cerrado por la camara (que exige ver la
+        senal interior con la camara), cae al ``cantidad`` del mapa (la
+        semilla con la que se midio la casa).
+        """
+        if self.zancada.aprendida and instruccion.distancia_m > 0:
+            return max(1, int(instruccion.distancia_m / self.zancada.metros + 0.5))
+        return instruccion.cantidad
+
     def _asignar_destino(self, destino: str) -> None:
         """Valida el destino pedido y arranca la ruta si existe.
 
@@ -1414,12 +1429,13 @@ class Aplicacion:
                 self._instruccion_actual = None
 
         elif instruccion.es_pasos:
+            objetivo = self._objetivo_pasos(instruccion)
             dados = self._creditar_pasos(resultado)
-            self._etiqueta = f"Caminando: {dados}/{instruccion.cantidad} pasos"
+            self._etiqueta = f"Caminando: {dados}/{objetivo} pasos"
             self._actualizar_odometro_ultrasonico(instruccion)
             self._actualizar_posicion_tramo(resultado, instruccion, dados)
             self._valorar_llegada_del_tramo(
-                resultado, dados, instruccion.cantidad
+                resultado, dados, objetivo
             )
             if self._instruccion_actual is None:
                 return
@@ -2221,4 +2237,4 @@ class Aplicacion:
         elif instruccion.accion is Accion.GIRAR_IZQUIERDA:
             self._hablar(f"Gira a la izquierda {instruccion.cantidad} grados.")
         elif instruccion.accion is Accion.CAMINAR:
-            self._hablar(f"Camina {instruccion.cantidad} pasos.")
+            self._hablar(f"Camina {self._objetivo_pasos(instruccion)} pasos.")
