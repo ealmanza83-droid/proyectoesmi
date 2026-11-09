@@ -192,14 +192,16 @@ class Configuracion:
     # (diez veces el ruido) se perdia la mayor parte de una marcha
     # suave: era el subconteo.  Con 0,03 g queda un margen de ~3x sobre
     # el ruido y entran los pasos suaves.
-    umbral_paso_min_g: float = 0.03
+    # umbral_paso_min_g: float = 0.03
+    umbral_paso_min_g: float = 0.038        # Antes 0.03
     # Umbral ADAPTATIVO: max(umbral_paso_min_g, factor x media de los
     # ultimos picos CONTADOS).  El 0.45 deja el umbral a la mitad de lo
     # que de verdad produce la marcha de esa persona: si camina suave
     # el umbral baja solo, y si va vigoroso sube (el ruido se queda
     # fuera).  Sin esto un umbral fijo o bien perdia los pasos suaves
     # o bien contaba el balanceo.
-    factor_umbral_paso: float = 0.45
+    # factor_umbral_paso: float = 0.45
+    factor_umbral_paso: float = 0.50        # Antes 0.45 (0.55 * 0.07g = ~0.038g - 0.045g)
     # Periodo refractario: intervalo minimo entre dos pasos contados
     # (contra el doble conteo de un mismo pico).  El ritmo real de la
     # persona es un paso cada ~0,25 a 0,5 s, asi que este valor tiene
@@ -217,7 +219,8 @@ class Configuracion:
     # mas lentas o mas rapidas son pasos validos; las pausas largas se
     # filtran con intervalo_paso_max_s. La tolerancia deja pasar
     # intervalos hasta un 62 % mas cortos que la mediana.
-    cadencia_tolerancia: float = 0.62
+    #cadencia_tolerancia: float = 0.62
+    cadencia_tolerancia: float = 0.45       # Antes 0.62
     cadencia_intervalos_minimos: int = 3
     # Tras N descartes seguidos de picos demasiado cercanos se olvida
     # la cadencia y el siguiente pico arranca un ritmo nuevo.
