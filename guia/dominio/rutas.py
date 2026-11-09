@@ -104,17 +104,17 @@ class Instruccion:
 #    ("Sala", "Baño"): TramoRuta(pasos=45, giros=("izquierda",)),
 #}
 
-#TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-#    ("Inicio", "Cuarto"): TramoRuta(pasos=11, giros=("izquierda",), distancia_m=6.1),
-#    ("Cuarto", "Sala"): TramoRuta(pasos=8, giros=("izquierda",), distancia_m=4.4),
-#    ("Sala", "Baño"): TramoRuta(pasos=31, giros=("izquierda",), distancia_m=19.7),
-#}
-
 TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
-    ("Inicio", "Cuarto"): TramoRuta(pasos=8, giros=("izquierda",), distancia_m=3.2),
-    ("Cuarto", "Sala"): TramoRuta(pasos=8, giros=("izquierda",), distancia_m=3.1),
-    ("Sala", "Baño"): TramoRuta(pasos=6, giros=("izquierda",), distancia_m=2.2),
+    ("Inicio", "Cuarto"): TramoRuta(pasos=11, giros=("izquierda",), distancia_m=6.1),
+    ("Cuarto", "Sala"): TramoRuta(pasos=8, giros=("izquierda",), distancia_m=4.4),
+    ("Sala", "Baño"): TramoRuta(pasos=31, giros=("izquierda",), distancia_m=19.7),
 }
+
+#TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
+#    ("Inicio", "Cuarto"): TramoRuta(pasos=8, giros=("izquierda",), distancia_m=3.2),
+#    ("Cuarto", "Sala"): TramoRuta(pasos=8, giros=("izquierda",), distancia_m=3.1),
+#    ("Sala", "Baño"): TramoRuta(pasos=6, giros=("izquierda",), distancia_m=2.2),
+#}
 
 #TRAMOS_DEMO: dict[tuple[str, str], TramoRuta] = {
 #    ("Inicio", "Cuarto"): TramoRuta(pasos=7, giros=("izquierda",)),
