@@ -876,17 +876,18 @@ class Aplicacion:
                 )
             return False
 
-        if senal.zona == self.destino and not self._senal_en_rango_de_llegada(
-            resultado, senal
-        ):
-            self._pedir_acercamiento_a_senal(resultado, senal)
-            return False
+        if senal.zona == self.destino:
+            if not self._senal_en_rango_de_llegada(resultado, senal):
+                return False
+            self.rumbo.anclar()
+            self._rumbo_al_caminar = self.rumbo.grados
+            self.ubicacion = senal.zona
+            self.lado_puerta = senal.lado
+            print("LLEGADA verificada:", senal.zona)
+            self._anunciar_llegada()
+            return True
 
-        if (
-            senal.zona == self._zona_cierre_tramo
-            and not self._senal_en_rango_de_llegada(resultado, senal)
-        ):
-            self._pedir_acercamiento_a_senal(resultado, senal)
+        if senal.zona == self._zona_cierre_tramo:
             return False
 
         # Senal interior: la persona esta en esa zona (o muy cerca de
@@ -895,11 +896,6 @@ class Aplicacion:
         self._rumbo_al_caminar = self.rumbo.grados
         self.ubicacion = senal.zona
         self.lado_puerta = senal.lado
-
-        if senal.zona == self.destino:
-            print("LLEGADA verificada:", senal.zona)
-            self._anunciar_llegada()
-            return True
 
         indice = (
             self._camino.index(senal.zona) if senal.zona in self._camino else -1
@@ -971,7 +967,7 @@ class Aplicacion:
         # y en el de vuelta a la izquierda.
         lado = self._planificador.lado_encarada(self.ubicacion, self.destino)
         self._hablar(
-            f"Para confirmar la llegada, gira despacio a la {lado} hasta "
+            f"Para confirmar la llegada, gira 90 grados a la {lado} hasta "
             f"encontrar la señal de {self.destino}."
         )
 
@@ -982,9 +978,6 @@ class Aplicacion:
 
         if senal is not None and senal.zona == self.destino:
             if senal.lado == LADO_INTERIOR:
-                if not self._senal_en_rango_de_llegada(resultado, senal):
-                    self._pedir_acercamiento_a_senal(resultado, senal)
-                    return
                 print("LLEGADA verificada:", senal.zona)
                 self._anunciar_llegada()
                 return
@@ -1020,7 +1013,7 @@ class Aplicacion:
             )
             self._hablar(
                 f"Todavía no veo la señal de {self.destino}. Gira "
-                f"despacio a la {lado} hasta encontrarla."
+                f"90 grados a la {lado} hasta encontrarla."
             )
 
     def _anunciar_llegada(self) -> None:
@@ -1517,15 +1510,6 @@ class Aplicacion:
         senal = resultado.senal
 
         if (
-            senal is not None
-            and senal.lado == LADO_INTERIOR
-            and senal.zona == self._zona_cierre_tramo
-            and not self._senal_en_rango_de_llegada(resultado, senal)
-        ):
-            self._pedir_acercamiento_a_senal(resultado, senal)
-            return
-
-        if (
             fraccion_avance >= inicio
             and senal is not None
             and senal.lado == LADO_INTERIOR
@@ -1554,55 +1538,16 @@ class Aplicacion:
                 senal is not None
                 and senal.lado == LADO_INTERIOR
                 and senal.zona == self.destino
-                and not self._senal_en_rango_de_llegada(resultado, senal)
             ):
-                self._pedir_acercamiento_a_senal(resultado, senal)
+                print("LLEGADA verificada:", senal.zona)
+                self._anunciar_llegada()
                 return
-            if (
-                self._zona_cierre_tramo == self.destino
-                and senal is None
-                and self._distancia_puerta_estable_cm is not None
-            ):
-                if any(
-                    obstaculo.lado == EN_MEDIO_DEL_CAMINO
-                    for obstaculo in resultado.obstaculos
-                ):
-                    return
-                if (
-                    self._distancia_puerta_estable_cm
-                    > self.config.distancia_puerta_max_cm
-                ):
-                    self._advertecer(
-                        f"busqueda-distancia:{self.destino}",
-                        "Aún no veo la señal. Avanza despacio hacia la puerta; "
-                        "te indicaré cuándo detenerte para buscarla.",
-                    )
-                    return
-                if (
-                    self._distancia_puerta_estable_cm
-                    < self.config.distancia_puerta_min_cm
-                ):
-                    self._hablar(
-                        "Detente. Estás a menos de "
-                        f"{self.config.distancia_puerta_min_cm:.0f} "
-                        "centímetros. Retrocede despacio y buscaré la señal."
-                    )
-                    self._empezar_a_confirmar_llegada()
-                    return
-                self._hablar(
-                    "Detente. Estás cerca de la puerta. Buscaré la señal "
-                    f"interior de {self.destino}."
-                )
-                self._empezar_a_confirmar_llegada()
-                return
+
             print(
                 f"TRAMO: {dados} pasos acreditados de {objetivo} "
                 "esperados sin ver la senal de cierre"
             )
-            self._hablar(
-                "Detente. Ya recorriste los pasos previstos, pero todavía "
-                "no confirmé la señal. Voy a buscarla."
-            )
+            self._hablar("Detente. Posiblemente has llegado.")
             self._cerrar_tramo(dados)
 
     def _umbral_aviso_llegada(self) -> float:
@@ -1951,11 +1896,6 @@ class Aplicacion:
         )
         if obstaculo_frontal:
             detalle = "Detente; hay un obstáculo delante."
-        elif (
-            distancia is not None
-            and distancia < self.config.distancia_puerta_min_cm
-        ):
-            detalle = "Detente y aléjate un poco; estás demasiado cerca."
         elif (
             time.monotonic() - self._ultima_alerta_obstaculo_en
             < self.config.espera_llegada_tras_obstaculo_s

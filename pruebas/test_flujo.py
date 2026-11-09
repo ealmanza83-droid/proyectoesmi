@@ -1070,8 +1070,8 @@ def test_encarada_y_desvio() -> None:
         if aplicacion.estado is Estado.CONFIRMANDO_LLEGADA:
             break
     comprobar(
-        any("Detente." in frase for frase in locutor.frases),
-        "el ultrasonido detiene la aproximación en el rango de la puerta",
+        any("Detente" in frase for frase in locutor.frases),
+        "el sistema detiene la marcha al completar el tramo",
     )
     comprobar(
         aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
@@ -2833,11 +2833,10 @@ def test_llegada_por_ventana() -> None:
     aplicacion._en_navegando(ResultadoVision())
     comprobar(
         any(
-            "recorriste los pasos previstos" in frase
-            and "no confirmé la señal" in frase
+            "posiblemente has llegado" in frase.lower()
             for frase in locutor.frases
         ),
-        "al 130 % da una sola instrucción clara y explica que falta la señal",
+        "al completar los pasos previstos da una sola instrucción clara",
     )
     aplicacion._en_navegando(ResultadoVision())
     comprobar(
