@@ -439,55 +439,109 @@ class DetectorVisual:
 
 
 class DetectorPuertasVisual:
-    """Detecta puertas con un modelo YOLO-World (vocabulario abierto).
+    """Detecta puertas con un modelo dedicado.
 
-    Modelo PREENTRENADO (por ejemplo ``yolov8s-worldv2.pt``): no hay que
-    entrenar nada.  El prompt de texto (por defecto ``"puerta"``) define la
-    clase a detectar en inference time, de modo que el mismo checkpoint sirve
-    para cualquier objeto suelto que se quiera buscar por nombre.  Devuelve
-    un ``ResultadoVision`` con las puertas del frame para que la navegacion
-    las consuma igual que las del detector general (senales + obstaculos).
+    Dos backends posibles:
+
+    1. **YOLO-World** (zero-shot): ``modelo_yolo`` se deja en ``None`` y
+       ``ruta_modelo`` apunta a un checkpoint tipo ``yolov8s-worldv2.pt``.
+       El prompt de texto (por defecto ``"puerta"``) define la clase a
+       buscar en inference time: pesos preentrenados, sin entrenar.
+    2. **YOLO con clases preentrenadas** (sin entrenar): se pasa una
+       instancia de ``ultralytics.YOLO`` con un modelo que ya detecta
+       puertas, por ejemplo los pesos preentrenados de puertas de la
+       comunidad (DoorDetect: clases ``door``, ``handle``, ``cabinet
+       door``, ``refrigerator door``).  Con ``modelo_yolo`` no hace falta
+       el prompt: el modelo ya nacio con su vocabulario de puertas.
     """
 
-    def __init__(self, config: Configuracion, ruta_modelo: str, prompt: str = "puerta"):
+    def __init__(
+        self,
+        config: Configuracion,
+        ruta_modelo: str,
+        prompt: str = "puerta",
+        modelo_yolo: YOLO | None = None,
+    ):
         self._config = config
-        self._modelo = YOLOWorld(ruta_modelo)
         self._prompt = prompt
-        # YOLO-World: el prompt de texto define la clase en inference time y
-        # viaja como embeddings (txt_feats).  Se fija con set_classes; NO se
-        # usa el kwarg ``classes`` de predict (eso es para modelos con indices
-        # numericos de clase, y con texto rompe la NMS: "too many dimensions").
-        self._modelo.set_classes([prompt])
+        self._puertas = PUERTAS
+        self._backend_yolo = modelo_yolo is not None
+        if self._backend_yolo:
+            self._modelo_yolo = modelo_yolo
+            self._modelo_world = None
+        else:
+            self._modelo_yolo = None
+            self._modelo_world = YOLOWorld(ruta_modelo)
+            # YOLO-World: el prompt de texto define la clase en inference
+            # time y viaja como embeddings (txt_feats).  Se fija con
+            # set_classes; NO se usa el kwarg ``classes`` de predict (eso es
+            # para modelos con indices numericos de clase, y con texto rompe
+            # la NMS: "too many dimensions").
+            self._modelo_world.set_classes([prompt])
 
     def analizar(self, frame) -> ResultadoVision:
-        resultados = self._modelo.predict(
-            frame,
-            conf=self._config.confianza_minima,
-            verbose=False,
-        )
         puertas: list[PuertaVisto] = []
-        for resultado in resultados:
-            cajas = resultado.boxes
-            if cajas is None or len(cajas) == 0:
-                continue
-            xyxy = cajas.xyxy[0]
-            x1, y1, x2, y2 = (int(round(float(v))) for v in xyxy)
-            puertas.append(
-                PuertaVisto(
-                    nombre=self._prompt,
-                    caja=(x1, y1, x2, y2),
-                    centro_x_px=(x1 + x2) / 2,
-                    alto_px=max(0, y2 - y1),
-                    ancho_px=max(0, x2 - x1),
-                    posicion=posicion_del_centro(
-                        (x1 + x2) / 2,
-                        ancho=self._config.ancho,
-                        minimo=self._config.obstaculo_centro_min,
-                        maximo=self._config.obstaculo_centro_max,
-                    ),
-                    distancia_m=None,
+        if self._backend_yolo:
+            # Backend YOLO preentrenado: las clases vienen del modelo y solo
+            # aceptamos las que el catalogo reconoce como puertas.
+            modelo = self._modelo_yolo
+            resultados = list(modelo(frame, conf=self._config.confianza_minima, verbose=False))
+            clases = modelo.names
+            nombres = list(clases.values()) if isinstance(clases, dict) else list(clases)
+            for resultado in resultados:
+                cajas = resultado.boxes
+                if cajas is None:
+                    continue
+                for caja in cajas:
+                    clase_id = int(caja.cls[0])
+                    if clase_id >= len(nombres):
+                        continue
+                    nombre = nombres[clase_id]
+                    if nombre not in self._puertas:
+                        continue
+                    x1, y1, x2, y2 = map(int, caja.xyxy[0])
+                    puertas.append(
+                        PuertaVisto(
+                            nombre=self._puertas[nombre],
+                            caja=(x1, y1, x2, y2),
+                            centro_x_px=(x1 + x2) / 2,
+                            alto_px=max(0, y2 - y1),
+                            ancho_px=max(0, x2 - x1),
+                            posicion=posicion_del_centro(
+                                (x1 + x2) / 2,
+                                ancho=self._config.ancho,
+                                minimo=self._config.obstaculo_centro_min,
+                                maximo=self._config.obstaculo_centro_max,
+                            ),
+                            distancia_m=None,
+                        )
+                    )
+        else:
+            # Backend YOLO-World (zero-shot con prompt de texto).
+            modelo = self._modelo_world
+            resultados = list(modelo.predict(frame, conf=self._config.confianza_minima, verbose=False))
+            for resultado in resultados:
+                cajas = resultado.boxes
+                if cajas is None or len(cajas) == 0:
+                    continue
+                xyxy = cajas.xyxy[0]
+                x1, y1, x2, y2 = (int(round(float(v))) for v in xyxy)
+                puertas.append(
+                    PuertaVisto(
+                        nombre=self._puertas[self._prompt],
+                        caja=(x1, y1, x2, y2),
+                        centro_x_px=(x1 + x2) / 2,
+                        alto_px=max(0, y2 - y1),
+                        ancho_px=max(0, x2 - x1),
+                        posicion=posicion_del_centro(
+                            (x1 + x2) / 2,
+                            ancho=self._config.ancho,
+                            minimo=self._config.obstaculo_centro_min,
+                            maximo=self._config.obstaculo_centro_max,
+                        ),
+                        distancia_m=None,
+                    )
                 )
-            )
         return ResultadoVision(
             detecciones=(),
             senal=None,

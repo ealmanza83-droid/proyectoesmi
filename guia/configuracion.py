@@ -85,6 +85,12 @@ class Configuracion:
     # Modelo PREENTRENADO para puertas (YOLO-World, open vocabulary):
     # yolov8s-worldv2.pt + prompt "puerta" en inference time.
     ruta_modelo_puerta: Path | None = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolov8s-worldv2.pt"
+    # Modelo OPCIONAL dedicado solo a puertas con YOLO PREENTRENADO (sin
+    # entrenar): pesos que ya incluyen la clase "door" (por ejemplo los
+    # pesos de puertas de la comunidad / DoorDetect: clases door, handle,
+    # cabinet door, refrigerator door).  None -> se usa el backend de
+    # YOLO-World (``ruta_modelo_puerta``).
+    ruta_modelo_puerta_yolo: Path | None = None
 
     # ------------------------------------------------------------------
     # Voz: que manda y que espera

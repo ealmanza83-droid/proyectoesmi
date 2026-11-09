@@ -57,6 +57,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+from ultralytics import YOLO
+
 from .audio.alarma import ReproductorBeep
 from .audio.locutor import Locutor
 from .audio.microfono import Microfono, ModoMicrofono
@@ -159,16 +161,27 @@ class Aplicacion:
         self.locutor = locutor
         self.microfono = microfono
         self.detector = detector
-        # Modelo OPCIONAL dedicado solo a puertas (``ruta_modelo_puerta``):
-        # se corre en paralelo al detector general (senales + obstaculos)
-        # y solo se usan sus detecciones de puerta.  Vacio -> None y se
-        # sigue usando el detector general para todo.  El dedicado usa
-        # YOLO-World (prompt de texto): pesos preentrenados, sin entrenar.
-        self.detector_puertas: DetectorPuertasVisual | None = (
-            DetectorPuertasVisual(self.config, str(self.config.ruta_modelo_puerta))
-            if self.config.ruta_modelo_puerta
-            else None
-        )
+        # Modelo OPCIONAL dedicado solo a puertas (``ruta_modelo_puerta_yolo``
+        # o ``ruta_modelo_puerta``).  Se corre en paralelo al detector general
+        # (senales + obstaculos) y solo se usan sus detecciones de puerta.
+        # Backend 1: YOLO-World (zero-shot, prompt de texto) con
+        # ``ruta_modelo_puerta`` (p.ej. ``yolov8s-worldv2.pt``).
+        # Backend 2: YOLO con clases preentrenadas (sin entrenar) con
+        # ``ruta_modelo_puerta_yolo`` (p.ej. pesos de puertas como DoorDetect,
+        # que ya incluyen la clase ``door``).
+        # Vacio -> None y se sigue usando el detector general para todo.
+        self.detector_puertas: DetectorPuertasVisual | None = None
+        if self.config.ruta_modelo_puerta_yolo is not None:
+            self.detector_puertas = DetectorPuertasVisual(
+                self.config,
+                str(self.config.ruta_modelo_puerta_yolo),
+                modelo_yolo=YOLO(str(self.config.ruta_modelo_puerta_yolo)),
+            )
+        elif self.config.ruta_modelo_puerta is not None:
+            self.detector_puertas = DetectorPuertasVisual(
+                self.config,
+                str(self.config.ruta_modelo_puerta),
+            )
 
         # Pitidos de proximidad: se silencian solos mientras la voz habla
         # (``locutor.hablando`` es el evento compartido entre ambos hilos).
