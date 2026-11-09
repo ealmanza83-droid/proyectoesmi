@@ -453,11 +453,15 @@ class DetectorPuertasVisual:
         self._config = config
         self._modelo = YOLOWorld(ruta_modelo)
         self._prompt = prompt
+        # YOLO-World: el prompt de texto define la clase en inference time y
+        # viaja como embeddings (txt_feats).  Se fija con set_classes; NO se
+        # usa el kwarg ``classes`` de predict (eso es para modelos con indices
+        # numericos de clase, y con texto rompe la NMS: "too many dimensions").
+        self._modelo.set_classes([prompt])
 
     def analizar(self, frame) -> ResultadoVision:
         resultados = self._modelo.predict(
             frame,
-            classes=[self._prompt],
             conf=self._config.confianza_minima,
             verbose=False,
         )
