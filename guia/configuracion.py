@@ -78,6 +78,11 @@ class Configuracion:
     distancia_puerta_max_cm: float = 140.0
     espera_llegada_tras_obstaculo_s: float = 4.0
     ruta_modelo: Path = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolo11n_ncnn_model"
+    # Modelo OPCIONAL dedicado solo a la deteccion de puertas.  Vacio
+    # (None) usa el mismo ``ruta_modelo`` (senales + obstaculos).  Se
+    # apunta a un checkpoint que incluya la clase ``door`` para no
+    # mezclar el modelo general con el especifico de puertas.
+    ruta_modelo_puerta: Path | None = None
 
     # ------------------------------------------------------------------
     # Voz: que manda y que espera

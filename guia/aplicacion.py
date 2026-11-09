@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import queue
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -157,6 +158,15 @@ class Aplicacion:
         self.locutor = locutor
         self.microfono = microfono
         self.detector = detector
+        # Modelo OPCIONAL dedicado solo a puertas (``ruta_modelo_puerta``):
+        # se corre en paralelo al detector general (senales + obstaculos)
+        # y solo se usan sus detecciones de puerta.  Vacio -> None y se
+        # sigue usando el detector general para todo.
+        self.detector_puertas: DetectorVisual | None = (
+            DetectorVisual(self.config, ruta_modelo=self.config.ruta_modelo_puerta)
+            if self.config.ruta_modelo_puerta
+            else None
+        )
 
         # Pitidos de proximidad: se silencian solos mientras la voz habla
         # (``locutor.hablando`` es el evento compartido entre ambos hilos).
@@ -381,6 +391,13 @@ class Aplicacion:
         while True:
             frame = self.camara.capturar()
             resultado = self.detector.analizar(frame)
+            if self.detector_puertas is not None:
+                # Modelo dedicado de puertas: se fusiona SOLO el campo de
+                # puertas al resultado general (senales + obstaculos).
+                resultado = replace(
+                    resultado,
+                    puertas=self.detector_puertas.analizar(frame).puertas,
+                )
             distancia_cm = self.sensor.distancia_cm
             self._actualizar_distancia_puerta(distancia_cm)
 

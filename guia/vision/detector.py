@@ -246,7 +246,7 @@ class ConfirmadorSenal:
 class DetectorVisual:
     """Analiza frames y confirma senales sin falsos positivos."""
 
-    def __init__(self, config: Configuracion):
+    def __init__(self, config: Configuracion, ruta_modelo: str | None = None):
         self._config = config
         self._senales = SENALES_ORIENTADORAS
         self._objetos = OBJETOS_PERMITIDOS
@@ -256,7 +256,10 @@ class DetectorVisual:
             config.distancia_mediana_perdidas,
         )
         self._confirmador = ConfirmadorSenal(config)
-        self._modelo = YOLO(str(config.ruta_modelo), task="detect")
+        self._modelo = YOLO(
+            str(ruta_modelo) if ruta_modelo is not None else str(config.ruta_modelo),
+            task="detect",
+        )
         print("YOLO OK")
         nombres = self._modelo.names
         clases_modelo = set(nombres.values() if isinstance(nombres, dict) else nombres)

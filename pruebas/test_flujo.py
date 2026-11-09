@@ -2187,8 +2187,8 @@ def test_desvio_requiere_confirmacion() -> None:
 
     comprobar(
         aplicacion.config.desvio_maximo_grados == 35.0
-        and aplicacion.config.confirmacion_desvio_s == 1.5,
-        "usa umbral de 35 grados y confirmación de 1,5 s",
+        and aplicacion.config.confirmacion_desvio_s == 2.5,
+        "usa umbral de 35 grados y confirmación de 2,5 s",
     )
     aplicacion.rumbo.girar(30.0)
     aplicacion._vigilar_desvio()
@@ -2209,7 +2209,7 @@ def test_desvio_requiere_confirmacion() -> None:
         "sin cumplirse la confirmacion todavia no avisa",
     )
 
-    # Sigue desviado: al pasar 1,5 segundos, ahi si sale el aviso.
+    # Sigue desviado: al pasar la configurada (2.5 s), ahi si sale el aviso.
     time.sleep(aplicacion.config.confirmacion_desvio_s + 0.1)
     aplicacion._vigilar_desvio()
     comprobar(
