@@ -82,7 +82,9 @@ class Configuracion:
     # (None) usa el mismo ``ruta_modelo`` (senales + obstaculos).  Se
     # apunta a un checkpoint que incluya la clase ``door`` para no
     # mezclar el modelo general con el especifico de puertas.
-    ruta_modelo_puerta: Path | None = None
+    # Modelo PREENTRENADO para puertas (YOLO-World, open vocabulary):
+    # yolov8s-worldv2.pt + prompt "puerta" en inference time.
+    ruta_modelo_puerta: Path | None = RAIZ_DEL_PROYECTO / "mi_deteccion" / "yolov8s-worldv2.pt"
 
     # ------------------------------------------------------------------
     # Voz: que manda y que espera
