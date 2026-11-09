@@ -295,7 +295,10 @@ class Configuracion:
     # balanceo fuerte no son un cambio de ruta.  El aviso solo sale si
     # el desvio SE SOSTIENE durante este tiempo desde que cruzo el
     # umbral (y si baja del umbral, la espera empieza de cero).
-    confirmacion_desvio_s: float = 1.5
+    # Ajustado a 2.5 s: en pasillos pequenos y con maniobras de
+    # obstaculo el desvio sostenido se dispara con mas facilidad y un
+    # tiempo de confirmacion corto hacia el aviso.
+    confirmacion_desvio_s: float = 2.5
     # Histesis al liberar: tras el aviso hay que bajar hasta este
     # fraccion del umbral para decir "ya enderezaste".  Sin esto, en
     # el limite del umbral el sistema parpadearia entre "te estas
