@@ -12,7 +12,7 @@ from statistics import median
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
+from ultralytics import YOLO, YOLOWorld
 from collections import deque
 from statistics import median
 
@@ -436,6 +436,60 @@ class DetectorVisual:
     def reiniciar_confirmacion(self) -> None:
         """Borra la racha de detecciones (al cambiar de fase)."""
         self._confirmador.reiniciar()
+
+
+class DetectorPuertasVisual:
+    """Detecta puertas con un modelo YOLO-World (vocabulario abierto).
+
+    Modelo PREENTRENADO (por ejemplo ``yolov8s-worldv2.pt``): no hay que
+    entrenar nada.  El prompt de texto (por defecto ``"puerta"``) define la
+    clase a detectar en inference time, de modo que el mismo checkpoint sirve
+    para cualquier objeto suelto que se quiera buscar por nombre.  Devuelve
+    un ``ResultadoVision`` con las puertas del frame para que la navegacion
+    las consuma igual que las del detector general (senales + obstaculos).
+    """
+
+    def __init__(self, config: Configuracion, ruta_modelo: str, prompt: str = "puerta"):
+        self._config = config
+        self._modelo = YOLOWorld(ruta_modelo)
+        self._prompt = prompt
+
+    def analizar(self, frame) -> ResultadoVision:
+        resultados = self._modelo.predict(
+            frame,
+            classes=[self._prompt],
+            conf=self._config.confianza_minima,
+            verbose=False,
+        )
+        puertas: list[PuertaVisto] = []
+        for resultado in resultados:
+            cajas = resultado.boxes
+            if cajas is None or len(cajas) == 0:
+                continue
+            xyxy = cajas.xyxy[0]
+            x1, y1, x2, y2 = (int(round(float(v))) for v in xyxy)
+            puertas.append(
+                PuertaVisto(
+                    nombre=self._prompt,
+                    caja=(x1, y1, x2, y2),
+                    centro_x_px=(x1 + x2) / 2,
+                    alto_px=max(0, y2 - y1),
+                    ancho_px=max(0, x2 - x1),
+                    posicion=posicion_del_centro(
+                        (x1 + x2) / 2,
+                        ancho=self._config.ancho,
+                        minimo=self._config.obstaculo_centro_min,
+                        maximo=self._config.obstaculo_centro_max,
+                    ),
+                    distancia_m=None,
+                )
+            )
+        return ResultadoVision(
+            detecciones=(),
+            senal=None,
+            obstaculos=(),
+            puertas=tuple(puertas),
+        )
 
 
 def dibujar_detecciones(

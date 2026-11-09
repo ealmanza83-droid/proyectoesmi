@@ -84,7 +84,7 @@ _instalar_si_falta("smbus2", SMBus=_CualquierCosa)
 _instalar_si_falta("gpiozero", DistanceSensor=_CualquierCosa)
 _instalar_si_falta("gpiozero.pins")
 _instalar_si_falta("gpiozero.pins.lgpio", LGPIOFactory=_CualquierCosa)
-_instalar_si_falta("ultralytics", YOLO=_CualquierCosa)
+_instalar_si_falta("ultralytics", YOLO=_CualquierCosa, YOLOWorld=_CualquierCosa)
 _instalar_si_falta("piper", PiperVoice=_CualquierCosa)
 _instalar_si_falta(
     "sounddevice",

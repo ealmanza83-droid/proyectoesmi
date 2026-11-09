@@ -95,6 +95,7 @@ from .version import obtener_version
 from .vision.detector import (
     EN_MEDIO_DEL_CAMINO,
     Deteccion,
+    DetectorPuertasVisual,
     DetectorVisual,
     ResultadoVision,
     dibujar_detecciones,
@@ -161,9 +162,10 @@ class Aplicacion:
         # Modelo OPCIONAL dedicado solo a puertas (``ruta_modelo_puerta``):
         # se corre en paralelo al detector general (senales + obstaculos)
         # y solo se usan sus detecciones de puerta.  Vacio -> None y se
-        # sigue usando el detector general para todo.
-        self.detector_puertas: DetectorVisual | None = (
-            DetectorVisual(self.config, ruta_modelo=self.config.ruta_modelo_puerta)
+        # sigue usando el detector general para todo.  El dedicado usa
+        # YOLO-World (prompt de texto): pesos preentrenados, sin entrenar.
+        self.detector_puertas: DetectorPuertasVisual | None = (
+            DetectorPuertasVisual(self.config, str(self.config.ruta_modelo_puerta))
             if self.config.ruta_modelo_puerta
             else None
         )
