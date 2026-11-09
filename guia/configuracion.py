@@ -91,6 +91,11 @@ class Configuracion:
     # cabinet door, refrigerator door).  None -> se usa el backend de
     # YOLO-World (``ruta_modelo_puerta``).
     ruta_modelo_puerta_yolo: Path | None = None
+    # Prompt de texto para el backend YOLO-World de deteccion de puertas
+    # (zero-shot): el modelo busca objetos que CLIP asocie con esta frase.
+    # Probar variantes como "door", "interior door" o "puerta" segun como
+    # funcione mejor con las puertas de la casa.
+    prompto_puerta: str = "puerta"
 
     # ------------------------------------------------------------------
     # Voz: que manda y que espera

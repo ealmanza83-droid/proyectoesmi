@@ -181,6 +181,7 @@ class Aplicacion:
             self.detector_puertas = DetectorPuertasVisual(
                 self.config,
                 str(self.config.ruta_modelo_puerta),
+                prompt=self.config.prompto_puerta,
             )
 
         # Pitidos de proximidad: se silencian solos mientras la voz habla
