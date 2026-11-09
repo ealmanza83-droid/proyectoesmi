@@ -181,12 +181,34 @@ class CamaraFalsa:
 
 
 class MPUFalso:
+    """MPU simulado con la gravedad sobre el eje Z (en reposo az = 1 g).
+
+    Escribir ``az`` simula el **rebote vertical de la pisada** y mueve
+    ``ax`` con el mismo valor (balanceo antero-posterior del tronco).
+    La componente horizontal es imprescindible: un rebote puramente
+    vertical es justo "marchar en sitio", el falso positivo que el
+    contador direccional rechaza (ver ``ContadorPasos``).  Con las dos
+    componentes la relacion vertical/horizontal cae en la franja fisica
+    de una marcha real.  En reposo (``az = 1``) el balanceo es cero.
+    """
+
     def __init__(self) -> None:
         self.gz = 0.0  # velocidad angular (grados/segundo)
-        self.az = 1.0  # aceleracion vertical (1.0 g en reposo)
+        self._az = 1.0  # aceleracion vertical (1.0 g en reposo)
+        self.ax = 0.0  # balanceo antero-posterior (lo mueve az)
+        self.ay = 0.0  # balanceo lateral
+
+    @property
+    def az(self) -> float:
+        return self._az
+
+    @az.setter
+    def az(self, valor: float) -> None:
+        self._az = valor
+        self.ax = -(valor - 1.0)
 
     def leer(self) -> LecturaMPU:
-        return LecturaMPU(0.0, 0.0, self.az, 0.0, 0.0, self.gz)
+        return LecturaMPU(self.ax, self.ay, self.az, 0.0, 0.0, self.gz)
 
     def cerrar(self) -> None:
         pass
@@ -1041,9 +1063,12 @@ def test_encarada_y_desvio() -> None:
     # Al caminar se va curvando a la derecha: hay que avisar que
     # corrija a la izquierda (el rumbo acumulado delata la curva).
     # Ciclo de 4 muestras a dt = 0,1 s = 2,5 Hz: un paso por ciclo.
+    # Las dos primeras zancadas asientan el pasa-banda (el contador se
+    # activa al empezar a caminar y aun no esta ``_asentado``); por eso
+    # el tramo ensayado es mas largo que el aviso en si.
     locutor.frases.clear()
     mpu.gz = -60.0
-    for i in range(8):
+    for i in range(16):
         mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
     comprobar(
@@ -3496,6 +3521,68 @@ def test_detector_de_pasos() -> None:
     )
 
 
+def test_pasos_direccion_e_invariancia() -> None:
+    """Valida la direccion del paso y no depende de como va montado.
+
+    Tres comprobaciones sobre senales sinteticas:
+
+    * marchar EN EL SITIO (rebote puramente vertical, sin balanceo
+      antero-posterior) NO cuenta: es justo el falso positivo que la
+      validacion vertical/horizontal rechaza.
+    * AGITAR de lado a lado (oscilacion horizontal) tampoco cuenta.
+    * la MISMA marcha con el modulo girado 90 grados sobre el eje Y
+      cuenta igual: la proyeccion sobre la gravedad medida hace que el
+      detector sea independiente de la orientacion del sensor (asi lo
+      lleva el usuario, girado ~90 grados).
+    """
+    print("\n[29b] Pasos: marcha en el sitio, agitacion y orientacion")
+    config = Configuracion()
+
+    def serie(muestras: int, generar) -> "movimiento.ContadorPasos":
+        pasos = movimiento.ContadorPasos(config)
+        for i in range(muestras):
+            pasos.en_muestra(LecturaMPU(*generar(i), 0.0, 0.0, 0.0), dt=0.01)
+        return pasos
+
+    # Marcha en el sitio: el rebote no tiene componente antero-posterior
+    # (ax = 0).  La relacion vertical/horizontal se dispara y se veta.
+    en_sitio = serie(400, lambda i: (0.0, 0.0, 1.6 if i % 50 < 25 else 1.0))
+    comprobar(
+        en_sitio.pasos == 0,
+        f"marchar en el sitio (solo rebote vertical) no cuenta ({en_sitio.pasos})",
+    )
+
+    # Agitacion lateral: el vaiven va por el eje horizontal (ay) y la
+    # gravedad se queda en Z; manda el horizontal y se veta.
+    lateral = serie(
+        400, lambda i: (0.0, 0.6 if i % 50 < 25 else -0.6, 1.0)
+    )
+    comprobar(
+        lateral.pasos == 0,
+        f"agitar el equipo de lado a lado no cuenta ({lateral.pasos})",
+    )
+
+    # Marcha real (rebote vertical + balanceo antero-posterior) montada
+    # de dos formas: la canonica (gravedad en +Z) y girada 90 grados
+    # sobre Y (gravedad en +X).  Deben contar lo mismo.
+    def marcha(i: int):
+        az = 1.6 if i % 50 < 25 else 1.0
+        return (-(az - 1.0), 0.0, az)
+
+    def girada(i: int):
+        ax, ay, az = marcha(i)
+        return (az, ay, -ax)  # rotacion de 90 grados sobre el eje Y
+
+    recta = serie(350, marcha)
+    rotada = serie(350, girada)
+    comprobar(recta.pasos >= 5, f"la marcha normal cuenta ({recta.pasos})")
+    comprobar(
+        rotada.pasos == recta.pasos,
+        "la misma marcha con el sensor a 90 grados cuenta igual "
+        f"({rotada.pasos} vs {recta.pasos})",
+    )
+
+
 def test_evaluacion_offline_pasos() -> None:
     """El evaluador reproduce las muestras del MPU registradas en CSV."""
     print("\n[30] Registro CSV y evaluación de pasos offline")
@@ -3508,9 +3595,13 @@ def test_evaluacion_offline_pasos() -> None:
                 ("t", "ax", "ay", "az", "gx", "gy", "gz", "distancia_ultrasonido")
             )
             for i in range(600):
+                # Marcha REAL: al rebote vertical (az) lo acompana el
+                # balanceo antero-posterior (ax), como en ``MPUFalso``.
+                # Un rebote puramente vertical seria "marchar en sitio",
+                # que el contador direccional rechaza a proposito.
                 az = 1.6 if i % 100 < 50 else 1.0
                 escritor.writerow(
-                    (i * 0.01, 0.0, 0.0, az, 0.0, 0.0, 0.0, "")
+                    (i * 0.01, -(az - 1.0), 0.0, az, 0.0, 0.0, 0.0, "")
                 )
 
         resultado = evaluar_csv(
@@ -4211,6 +4302,7 @@ def main() -> int:
         test_zancada_adaptativa()
         test_zancada_por_pico_opcional()
         test_detector_de_pasos()
+        test_pasos_direccion_e_invariancia()
         test_evaluacion_offline_pasos()
         test_registro_sensores_con_aplicacion()
         test_distancia_visual_y_mediana()
