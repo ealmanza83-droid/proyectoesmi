@@ -206,6 +206,9 @@ class AlarmaFalsa:
     def reproducir(self) -> None:
         pass
 
+    def detener_beep(self) -> None:
+        pass
+
     def activar_alarma(self, duracion_s: float | None = None) -> None:
         self.alarma_activa = True
 

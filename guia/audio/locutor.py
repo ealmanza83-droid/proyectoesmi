@@ -29,12 +29,37 @@ class Locutor:
         print("CARGANDO PIPER")
         self._voz = PiperVoice.load(str(ruta_voz))
         self._carpeta = Path(carpeta_audio)
+        self._carpeta.mkdir(parents=True, exist_ok=True)
         self._cache: dict[str, Path] = {}
         self._candado = threading.Lock()
         # Evento compartido con la alerta ultrasonica: si la voz habla,
         # los pitidos se hacen a un lado.
         self.hablando = threading.Event()
         print("PIPER OK")
+        # Precarga de frases frecuentes en segundo plano para que suenen
+        # de inmediato sin esperar a que Piper sintetice en tiempo real.
+        self._precargar_en_segundo_plano()
+
+    def _precargar_en_segundo_plano(self) -> None:
+        frases_clave = (
+            "Hay algo enfrente. Los pitidos indican qué tan cerca está.",
+            "Puedes parar. Ya enderezaste; los pasos vuelven a contar.",
+            "Puedes parar. Ya giraste 90 grados.",
+            "Puedes parar. Giro completo.",
+            "Detente. Posiblemente has llegado.",
+            "Ya veo la señal. Puedes parar.",
+            "Alto. Navegación en pausa.",
+            "Navegación reanudada.",
+            "Alarma apagada.",
+            "Sí, dime.",
+        )
+        def _tarea():
+            for frase in frases_clave:
+                try:
+                    self._obtener_audio(frase)
+                except Exception:
+                    pass
+        threading.Thread(target=_tarea, name="precarga-voz", daemon=True).start()
 
     @property
     def ocupado(self) -> bool:
@@ -47,13 +72,15 @@ class Locutor:
         self.hablando.set()
         try:
             ruta = self._obtener_audio(texto)
-            subprocess.run(
+            proc = subprocess.run(
                 ["aplay", "-q", str(ruta)],
                 check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
             )
-            return True
+            if proc.returncode != 0 and proc.stderr:
+                print(f"AVISO AUDIO (aplay {proc.returncode}):", proc.stderr.strip())
+            return proc.returncode == 0
         except Exception as error:
             print("ERROR DE AUDIO:", error)
             return False
@@ -67,6 +94,10 @@ class Locutor:
                 return self._cache[texto]
 
             ruta = self._carpeta / f"{nombre_de_archivo(texto)}.wav"
+            if ruta.is_file() and ruta.stat().st_size > 0:
+                self._cache[texto] = ruta
+                return ruta
+
             with wave.open(str(ruta), "wb") as archivo:
                 self._voz.synthesize_wav(texto, archivo)
 

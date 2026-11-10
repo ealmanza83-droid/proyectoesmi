@@ -95,6 +95,18 @@ class ReproductorBeep:
             except Exception as error:
                 print("ERROR BEEP:", error)
 
+    def detener_beep(self) -> None:
+        """Detiene cualquier beep corto en curso para liberar el dispositivo de audio."""
+        with self._candado:
+            proceso = self._proceso
+            if proceso is not None and proceso.poll() is None:
+                try:
+                    proceso.terminate()
+                    proceso.wait(timeout=0.1)
+                except Exception:
+                    pass
+            self._proceso = None
+
     def activar_alarma(self, duracion_s: float | None = None) -> None:
         """Enciende el tono constante de caida.
 

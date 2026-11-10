@@ -473,6 +473,8 @@ class Aplicacion:
         """
         modo_anterior = self.microfono.modo
         self.microfono.cambiar_modo(ModoMicrofono.APAGADO)
+        if hasattr(self.alarma, "detener_beep"):
+            self.alarma.detener_beep()
         self.locutor.hablar(texto)
         self.microfono.cambiar_modo(cambiar_a if cambiar_a is not None else modo_anterior)
         self._ultima_voz_en = time.monotonic()
