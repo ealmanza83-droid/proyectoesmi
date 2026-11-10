@@ -192,20 +192,17 @@ class Configuracion:
     # paso (ruido del sensor).  Se mide sobre la senal YA FILTRADA.
     # Si faltan pasos en casa, bajalo; si cuenta pasos al balancear,
     # subelo (pruebas/caracterizar_mpu6050.py mide el ruido en reposo).
-    umbral_paso_min_g: float = 0.07
+    umbral_paso_min_g: float = 0.08
     # Umbral ADAPTATIVO: max(umbral_paso_min_g, factor x media de los
-    # ultimos picos CONTADOS).  El 0.45 deja el umbral a la mitad de lo
-    # que de verdad produce la marcha de esa persona: si camina suave
-    # el umbral baja solo, y si va vigoroso sube (el ruido se queda
-    # fuera).  Sin esto un umbral fijo o bien perdia los pasos suaves
-    # o bien contaba el balanceo.
-    factor_umbral_paso: float = 0.45
+    # ultimos picos CONTADOS).  El 0.55 deja el umbral algo por encima de la
+    # mitad de lo que produce la marcha real, bloqueando rebotes secundarios
+    # de talón y balanceo de cadera.
+    factor_umbral_paso: float = 0.55
     # Periodo refractario: intervalo minimo entre dos pasos contados
-    # (contra el doble conteo de un mismo pico).  El ritmo real de la
-    # persona es un paso cada ~0,25 a 0,5 s, asi que este valor tiene
-    # que quedar por DEBAJO de eso: con 0.22 s se elimina el rebote
-    # secundario del talon sin cortar la marcha rapida.
-    intervalo_paso_s: float = 0.22
+    # (contra el doble conteo de un mismo paso: impacto de talón + empuje).
+    # Un paso normal dura ~0.5 a 0.8 s; 0.34 s (hasta ~3 pasos/s) bloquea
+    # el rebote secundario típico (0.26 a 0.33 s) sin cortar una marcha rápida.
+    intervalo_paso_s: float = 0.34
     # Piso duro del intervalo MAXIMO: mas que esto desde el ultimo paso
     # Si el intervalo supera este maximo, el pico queda pendiente y
     # solo se acredita junto con el siguiente pico de marcha. Evita

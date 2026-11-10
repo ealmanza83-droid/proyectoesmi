@@ -3102,11 +3102,11 @@ def test_detector_de_pasos() -> None:
     lenta = marcha(100, 700)
     comprobar(lenta.pasos >= 5, f"la marcha lenta (1 s/paso) cuenta ({lenta.pasos})")
 
-    # --- 29.2 Marcha rapida: un paso cada 0,25 s ------------------
-    # 25 muestras de periodo = 4 Hz: aun dentro de la banda (5 Hz) y
-    # por encima del periodo refractario (0,18 s).
-    rapida = marcha(25, 300)
-    comprobar(rapida.pasos >= 8, f"la marcha rapida (0,25 s/paso) cuenta ({rapida.pasos})")
+    # --- 29.2 Marcha rapida: un paso cada 0,36 s ------------------
+    # 36 muestras de periodo = 2,78 Hz: aun dentro de la banda (5 Hz) y
+    # por encima del periodo refractario (0,34 s).
+    rapida = marcha(36, 360)
+    comprobar(rapida.pasos >= 8, f"la marcha rapida (0,36 s/paso) cuenta ({rapida.pasos})")
     comprobar(
         rapida._umbral(0.0) > config.umbral_paso_min_g,
         "el umbral sube con los picos reales de la marcha vigorosa",
