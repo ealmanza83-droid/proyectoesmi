@@ -125,7 +125,7 @@ RECORDATORIO_CORRECCION_S = 15.0
 # senal orientadora se sigue leyendo, con los 3 fragmentos de la
 # imagen.  En marcha ademas solo cuenta el fragmento central (ver
 # ``mirar_solo_centro_en_marcha``).
-_ESTADOS_DE_MARCHA = frozenset({Estado.NAVEGANDO, Estado.CINCO_PASOS})
+_ESTADOS_DE_MARCHA = frozenset({Estado.NAVEGANDO, Estado.CINCO_PASOS, Estado.AVANCE_REUBICACION})
 
 
 def _unir_nombres(nombres: list[str]) -> str:
@@ -306,6 +306,13 @@ class Aplicacion:
         self._intento = 0
         self._inicio_busqueda = 0.0
 
+        # Reubicacion activa (escaneo rotacional + avance 1 paso)
+        self._inicio_escaneo_reubicacion = 0.0
+        self._rumbo_antes_escaneo = 0.0
+        self._instruccion_antes_busqueda: Instruccion | None = None
+        self._pasos_acreditados_antes_busqueda = 0
+        self._ciclos_reubicacion = 0
+
         # Voz
         self._fin_ventana_comando = 0.0
         self._en_pausa = False
@@ -347,6 +354,8 @@ class Aplicacion:
             Estado.ESPERANDO_DESTINO: Aplicacion._en_esperando_destino,
             Estado.ENCARAR_SENAL: Aplicacion._en_encarar_senal,
             Estado.NAVEGANDO: Aplicacion._en_navegando,
+            Estado.BUSQUEDA_ACTIVA: Aplicacion._en_busqueda_activa,
+            Estado.AVANCE_REUBICACION: Aplicacion._en_avance_reubicacion,
             Estado.CONFIRMANDO_LLEGADA: Aplicacion._en_confirmando_llegada,
         }
 
@@ -731,6 +740,9 @@ class Aplicacion:
         self._lado_encarada = self._planificador.lado_encarada(
             self.ubicacion, self.destino
         )
+        self._inicio_escaneo_reubicacion = time.monotonic()
+        self._rumbo_antes_escaneo = self.rumbo.grados
+        self._ciclos_reubicacion = 0
         self.estado = Estado.ENCARAR_SENAL
 
     def _encarar_zona_alcanzada(self) -> None:
@@ -761,6 +773,9 @@ class Aplicacion:
         self._lado_encarada = self._planificador.lado_encarada(
             self.ubicacion, self.destino
         )
+        self._inicio_escaneo_reubicacion = time.monotonic()
+        self._rumbo_antes_escaneo = self._rumbo_al_caminar
+        self._ciclos_reubicacion = 0
         self.estado = Estado.ENCARAR_SENAL
 
     def _en_encarar_senal(self, resultado: ResultadoVision) -> None:
@@ -807,6 +822,19 @@ class Aplicacion:
                     self.estado = Estado.NAVEGANDO
                 else:
                     self._iniciar_navegacion(plan)
+                return
+
+        # Escaneo rotacional sin senal: si transcurren 60 segundos sin senal,
+        # activar estrategia de reubicacion activa (restaurar rumbo y 1 paso).
+        if senal is None:
+            if self._inicio_escaneo_reubicacion == 0.0:
+                self._inicio_escaneo_reubicacion = time.monotonic()
+            if (
+                time.monotonic() - self._inicio_escaneo_reubicacion
+                >= self.config.tiempo_escaneo_reubicacion_s
+            ):
+                print("ENCARAR_SENAL: 60s sin senal, iniciando avance de reubicacion")
+                self._iniciar_avance_reubicacion()
                 return
 
         self._etiqueta = "Encarando la senal orientadora"
@@ -955,6 +983,212 @@ class Aplicacion:
         self.estado = Estado.ESPERANDO_DESTINO
         self._hablar("¿A dónde quieres ir?", cambiar_a=ModoMicrofono.DESTINO)
 
+    # ------------------------------------------------------------------
+    # Reubicacion activa (escaneo rotacional + avance 1 paso)
+    # ------------------------------------------------------------------
+    def _iniciar_busqueda_activa(self) -> None:
+        """Entra en modo escaneo rotacional buscando la senal esperada.
+
+        Se guarda el rumbo actual para poder restaurarlo si el escaneo
+        de 60 segundos no encuentra nada: asi el avance posterior
+        mantiene la direccion original y el robot nunca queda girando
+        indefinidamente en un mismo punto.
+        """
+        self._inicio_escaneo_reubicacion = time.monotonic()
+        self._rumbo_antes_escaneo = self.rumbo.grados
+        self._instruccion_antes_busqueda = self._instruccion_actual
+        self._pasos_acreditados_antes_busqueda = self._pasos_acreditados
+        self._ciclos_reubicacion += 1
+        self.detector.reiniciar_confirmacion()
+        self.estado = Estado.BUSQUEDA_ACTIVA
+
+        lado = self._planificador.lado_encarada(
+            self.ubicacion, self.destino
+        )
+        self._hablar(
+            f"Gira despacio a la {lado} buscando la señal orientadora."
+        )
+        print(
+            f"BUSQUEDA ACTIVA: ciclo {self._ciclos_reubicacion}, "
+            f"rumbo guardado {self._rumbo_antes_escaneo:.1f} grados"
+        )
+
+    def _iniciar_avance_reubicacion(self) -> None:
+        """Restaura la orientación de avance y avanza 1 paso para reubicarse.
+
+        Evita que el robot permanezca girando indefinidamente en una misma ubicación.
+        """
+        print(
+            "REUBICACION ACTIVA: escaneo agotado (60s sin señal), "
+            f"avanzando 1 paso (ciclo {self._ciclos_reubicacion + 1})"
+        )
+        self.rumbo.fijar(self._rumbo_antes_escaneo)
+        self._hablar(
+            "No encontré la señal. Endereza al frente y camina un paso."
+        )
+        self.pasos.reiniciar()
+        self._pasos_previos = 0
+        self._pasos_acreditados = 0
+        self.estado = Estado.AVANCE_REUBICACION
+
+    def _en_busqueda_activa(self, resultado: ResultadoVision) -> None:
+        """Escaneo rotacional de hasta 60 s buscando la senal esperada.
+
+        Si se detecta una senal valida, se recalcula la posicion y se
+        decide si continuar, corregir o retroceder.  Si se agotan los
+        60 segundos sin senal, restaura el rumbo de avance, avanza
+        1 paso y reinicia el escaneo (estado AVANCE_REUBICACION).
+        """
+        self._etiqueta = (
+            f"Escaneo rotacional - ciclo {self._ciclos_reubicacion}"
+        )
+
+        senal = resultado.senal
+        self._guiar_con_puerta(resultado)
+
+        if senal is not None:
+            if senal.lado == LADO_INTERIOR:
+                # Senal interior encontrada: recalcular posicion.
+                self._resolver_reubicacion(senal)
+                return
+            # Cara del pasillo: orientadora pero no confirma ubicacion.
+            self._advertecer(
+                f"pasillo:{senal.zona}",
+                f"Frente a ti está la puerta de {senal.zona}, pero "
+                "estás del lado del pasillo. Entra por ella o sigue "
+                "girando para buscar la señal interior.",
+            )
+            return
+
+        # Sin senal: comprobar si se agotaron los 60 segundos.
+        if self._inicio_escaneo_reubicacion == 0.0:
+            self._inicio_escaneo_reubicacion = time.monotonic()
+        transcurrido = (
+            time.monotonic() - self._inicio_escaneo_reubicacion
+        )
+        if transcurrido >= self.config.tiempo_escaneo_reubicacion_s:
+            print(
+                "BUSQUEDA ACTIVA: escaneo agotado (60s), avanzando 1 paso "
+                f"(ciclo {self._ciclos_reubicacion})"
+            )
+            self._iniciar_avance_reubicacion()
+
+    def _en_avance_reubicacion(self, resultado: ResultadoVision) -> None:
+        """Avanza exactamente 1 paso y vuelve a escanear.
+
+        Mientras camina, si la camara ve la senal esperada, la resuelve
+        de inmediato sin esperar a completar el paso.  Asi el robot no
+        permanece girando indefinidamente en una misma ubicacion.
+        """
+        dados = self.pasos.avanzar()
+        self._etiqueta = (
+            f"Avance reubicacion - {dados}/1 pasos "
+            f"(ciclo {self._ciclos_reubicacion})"
+        )
+
+        # Si la camara ve la senal mientras camina, resolver ya.
+        senal = resultado.senal
+        if senal is not None and senal.lado == LADO_INTERIOR:
+            self._resolver_reubicacion(senal)
+            return
+
+        if dados >= 1:
+            # Paso completado: volver a escanear.
+            print(
+                f"REUBICACION: paso completado, reiniciando escaneo "
+                f"(ciclo {self._ciclos_reubicacion + 1})"
+            )
+            self._iniciar_busqueda_activa()
+
+    def _resolver_reubicacion(self, senal: Senal) -> None:
+        """Al detectar una señal válida, recalcula posición y decide acción.
+
+        Decide si continúa avanzando, corrige su trayectoria o retrocede.
+        """
+        self.rumbo.anclar()
+        self.ubicacion = senal.zona
+        self.lado_puerta = senal.lado
+        self._senal_enfrente = (senal.zona, time.monotonic())
+        self._ciclos_reubicacion = 0
+        print(f"REUBICACION: señal válida de {senal.zona} detectada. Recalculando posición...")
+
+        # 1. Llegada al destino
+        if senal.zona == self.destino:
+            print("LLEGADA verificada:", senal.zona)
+            self._anunciar_llegada()
+            return
+
+        cadena = ["Inicio", "Cuarto", "Sala", "Baño"]
+        idx_actual = cadena.index(senal.zona) if senal.zona in cadena else -1
+        idx_destino = cadena.index(self.destino) if self.destino in cadena else -1
+        idx_origen = (
+            cadena.index(self._camino[0])
+            if self._camino and self._camino[0] in cadena
+            else -1
+        )
+
+        plan = self._planificador.planificar(
+            self.ubicacion, self.destino, self._zancada_para_plan()
+        )
+        if plan is None:
+            self._hablar(
+                f"Estás en {self.ubicacion} y no hay ruta hacia {self.destino}."
+            )
+            self._abandonar_ruta()
+            return
+
+        # Comprobar si se pasó de largo (requiere retroceder)
+        retroceder = False
+        if idx_actual != -1 and idx_destino != -1 and idx_origen != -1:
+            if idx_origen < idx_destino and idx_actual > idx_destino:
+                retroceder = True
+            elif idx_origen > idx_destino and idx_actual < idx_destino:
+                retroceder = True
+
+        if retroceder:
+            print(f"DECISION: Retrocede hacia {self.destino}")
+            self._hablar(
+                f"Estás en {senal.zona}. Pasaste de largo el destino. "
+                f"Retrocede hacia {self.destino}."
+            )
+            self._reiniciar_plan(plan)
+            return
+
+        if self._camino and senal.zona in self._camino:
+            idx_en_camino = self._camino.index(senal.zona)
+            if idx_en_camino >= self._indice_zona:
+                print(f"DECISION: Continúa avanzando hacia {self.destino}")
+                self._indice_zona = idx_en_camino
+                self._hablar(
+                    f"Estás en {senal.zona}. Posición recalculada. "
+                    f"Continúa avanzando hacia {self.destino}."
+                )
+                self._reiniciar_plan(plan)
+                return
+            else:
+                print(f"DECISION: Corrige trayectoria hacia {self.destino} (retraso)")
+                self._indice_zona = idx_en_camino
+                self._hablar(
+                    f"Estás en {senal.zona}. Te devolviste en el camino. "
+                    f"Corrige tu trayectoria hacia {self.destino}."
+                )
+                self._reiniciar_plan(plan)
+                return
+
+        print(f"DECISION: Corrige trayectoria hacia {self.destino} (desvío)")
+        self._hablar(
+            f"Estás en {senal.zona}. Te saliste de la ruta hacia {self.destino}. "
+            f"Corrige tu trayectoria. Vamos de nuevo."
+        )
+        self._reiniciar_plan(plan)
+
+    def _restaurar_navegacion_desde_busqueda(self) -> None:
+        """Vuelve al estado NAVEGANDO restaurando la instruccion previa."""
+        self._instruccion_actual = self._instruccion_antes_busqueda
+        self._instruccion_antes_busqueda = None
+        self.estado = Estado.NAVEGANDO
+        self._ciclos_reubicacion = 0
+
     def _empezar_a_confirmar_llegada(self) -> None:
         """Tras los pasos medidos, falta VER la senal del destino.
 
@@ -964,6 +1198,9 @@ class Aplicacion:
         """
         self.estado = Estado.CONFIRMANDO_LLEGADA
         self._inicio_llegada = time.monotonic()
+        self._inicio_escaneo_reubicacion = time.monotonic()
+        self._rumbo_antes_escaneo = self.rumbo.grados
+        self._ciclos_reubicacion = 0
         # La puerta del destino esta en el mismo lado que las demas:
         # en el sentido del viaje la imagen se encara a la derecha,
         # y en el de vuelta a la izquierda.
@@ -1002,6 +1239,19 @@ class Aplicacion:
             self._hablar(f"Parece que pasaste de largo. Estás en {senal.zona}.")
             self._abandonar_ruta()
             return
+
+        # Escaneo rotacional sin senal: si transcurren 60 segundos sin senal,
+        # activar estrategia de reubicacion activa (restaurar rumbo y 1 paso).
+        if senal is None:
+            if self._inicio_escaneo_reubicacion == 0.0:
+                self._inicio_escaneo_reubicacion = time.monotonic()
+            if (
+                time.monotonic() - self._inicio_escaneo_reubicacion
+                >= self.config.tiempo_escaneo_reubicacion_s
+            ):
+                print("CONFIRMANDO_LLEGADA: 60s sin senal, iniciando avance de reubicacion")
+                self._iniciar_avance_reubicacion()
+                return
 
         # Sin senal del destino todavia: sin anuncio (para no mentir),
         # pero con un recordatorio periodico por si quedo a un lado.

@@ -331,6 +331,17 @@ class Configuracion:
     # antes de volver a avisar ("gira despacio hasta encontrarla"),
     # sin anunciar jamas una llegada falsa.
     tiempo_llegada_s: float = 15.0
+    # ------------------------------------------------------------------
+    # Reubicacion activa (escaneo rotacional + avance en bucle)
+    # ------------------------------------------------------------------
+    # Al alcanzar la distancia estimada al siguiente punto de referencia,
+    # el robot entra en modo busqueda activa: escanea girando durante
+    # ``tiempo_escaneo_reubicacion_s`` (60 s).  Si no detecta señal,
+    # restaura el rumbo de avance, avanza 1 paso y vuelve a escanear.
+    # Este bucle evita girar indefinidamente en el mismo punto.
+    tiempo_escaneo_reubicacion_s: float = 60.0
+    """Segundos de escaneo rotacional antes de avanzar 1 paso."""
+
     # Encarada automatica: si la persona acaba de confirmar la senal
     # de SU zona (la busqueda la vio, o se mantuvo a la vista
     # esperando el destino) y no ha girado desde entonces, ya la

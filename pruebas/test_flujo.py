@@ -3639,6 +3639,150 @@ def test_deteccion_y_seguimiento_de_puertas() -> None:
     )
 
 
+def test_reubicacion_activa() -> None:
+    """Estrategia de reubicacion activa: escaneo rotacional 60s, avance de 1 paso y decisiones."""
+    print("\n[35] Reubicación activa: escaneo rotacional de 60s, avance de 1 paso y recalculo")
+    movimiento.time = RelojFalso()
+    detector = DetectorFalso()
+    locutor = LocutorFalso()
+    microfono = MicrofonoFalso()
+    mpu = MPUFalso()
+
+    aplicacion = Aplicacion(
+        config=Configuracion(),
+        camara=CamaraFalsa(),
+        mpu=mpu,
+        sensor=SensorFalso(),
+        alarma=AlarmaFalsa(),
+        locutor=locutor,
+        microfono=microfono,
+        detector=detector,
+        planificador=PlanificadorRutas(),
+        ventana=VentanaFalsa(),
+    )
+
+    # 35.1 Al alcanzar la distancia estimada entra en búsqueda de señal (CONFIRMANDO_LLEGADA)
+    aplicacion.ubicacion = "Sala"
+    aplicacion.lado_puerta = LADO_INTERIOR
+    aplicacion.destino = "Baño"
+    aplicacion._camino = ["Sala", "Baño"]
+    aplicacion._indice_zona = 0
+    aplicacion._empezar_a_confirmar_llegada()
+    comprobar(
+        aplicacion.estado is Estado.CONFIRMANDO_LLEGADA,
+        "entra en búsqueda/confirmación de señal al punto de referencia",
+    )
+
+    # 35.2 Tras 60s sin señal restaura rumbo, avanza 1 paso (AVANCE_REUBICACION)
+    aplicacion.rumbo.girar(45.0)  # el robot giró durante el escaneo
+    aplicacion._rumbo_antes_escaneo = 0.0
+    aplicacion._inicio_escaneo_reubicacion = time.monotonic() - 65.0  # pasaron > 60s
+    detector.senal = None
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.AVANCE_REUBICACION,
+        "tras 60 segundos de escaneo sin señal pasa a AVANCE_REUBICACION",
+    )
+    comprobar(
+        aplicacion.rumbo.grados == 0.0,
+        "restaura su orientación de avance al iniciar el paso",
+    )
+    comprobar(
+        any("camina un paso" in frase or "avanza un paso" in frase for frase in locutor.frases),
+        "anuncia avanzar un paso tras escaneo fallido",
+    )
+
+    # 35.3 Al completar 1 paso, reinicia el escaneo rotacional (BUSQUEDA_ACTIVA)
+    for i in range(8):
+        mpu.az = 1.6 if i % 4 < 2 else 1.0
+        paso(aplicacion, detector, mpu)
+        if aplicacion.estado is Estado.BUSQUEDA_ACTIVA:
+            break
+    comprobar(
+        aplicacion.estado is Estado.BUSQUEDA_ACTIVA,
+        "al completar 1 paso reinicia el escaneo rotacional en BUSQUEDA_ACTIVA",
+    )
+
+    # 35.4 El proceso se repite en bucle: otro timeout de 60s avanza otro paso (nunca gira indefinidamente)
+    aplicacion._inicio_escaneo_reubicacion = time.monotonic() - 65.0
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.AVANCE_REUBICACION,
+        "el escaneo sin señal vuelve a avanzar 1 paso en bucle (no gira indefinidamente)",
+    )
+
+    # 35.5 Mientras avanza, si detecta una señal válida resuelve de inmediato
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.estado is Estado.ESPERANDO_DESTINO and aplicacion.ubicacion == "Baño",
+        "al detectar la señal de destino en reubicación verifica la llegada",
+    )
+
+    # 35.6 Decisión: Continúa avanzando (señal adelante en la ruta)
+    aplicacion.ubicacion = "Inicio"
+    aplicacion.destino = "Baño"
+    aplicacion._camino = ["Inicio", "Cuarto", "Sala", "Baño"]
+    aplicacion._indice_zona = 0
+    aplicacion._inicio_escaneo_reubicacion = time.monotonic()
+    aplicacion.estado = Estado.BUSQUEDA_ACTIVA
+    detector.senal = Senal("Cuarto", LADO_INTERIOR)
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.ubicacion == "Cuarto",
+        "recalcula la posición con la señal válida detectada",
+    )
+    comprobar(
+        any("continúa avanzando" in frase.lower() for frase in locutor.frases),
+        "señal en ruta adelante: decide que continúa avanzando",
+    )
+    comprobar(
+        aplicacion.estado is Estado.NAVEGANDO,
+        "retoma la navegación con el nuevo plan hacia el destino",
+    )
+
+    # 35.7 Decisión: Retrocede (se pasó de largo el destino)
+    aplicacion.ubicacion = "Inicio"
+    aplicacion.destino = "Sala"
+    aplicacion._camino = ["Inicio", "Cuarto", "Sala"]
+    aplicacion._indice_zona = 1
+    aplicacion._inicio_escaneo_reubicacion = time.monotonic()
+    aplicacion.estado = Estado.BUSQUEDA_ACTIVA
+    detector.senal = Senal("Baño", LADO_INTERIOR)
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        aplicacion.ubicacion == "Baño",
+        "actualiza posición a Baño tras pasarse de largo",
+    )
+    comprobar(
+        any("retrocede" in frase.lower() for frase in locutor.frases),
+        "señal más allá del destino: decide que retrocede hacia el destino",
+    )
+    comprobar(
+        aplicacion._plan is not None and len(aplicacion._plan) > 0,
+        "calcula ruta de regreso (retroceso) hacia Sala",
+    )
+
+    # 35.8 Decisión: Corrige trayectoria (desviado o fuera de ruta)
+    aplicacion.ubicacion = "Cuarto"
+    aplicacion.destino = "Baño"
+    aplicacion._camino = ["Cuarto", "Sala", "Baño"]
+    aplicacion._indice_zona = 1
+    aplicacion._inicio_escaneo_reubicacion = time.monotonic()
+    aplicacion.estado = Estado.BUSQUEDA_ACTIVA
+    detector.senal = Senal("Inicio", LADO_INTERIOR)
+    locutor.frases.clear()
+    paso(aplicacion, detector, mpu)
+    comprobar(
+        any("corrige" in frase.lower() for frase in locutor.frases),
+        "señal desfasada o desviada: decide que corrige trayectoria",
+    )
+
+
 def main() -> int:
     # Salida legible con acentos en Windows.
     if hasattr(sys.stdout, "reconfigure"):
@@ -3686,6 +3830,7 @@ def main() -> int:
         test_odometro_ultrasonico_estable()
         test_estimador_posicion_tramo()
         test_deteccion_y_seguimiento_de_puertas()
+        test_reubicacion_activa()
     except AssertionError as error:
         print(f"\nFALLO: {error}")
         return 1

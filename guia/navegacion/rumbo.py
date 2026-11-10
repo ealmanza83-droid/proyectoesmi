@@ -39,6 +39,10 @@ class Rumbo:
         """Fija el rumbo a cero: la referencia esta enfrente."""
         self._grados = 0.0
 
+    def fijar(self, grados: float) -> None:
+        """Restaura una orientacion fija en [-180, 180)."""
+        self._grados = self.diferencia(grados, 0.0)
+
     @property
     def grados(self) -> float:
         """Rotacion desde el anclaje, normalizada a [-180, 180)."""

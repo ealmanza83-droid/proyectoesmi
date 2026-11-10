@@ -33,6 +33,12 @@ class Estado(Enum):
     NAVEGANDO = auto()
     """Siguiendo la ruta (giros y pasos) hasta el destino."""
 
+    BUSQUEDA_ACTIVA = auto()
+    """Escaneo rotacional buscando la senal del siguiente punto de referencia."""
+
+    AVANCE_REUBICACION = auto()
+    """Avance de 1 paso tras escaneo fallido para reubicarse."""
+
     CONFIRMANDO_LLEGADA = auto()
     """Esperando ver la senal interior del destino para anunciar la llegada."""
 
@@ -53,6 +59,8 @@ _ETIQUETAS: dict[Estado, str] = {
     Estado.ESPERANDO_DESTINO: "Esperando destino",
     Estado.ENCARAR_SENAL: "Encarando la senal orientadora",
     Estado.NAVEGANDO: "Navegando hacia el destino",
+    Estado.BUSQUEDA_ACTIVA: "Escaneo rotacional buscando senal",
+    Estado.AVANCE_REUBICACION: "Avanzando 1 paso para reubicarse",
     Estado.CONFIRMANDO_LLEGADA: "Confirmando llegada con la senal",
     Estado.DETENIDO: "Sistema detenido",
 }
