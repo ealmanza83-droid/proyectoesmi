@@ -2108,9 +2108,12 @@ class Aplicacion:
             self._inicio_desvio = None
             return
 
-        # Desvio positivo = giro a la derecha: para volver a la recta
-        # hay que girar al lado contrario.
-        sentido = "izquierda" if desvio > 0 else "derecha"
+        # La correccion va al lado contrario del desvio.  El signo del
+        # desvio depende del montaje fisico del sensor: si la correccion
+        # siempre sale al revés, cambia signo_correccion_desvio a -1 en
+        # configuracion.py (sin tocar los giros del menú de 90°).
+        giro_efectivo = desvio * self.config.signo_correccion_desvio
+        sentido = "izquierda" if giro_efectivo > 0 else "derecha"
         grados = round(abs(desvio))
 
         if not self._corrigiendo:

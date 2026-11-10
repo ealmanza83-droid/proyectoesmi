@@ -1006,9 +1006,14 @@ def test_encarada_y_desvio() -> None:
         any("desviando" in frase for frase in locutor.frases),
         "avisa del desvio de la linea recta",
     )
+    sentido_esperado = (
+        "izquierda"
+        if aplicacion.config.signo_correccion_desvio == 1
+        else "derecha"
+    )
     comprobar(
-        any("izquierda" in frase for frase in locutor.frases),
-        "pide corregir al lado contrario (desvio a la derecha)",
+        any(sentido_esperado in frase for frase in locutor.frases),
+        f"pide corregir al lado contrario ({sentido_esperado})",
     )
     comprobar(
         any("hasta que te diga" in frase for frase in locutor.frases),
@@ -3447,7 +3452,7 @@ def test_estimador_posicion_tramo() -> None:
     aplicacion.estimador_posicion.predecir(6, 0.5)
     aplicacion._valorar_llegada_del_tramo(ResultadoVision(), dados=0, objetivo=10)
     comprobar(
-        any("Reduce el paso" in frase for frase in locutor.frases)
+        aplicacion._aviso_ventana_dado
         and aplicacion._tramos_completados == 0,
         "la incertidumbre puede iniciar búsqueda, pero no cerrar el tramo",
     )

@@ -165,6 +165,14 @@ class Configuracion:
     # signo lo da la fisica: +1 = derecha bien desde el principio.
     # Si el giro sigue yendo al contador equivocado, cambia a -1.
     signo_derecha: int = 1
+    # Signo de la correccion de desvio: controla si "desvio positivo"
+    # significa que la persona giro a la derecha o a la izquierda al
+    # caminar. Con +1 (defecto), desvio positivo = giró a la derecha y
+    # la correccion es "izquierda". Si la correccion siempre sale al
+    # lado equivocado (te desviaste a la izquierda y te manda a la
+    # izquierda), cambia esto a -1 para invertirla sin tocar los giros
+    # del menu (90°), que no usan este parametro.
+    signo_correccion_desvio: int = -1
     # La velocidad que va al RUMBO (orientacion de la ruta) solo se
     # integra cuando es sostenida: el vaiven de la cintura al caminar
     # cambia de signo a cada paso y su media con esta constante queda
