@@ -1016,8 +1016,8 @@ def test_encarada_y_desvio() -> None:
         f"pide corregir al lado contrario ({sentido_esperado})",
     )
     comprobar(
-        any("hasta que te diga" in frase for frase in locutor.frases),
-        "promete avisar cuando parar de girar",
+        any("Corrige a la" in frase for frase in locutor.frases),
+        "indica el sentido de corrección",
     )
 
     # Sigue desviado y caminando: el sensor cuenta pasos crudos, pero

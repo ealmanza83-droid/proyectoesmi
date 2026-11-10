@@ -2114,6 +2114,7 @@ class Aplicacion:
         # configuracion.py (sin tocar los giros del menú de 90°).
         giro_efectivo = desvio * self.config.signo_correccion_desvio
         sentido = "izquierda" if giro_efectivo > 0 else "derecha"
+        lado_desvio = "derecha" if sentido == "izquierda" else "izquierda"
         grados = round(abs(desvio))
 
         if not self._corrigiendo:
@@ -2134,11 +2135,10 @@ class Aplicacion:
             self._ultima_alerta_desvio = ahora
             self._corrigiendo = True
             self._desvio_inicial = abs(desvio)
-            print(f"DESVIO: {desvio:+.1f} grados -> corregir a la {sentido}")
+            print(f"DESVIO: {desvio:+.1f} grados ({lado_desvio}) -> corregir a la {sentido}")
             self._hablar(
-                f"Alto un momento. Te estás desviando de la línea "
-                f"recta, unos {grados} grados. Gira despacio a la "
-                f"{sentido} hasta que te diga que ya enderezaste."
+                f"Te estás desviando {grados} grados a la {lado_desvio}. "
+                f"Corrige a la {sentido}."
             )
             # El reloj del recordatorio arranca al TERMINAR de oirse el
             # aviso: _hablar bloquea mientras suena el audio, y contar
@@ -2152,10 +2152,10 @@ class Aplicacion:
         if abs(desvio) >= self._desvio_inicial:
             self._desvio_inicial = abs(desvio)
             if ahora - self._ultima_alerta_desvio >= RECORDATORIO_CORRECCION_S:
-                print(f"DESVIO SIN MEJORAR: {desvio:+.1f} grados")
+                print(f"DESVIO SIN MEJORAR: {desvio:+.1f} grados ({lado_desvio})")
                 self._hablar(
-                    f"Sigues fuera de la línea recta: {grados} grados. "
-                    f"Gira despacio a la {sentido}."
+                    f"Sigues desviado {grados} grados a la {lado_desvio}. "
+                    f"Corrige a la {sentido}."
                 )
                 self._ultima_alerta_desvio = time.monotonic()
             return
