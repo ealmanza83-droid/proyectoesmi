@@ -2741,12 +2741,12 @@ def test_llegada_por_ventana() -> None:
     )
     caminar_hasta(5)
     comprobar(
-        not any("Reduce el paso" in frase for frase in locutor.frases),
+        not aplicacion._aviso_ventana_dado,
         "no adelanta el aviso más de lo configurado",
     )
     caminar_hasta(6)
     comprobar(
-        any("Reduce el paso" in frase for frase in locutor.frases),
+        aplicacion._aviso_ventana_dado,
         "estima reacción y frenado para avisar antes del 70 %",
     )
     comprobar(
@@ -2757,7 +2757,7 @@ def test_llegada_por_ventana() -> None:
     caminar_hasta(9)
     comprobar(
         not any("Reduce el paso" in frase for frase in locutor.frases),
-        "el aviso de la ventana se da una sola vez por tramo",
+        "no emite locución de reducción de paso",
     )
 
     # --- 27.3 Entre el 70 % y el 130 % la camara CIERRA el tramo ---

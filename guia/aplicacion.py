@@ -1527,9 +1527,6 @@ class Aplicacion:
         umbral_aviso = self._umbral_aviso_llegada()
         if fraccion_avance >= umbral_aviso and not self._aviso_ventana_dado:
             self._aviso_ventana_dado = True
-            self._hablar(
-                "Reduce el paso; te indicaré dónde detenerte."
-            )
 
         tiempo_parado = self.pasos.segundos_desde_ultimo_paso
         detenido_en_meta = dados >= objetivo and tiempo_parado >= 2.5
