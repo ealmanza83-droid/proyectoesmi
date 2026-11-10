@@ -2097,7 +2097,7 @@ class Aplicacion:
             if self._corrigiendo:
                 self._corrigiendo = False
                 self._ultima_alerta_desvio = None
-                self._hablar("Ya enderezaste. Los pasos vuelven a contar.")
+                self._hablar("Puedes parar. Ya enderezaste; los pasos vuelven a contar.")
             return
 
         if abs(desvio) < umbral:
@@ -2138,7 +2138,7 @@ class Aplicacion:
             print(f"DESVIO: {desvio:+.1f} grados ({lado_desvio}) -> corregir a la {sentido}")
             self._hablar(
                 f"Te estás desviando {grados} grados a la {lado_desvio}. "
-                f"Corrige a la {sentido}."
+                f"Corrige a la {sentido} hasta que te diga parar."
             )
             # El reloj del recordatorio arranca al TERMINAR de oirse el
             # aviso: _hablar bloquea mientras suena el audio, y contar
@@ -2155,7 +2155,7 @@ class Aplicacion:
                 print(f"DESVIO SIN MEJORAR: {desvio:+.1f} grados ({lado_desvio})")
                 self._hablar(
                     f"Sigues desviado {grados} grados a la {lado_desvio}. "
-                    f"Corrige a la {sentido}."
+                    f"Corrige a la {sentido} hasta que te diga parar."
                 )
                 self._ultima_alerta_desvio = time.monotonic()
             return

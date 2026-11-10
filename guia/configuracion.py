@@ -324,7 +324,7 @@ class Configuracion:
     # fraccion del umbral para decir "ya enderezaste".  Sin esto, en
     # el limite del umbral el sistema parpadearia entre "te estas
     # desviando" y "ya enderezaste".
-    liberacion_desvio_factor: float = 0.6
+    liberacion_desvio_factor: float = 0.70
     enfriamiento_desvio_s: float = 12.0
     # Tras los pasos medidos la llegada NO se da por hecha: hay que
     # ver la senal interior del destino.  Este es el tiempo maximo
