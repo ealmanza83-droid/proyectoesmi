@@ -2397,6 +2397,16 @@ class Aplicacion:
             # desde antes haria saltar el recordatorio en cuanto
             # terminara de hablar, sin dar tiempo a reaccionar.
             self._ultima_alerta_desvio = time.monotonic()
+            # Re-evaluar INMEDIATAMENTE: mientras la frase sonaba (~4 s)
+            # el sensor siguio midiendo; si la persona ya corrigio, el
+            # "ya enderezaste" sale sin esperar otro ciclo del bucle.
+            desvio_post = self.rumbo.diferencia(
+                self.rumbo.grados, self._rumbo_al_caminar
+            )
+            if abs(desvio_post) < liberacion:
+                self._corrigiendo = False
+                self._ultima_alerta_desvio = None
+                self._hablar("Puedes parar. Ya enderezaste; los pasos vuelven a contar.")
             return
 
         # En plena correccion: si el desvio no baja (giró al reves o
@@ -2410,6 +2420,15 @@ class Aplicacion:
                     f"Corrige a la {sentido} hasta que te diga parar."
                 )
                 self._ultima_alerta_desvio = time.monotonic()
+                # Re-evaluar tras la frase bloqueante: el sensor siguio
+                # midiendo y la persona pudo corregir mientras sonaba.
+                desvio_post = self.rumbo.diferencia(
+                    self.rumbo.grados, self._rumbo_al_caminar
+                )
+                if abs(desvio_post) < liberacion:
+                    self._corrigiendo = False
+                    self._ultima_alerta_desvio = None
+                    self._hablar("Puedes parar. Ya enderezaste; los pasos vuelven a contar.")
             return
 
         # El giro de correccion se sigue en vivo hasta aqui: no se
