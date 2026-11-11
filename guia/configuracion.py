@@ -26,7 +26,7 @@ class Configuracion:
     alto: int = 480
     fps_camara: float = 15.0
     confianza_minima: float = 0.60
-    detecciones_senal_requeridas: int = 3
+    detecciones_senal_requeridas: int = 2
     perdidas_senal_toleradas: int = 2
     enfriamiento_objeto_s: float = 4.0
     tiempo_busqueda_s: float = 60.0
@@ -105,7 +105,7 @@ class Configuracion:
     # hablar.  Asi una indicacion (giro, pasos, llegada, encarada) jamas
     # se atrasa ni se pisa por un aviso de objeto: el aviso espera su
     # turno.  El silencio se cuenta desde que TERMINA la frase anterior.
-    silencio_para_obstaculos_s: float = 4.0
+    silencio_para_obstaculos_s: float = 1.2
     # Que si se anuncia por voz: solo objetos estaticos que pueden
     # estar EN MEDIO del camino.  "persona" queda fuera: se mueve, no
     # bloquea el paso y anunciarla daba un aviso cada vez que alguien
@@ -120,7 +120,7 @@ class Configuracion:
     # ------------------------------------------------------------------
     # Audio (Piper + Vosk)
     # ------------------------------------------------------------------
-    ruta_voz: Path = RAIZ_DEL_PROYECTO / "piper_voices" / "es_MX-claude-high.onnx"
+    ruta_voz: Path = RAIZ_DEL_PROYECTO / "piper_voices" / "es_MX-ald-medium.onnx"
     ruta_vosk: Path = RAIZ_DEL_PROYECTO / "vosk" / "vosk-model-small-es-0.42"
     carpeta_audio: Path = Path("/tmp/audio_orientacion")
     microfono_id: int | None = None
@@ -172,7 +172,7 @@ class Configuracion:
     # lado equivocado (te desviaste a la izquierda y te manda a la
     # izquierda), cambia esto a -1 para invertirla sin tocar los giros
     # del menu (90°), que no usan este parametro.
-    signo_correccion_desvio: int = -1
+    signo_correccion_desvio: int = 1
     # La velocidad que va al RUMBO (orientacion de la ruta) solo se
     # integra cuando es sostenida: el vaiven de la cintura al caminar
     # cambia de signo a cada paso y su media con esta constante queda

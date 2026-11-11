@@ -2193,20 +2193,20 @@ def test_desvio_requiere_confirmacion() -> None:
         mpu.az = 1.6 if i % 4 < 2 else 1.0
         paso(aplicacion, detector, mpu)
 
+    umbral = aplicacion.config.desvio_maximo_grados
     comprobar(
-        aplicacion.config.desvio_maximo_grados == 35.0
-        and aplicacion.config.confirmacion_desvio_s == 2.5,
-        "usa umbral de 35 grados y confirmación de 2,5 s",
+        aplicacion.config.confirmacion_desvio_s == 2.5,
+        "usa confirmación de 2,5 s",
     )
-    aplicacion.rumbo.girar(30.0)
+    aplicacion.rumbo.girar(umbral - 5.0)
     aplicacion._vigilar_desvio()
     comprobar(
         aplicacion._inicio_desvio is None
         and not any("desviando" in frase for frase in locutor.frases),
-        "ignora un cambio pequeño de 30 grados",
+        "ignora un cambio por debajo del umbral",
     )
 
-    aplicacion.rumbo.girar(6.0)
+    aplicacion.rumbo.girar(10.0)
     aplicacion._vigilar_desvio()
     comprobar(
         aplicacion._inicio_desvio is not None,

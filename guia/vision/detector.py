@@ -402,8 +402,8 @@ class DetectorVisual:
                 obstaculos.append(
                     ObstaculoVisto(
                         nombre=objeto,
-                        lado=posicion_en_frame(
-                            (x1, y1, x2, y2),
+                        lado=posicion_del_centro(
+                            (x1 + x2) / 2,
                             ancho=self._config.ancho,
                             minimo=self._config.obstaculo_centro_min,
                             maximo=self._config.obstaculo_centro_max,
