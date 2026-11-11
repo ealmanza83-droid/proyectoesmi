@@ -311,7 +311,7 @@ class Configuracion:
     # El rumbo integra el giroscopio desde la ultima senal vista.  Si
     # mientras la persona camina acumula mas giro que este umbral, va
     # curvando la ruta y se le avisa que enderece.
-    desvio_maximo_grados: float = 35.0
+    desvio_maximo_grados: float = 20.0
     # El sensor esta en la cintura: un giro repentino del torso o un
     # balanceo fuerte no son un cambio de ruta.  El aviso solo sale si
     # el desvio SE SOSTIENE durante este tiempo desde que cruzo el
